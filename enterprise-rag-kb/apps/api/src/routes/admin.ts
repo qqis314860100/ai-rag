@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { getAllSettings, setMultipleSettings } from "../db/settings";
+import { getAllSettings, getAllSettingsFlat, setMultipleSettings } from "../db/settings";
 import { listAuditLogs } from "../db/auditLogs";
 import { sendSuccess, sendPaginated } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
@@ -14,7 +14,7 @@ router.get(
   requirePermission("settings.update"),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const settings = getAllSettings();
+    const settings = getAllSettingsFlat();
     sendSuccess(res, settings, req.requestId);
   } catch (err) {
     next(err);

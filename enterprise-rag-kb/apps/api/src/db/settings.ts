@@ -47,6 +47,12 @@ export function setSetting(key: string, value: string, updatedBy?: string): Sett
   return getSetting(key)!;
 }
 
+export function getAllSettingsFlat(): Array<{ key: string; value: string }> {
+  const db = getDb();
+  const rows = db.prepare("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>;
+  return rows;
+}
+
 export function setMultipleSettings(
   updates: Record<string, string>,
   updatedBy?: string
