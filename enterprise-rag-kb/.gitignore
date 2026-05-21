@@ -40,3 +40,9 @@ ONBOARDING.md
 enterprise-rag-kb-*.md
 agent-harness/
 data/
+
+# macOS
+.DS_Store
+
+# Data
+data/
