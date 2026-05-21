@@ -110,30 +110,23 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
       allowedSecurityLevels: ROLE_SECURITY_LEVELS[role] || ["public"],
     };
   } else {
-    // Default to admin user from DB
+    // Default to system user from DB
     try {
       const db = getDb();
-      const admin = db.prepare("SELECT id, name, role FROM users WHERE name='admin' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
-      if (admin) {
+      const sys = db.prepare("SELECT id, name, role FROM users WHERE name='system' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
+      const user = sys || db.prepare("SELECT id, name, role FROM users WHERE name='admin' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
+      if (user) {
+        const role = ROLE_SECURITY_LEVELS[user.role] ? user.role : "system_admin";
         req.user = {
-          id: admin.id,
-          name: admin.name,
-          role: admin.role,
-          permissions: ROLE_PERMISSIONS[admin.role] || [],
-          allowedSecurityLevels: ROLE_SECURITY_LEVELS[admin.role] || ["public"],
+          id: user.id, name: user.name, role,
+          permissions: ROLE_PERMISSIONS[role] || [],
+          allowedSecurityLevels: ROLE_SECURITY_LEVELS[role] || ["public"],
         };
         return next();
       }
     } catch {}
 
-    const defaultRole = "system_admin";
-    req.user = {
-      id: "user_system",
-      name: "系统管理员",
-      role: defaultRole,
-      permissions: ROLE_PERMISSIONS[defaultRole] || [],
-      allowedSecurityLevels: ROLE_SECURITY_LEVELS[defaultRole] || [],
-    };
+    req.user = { id: "anonymous", name: "访客", role: "viewer", permissions: ROLE_PERMISSIONS["viewer"] || [], allowedSecurityLevels: ["public"] };
   }
 
   next();

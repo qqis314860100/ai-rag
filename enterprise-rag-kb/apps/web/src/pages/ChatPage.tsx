@@ -6,6 +6,7 @@ import SourcePanel from "../components/chat/SourcePanel";
 import DocPreview from "../components/chat/DocPreview";
 import { useStreamChat } from "../hooks/useStreamChat";
 import { api } from "../services/api";
+import { showToast } from "../components/ui/Toast";
 import type { ChatMessage, ChatSession, Source } from "../types";
 
 export default function ChatPage() {
@@ -108,6 +109,7 @@ export default function ChatPage() {
           setActiveSessionId(sid);
           loadSessions();
         } catch {
+          showToast("error", "创建会话失败，请检查网络连接");
           return;
         }
       }

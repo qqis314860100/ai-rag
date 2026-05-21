@@ -184,10 +184,8 @@ function createTablesV2(database: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
       title TEXT NOT NULL,
-      agent_id TEXT,
-      parent_session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
       pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -222,7 +220,7 @@ function createTablesV2(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS feedback (
       id TEXT PRIMARY KEY,
       message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
       rating TEXT NOT NULL CHECK(rating IN ('up','down')),
       reason TEXT,
       comment TEXT,
@@ -237,7 +235,7 @@ function createTablesV2(database: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS browse_history (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
       event_type TEXT NOT NULL,
       resource_type TEXT,
       resource_id TEXT,
@@ -298,7 +296,7 @@ function createTablesV2(database: Database.Database): void {
     -- Future: agent memory
     CREATE TABLE IF NOT EXISTS agent_memories (
       id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
       agent_id TEXT REFERENCES agents(id),
       key TEXT NOT NULL,
       value TEXT NOT NULL,
@@ -359,6 +357,7 @@ function seedData(database: Database.Database): void {
       { name: "admin", email: "admin@battery.local", password: "admin123", role: "system_admin" },
       { name: "editor", email: "editor@battery.local", password: "editor123", role: "knowledge_admin" },
       { name: "viewer", email: "viewer@battery.local", password: "viewer123", role: "viewer" },
+      { name: "system", email: "system@battery.local", password: uuidv4(), role: "system_admin" },
     ];
 
     const insertUsers = database.transaction(() => {
@@ -367,6 +366,13 @@ function seedData(database: Database.Database): void {
       }
     });
     insertUsers();
+  }
+
+  // Update auth middleware fallback user_id to point to system user
+  const systemUser = database.prepare("SELECT id FROM users WHERE name='system' LIMIT 1").get() as { id: string } | undefined;
+  if (systemUser) {
+    database.prepare("INSERT OR REPLACE INTO settings (key, value, value_type, description, updated_at) VALUES ('system_user_id', ?, 'string', 'Default user ID for unauthenticated requests', ?)")
+      .run(systemUser.id, now);
   }
 
   // Seed roles
