@@ -10,7 +10,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => { api.get<{ data: DashData }>("/stats/dashboard").then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false)); }, []);
-  if (loading) return <div className="flex items-center justify-center h-full"><div className="skeleton h-8 w-32 rounded-lg" /></div>;
+  if (loading) return <div className="p-6 space-y-6"><div className="skeleton h-8 w-48 rounded-lg" /><div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">{[1,2,3,4,5,6].map(i=><div key={i} className="skeleton h-24 rounded-xl" />)}</div><div className="grid grid-cols-1 lg:grid-cols-3 gap-5">{[1,2,3].map(i=><div key={i} className="skeleton h-48 rounded-xl" />)}</div></div>;
   if (!data) return <div className="flex items-center justify-center h-full text-text-muted text-sm">加载失败</div>;
   const { documents, sessions, messages, feedback, categories, recentSessions, popularQueries } = data;
   const maxCat = Math.max(1, ...categories.map(e => e[1]||0));

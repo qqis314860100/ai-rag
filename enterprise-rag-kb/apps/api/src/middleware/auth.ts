@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getDb } from "../db/index";
 
-const ROLE_SECURITY_LEVELS: Record<string, string[]> = {
+export const ROLE_SECURITY_LEVELS: Record<string, string[]> = {
   viewer: ["public"],
   operator: ["public", "internal"],
   process_engineer: ["public", "internal", "confidential"],
@@ -14,7 +14,7 @@ const ROLE_SECURITY_LEVELS: Record<string, string[]> = {
   system_admin: ["public", "internal", "confidential", "restricted"],
 };
 
-const ROLE_PERMISSIONS: Record<string, string[]> = {
+export const ROLE_PERMISSIONS: Record<string, string[]> = {
   viewer: ["document.read", "chat.use"],
   operator: ["document.read", "chat.use", "feedback.create"],
   process_engineer: [

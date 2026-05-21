@@ -23,7 +23,7 @@ export interface Source {
   section_path: string;
   page_number?: number;
   score: number;
-  snippet: string;
+  snippet: string; content?: string;
 }
 
 export interface ChatMessage {

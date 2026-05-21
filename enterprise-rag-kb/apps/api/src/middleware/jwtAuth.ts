@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { AppError, ErrorCodes } from "../utils/errors";
+import { ROLE_PERMISSIONS, ROLE_SECURITY_LEVELS } from "./auth";
 
 const JWT_SECRET = process.env.JWT_SECRET || "battery-kb-dev-secret-key-change-in-prod";
 const JWT_EXPIRES_IN = "24h";
@@ -27,10 +28,13 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
   const token = header.slice(7);
   try {
     const payload = verifyToken(token);
+    const role = ROLE_SECURITY_LEVELS[payload.role] ? payload.role : "viewer";
     req.user = {
       id: payload.sub,
       name: payload.name,
-      role: payload.role,
+      role,
+      permissions: ROLE_PERMISSIONS[role] || [],
+      allowedSecurityLevels: ROLE_SECURITY_LEVELS[role] || ["public"],
     };
     next();
   } catch {
