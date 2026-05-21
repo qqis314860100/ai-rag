@@ -7,6 +7,7 @@ import DocPreview from "../components/chat/DocPreview";
 import { useStreamChat } from "../hooks/useStreamChat";
 import { api } from "../services/api";
 import { showToast } from "../components/ui/Toast";
+import { track } from "../services/tracking";
 import type { ChatMessage, ChatSession, Source } from "../types";
 
 export default function ChatPage() {
@@ -15,7 +16,6 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedSources, setSelectedSources] = useState<Source[] | null>(null);
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
-  const [topK, setTopK] = useState(5);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const { stream, sendStream, cancelStream } = useStreamChat();
@@ -31,13 +31,11 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    track("page_view", "page", "chat");
     loadSessions().then(() => {
-      // Auto-select most recent session
       api.get<{ data: { items: ChatSession[] } }>("/chat/sessions").then((res) => {
         const items = res.data.items || [];
-        if (items.length > 0 && !activeSessionId) {
-          setActiveSessionId(items[0].id);
-        }
+        if (items.length > 0 && !activeSessionId) setActiveSessionId(items[0].id);
       }).catch(() => {});
     });
   }, []); // only on mount
@@ -126,11 +124,11 @@ export default function ChatPage() {
       setSelectedSources(null);
 
       // Send with streaming
-      await sendStream(sid, message, topK);
+      await sendStream(sid, message, 5);
 
       // Stream completion is handled by the effect above
     },
-    [activeSessionId, topK, sendStream, loadSessions]
+    [activeSessionId, sendStream, loadSessions]
   );
 
   const handleFollowUp = useCallback(
@@ -198,12 +196,7 @@ export default function ChatPage() {
         />
 
         <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">
-          <ChatInput
-            onSend={handleSend}
-            loading={stream.loading}
-            topK={topK}
-            onTopKChange={setTopK}
-          />
+          <ChatInput onSend={handleSend} loading={stream.loading} />
         </div>
       </div>
 

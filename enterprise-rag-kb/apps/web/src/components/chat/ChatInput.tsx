@@ -1,32 +1,23 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from "react";
-import { Send, Zap } from "lucide-react";
-import { Button, Textarea } from "../ui";
+import { Send } from "lucide-react";
 
 interface ChatInputProps {
-  onSend: (message: string, topK?: number) => void;
+  onSend: (message: string) => void;
   loading: boolean;
   disabled?: boolean;
-  topK?: number;
-  onTopKChange?: (k: number) => void;
 }
 
-const TOP_K_OPTIONS = [3, 5, 8, 10];
-
-export default function ChatInput({ onSend, loading, disabled, topK: extTopK, onTopKChange }: ChatInputProps) {
+export default function ChatInput({ onSend, loading, disabled }: ChatInputProps) {
   const [message, setMessage] = useState("");
-  const [localTopK, setLocalTopK] = useState(5);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const topK = extTopK ?? localTopK;
-  const setTopK = onTopKChange ?? setLocalTopK;
 
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
     if (!trimmed || loading || disabled) return;
-    onSend(trimmed, topK);
+    onSend(trimmed);
     setMessage("");
     textareaRef.current?.focus();
-  }, [message, loading, disabled, topK, onSend]);
+  }, [message, loading, disabled, onSend]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -36,9 +27,9 @@ export default function ChatInput({ onSend, loading, disabled, topK: extTopK, on
   };
 
   return (
-    <div className="flex items-end gap-3">
-      <div className="flex-1 rounded-lg glass shadow-sm-soft ring-1 ring-transparent focus-within:ring-accent/20 transition-all duration-normal px-1 py-1">
-        <Textarea
+    <div className="flex items-end gap-2.5">
+      <div className="flex-1 rounded-xl border border-border bg-surface-page focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/10 transition-all duration-normal">
+        <textarea
           ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -46,38 +37,20 @@ export default function ChatInput({ onSend, loading, disabled, topK: extTopK, on
           placeholder="输入你的问题... (Enter 发送)"
           rows={2}
           disabled={disabled || loading}
-          className="min-h-[48px] resize-none border-0 bg-transparent focus:ring-0 focus:outline-none placeholder:text-text-muted/60"
+          className="w-full min-h-[44px] max-h-[120px] resize-none bg-transparent px-4 py-2.5 text-sm text-text placeholder:text-text-muted/50 focus:outline-none"
         />
-        <div className="flex items-center justify-between px-3 pb-2">
-          <div className="flex items-center gap-1.5">
-            <Zap className="h-3 w-3 text-text-muted" />
-            {TOP_K_OPTIONS.map((k) => (
-              <button
-                key={k}
-                onClick={() => setTopK(k)}
-                className={`min-w-[36px] min-h-[36px] rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-fast ${
-                  topK === k
-                    ? "bg-accent text-white shadow-sm"
-                    : "text-text-muted hover:bg-surface-hover hover:text-text"
-                }`}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-          {message.length > 0 && (
-            <span className="text-xs text-text-muted">{message.length} 字</span>
-          )}
-        </div>
       </div>
-      <Button
+      <button
         onClick={handleSend}
         disabled={!message.trim() || loading || disabled}
-        loading={loading}
-        className="h-[48px] w-[48px] shrink-0 rounded-xl p-0"
+        className="shrink-0 h-[44px] w-[44px] rounded-xl bg-accent text-white flex items-center justify-center hover:bg-accent-hover disabled:opacity-30 transition-all active:scale-[0.95]"
       >
-        <Send className="h-4 w-4" />
-      </Button>
+        {loading ? (
+          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+        ) : (
+          <Send className="h-4 w-4" />
+        )}
+      </button>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
+import { v4 as uuidv4 } from "uuid";
 import { getDb } from "../db/index";
 import { sendSuccess } from "../utils/response";
 
@@ -70,7 +71,6 @@ router.post("/stats/browse", (req: Request, res: Response, next: NextFunction) =
     const userId = req.user?.id || "anonymous";
     const now = new Date().toISOString();
 
-    const { v4: uuidv4 } = require("uuid");
     db.prepare("INSERT INTO browse_history (id, user_id, event_type, resource_type, resource_id, metadata_json, created_at) VALUES (?,?,?,?,?,?,?)")
       .run(uuidv4(), userId, event_type, resource_type || null, resource_id || null, JSON.stringify(metadata || {}), now);
 
