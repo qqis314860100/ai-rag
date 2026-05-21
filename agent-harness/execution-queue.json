@@ -1,0 +1,169 @@
+{
+  "project": "enterprise-rag-kb",
+  "version": "1.0",
+  "status": "ready",
+  "waves": [
+    {
+      "id": "W0",
+      "name": "主控初始化",
+      "parallel": false,
+      "tasks": [
+        {
+          "id": "W0-T1",
+          "title": "创建项目目录与 monorepo",
+          "agent": "orchestrator",
+          "write_scope": ["enterprise-rag-kb/"],
+          "depends_on": [],
+          "outputs": ["enterprise-rag-kb/README.md", "enterprise-rag-kb/.env.example", "enterprise-rag-kb/apps/", "enterprise-rag-kb/services/"],
+          "acceptance": ["目录结构完整", "README 包含启动说明", ".env.example 包含 DeepSeek、Chroma、RAG 配置"]
+        },
+        {
+          "id": "W0-T2",
+          "title": "复制项目文档到 docs",
+          "agent": "orchestrator",
+          "write_scope": ["enterprise-rag-kb/docs/"],
+          "depends_on": ["W0-T1"],
+          "outputs": ["enterprise-rag-kb/docs/requirements.md", "enterprise-rag-kb/docs/architecture.md", "enterprise-rag-kb/docs/api.md"],
+          "acceptance": ["docs 目录包含完整需求、架构、API、数据库、UI、任务和实施文档"]
+        }
+      ]
+    },
+    {
+      "id": "W1",
+      "name": "并行基础建设",
+      "parallel": true,
+      "tasks": [
+        {
+          "id": "W1A",
+          "title": "Python RAG 基础服务",
+          "agent": "rag_engine",
+          "write_scope": ["enterprise-rag-kb/services/rag/"],
+          "depends_on": ["W0-T1"],
+          "outputs": ["FastAPI app", "/rag/health", "ChromaDB init", "EmbeddingService"],
+          "acceptance": ["RAG 服务可启动", "health 返回 ok", "embedding 输出 384 维向量"]
+        },
+        {
+          "id": "W1B",
+          "title": "Node API 与 SQLite",
+          "agent": "backend_api",
+          "write_scope": ["enterprise-rag-kb/apps/api/", "enterprise-rag-kb/data/migrations/"],
+          "depends_on": ["W0-T1"],
+          "outputs": ["Node API app", "SQLite schema", "/api/admin/health"],
+          "acceptance": ["API 服务可启动", "SQLite 表创建成功", "health 返回 ok"]
+        },
+        {
+          "id": "W1C",
+          "title": "Frontend Shell 与主题",
+          "agent": "frontend",
+          "write_scope": ["enterprise-rag-kb/apps/web/"],
+          "depends_on": ["W0-T1"],
+          "outputs": ["React app", "Tailwind theme", "AppShell", "empty routes"],
+          "acceptance": ["前端可启动", "页面路由可访问", "Sitor 风格 token 生效"]
+        },
+        {
+          "id": "W1D",
+          "title": "初始知识文档",
+          "agent": "content",
+          "write_scope": ["enterprise-rag-kb/knowledge/", "enterprise-rag-kb/data/seed/"],
+          "depends_on": ["W0-T1"],
+          "outputs": ["14 Markdown docs", "documents seed manifest"],
+          "acceptance": ["14 篇文档齐全", "frontmatter 完整", "标题层级清晰"]
+        }
+      ]
+    },
+    {
+      "id": "W2",
+      "name": "RAG 闭环",
+      "parallel": false,
+      "tasks": [
+        {
+          "id": "W2-T1",
+          "title": "文档入库闭环",
+          "agent": "rag_engine",
+          "write_scope": ["enterprise-rag-kb/services/rag/"],
+          "depends_on": ["W1A", "W1D"],
+          "outputs": ["/rag/documents/ingest", "parser", "chunker", "vector upsert"],
+          "acceptance": ["上传文件可解析", "chunk 可写入 ChromaDB", "返回 chunk_count"]
+        },
+        {
+          "id": "W2-T2",
+          "title": "搜索与问答 API 集成",
+          "agent": "backend_api",
+          "write_scope": ["enterprise-rag-kb/apps/api/"],
+          "depends_on": ["W1B", "W2-T1"],
+          "outputs": ["/api/search", "/api/search/debug", "/api/chat"],
+          "acceptance": ["搜索返回 chunks", "问答返回 answer + sources", "写入 chat_messages"]
+        },
+        {
+          "id": "W2-T3",
+          "title": "DeepSeek 与 PromptBuilder",
+          "agent": "rag_engine",
+          "write_scope": ["enterprise-rag-kb/services/rag/"],
+          "depends_on": ["W2-T1"],
+          "outputs": ["DeepSeek client", "PromptBuilder", "SourceBinder"],
+          "acceptance": ["无 API Key 可 mock", "有 API Key 可真实调用", "无依据问题拒答"]
+        }
+      ]
+    },
+    {
+      "id": "W3",
+      "name": "前端集成",
+      "parallel": true,
+      "tasks": [
+        {
+          "id": "W3-T1",
+          "title": "文档管理 UI",
+          "agent": "frontend",
+          "write_scope": ["enterprise-rag-kb/apps/web/"],
+          "depends_on": ["W1C", "W2-T2"],
+          "outputs": ["Documents page", "UploadDropzone", "DocumentDetail"],
+          "acceptance": ["可上传文档", "可查看索引状态", "可重建索引"]
+        },
+        {
+          "id": "W3-T2",
+          "title": "问答与引用 UI",
+          "agent": "frontend",
+          "write_scope": ["enterprise-rag-kb/apps/web/"],
+          "depends_on": ["W1C", "W2-T2"],
+          "outputs": ["Chat page", "SourcePanel", "Feedback buttons"],
+          "acceptance": ["可提问", "答案显示引用来源", "可展开 chunk 原文"]
+        },
+        {
+          "id": "W3-T3",
+          "title": "检索调试 UI",
+          "agent": "frontend",
+          "write_scope": ["enterprise-rag-kb/apps/web/"],
+          "depends_on": ["W1C", "W2-T2"],
+          "outputs": ["Debugger page", "score list", "prompt preview"],
+          "acceptance": ["可运行检索", "展示 topK、score、metadata、prompt"]
+        }
+      ]
+    },
+    {
+      "id": "W4",
+      "name": "QA、安全与发布",
+      "parallel": true,
+      "tasks": [
+        {
+          "id": "W4-T1",
+          "title": "RAG 评测与验收问题",
+          "agent": "qa_eval",
+          "write_scope": ["enterprise-rag-kb/evals/", "enterprise-rag-kb/tests/", "enterprise-rag-kb/docs/qa/"],
+          "depends_on": ["W2-T2", "W3-T2"],
+          "outputs": ["30+ eval questions", "QA report"],
+          "acceptance": ["覆盖工艺、设备、检测、安全、无依据问题"]
+        },
+        {
+          "id": "W4-T2",
+          "title": "安全审查",
+          "agent": "security_review",
+          "write_scope": ["enterprise-rag-kb/docs/security/", "enterprise-rag-kb/tests/security/"],
+          "depends_on": ["W2-T2"],
+          "outputs": ["security review report"],
+          "acceptance": ["无 P0/P1 安全风险", "API Key 不暴露", "权限过滤生效"]
+        }
+      ]
+    }
+  ]
+}
+
