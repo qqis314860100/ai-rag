@@ -1,0 +1,32 @@
+{
+  "name": "enterprise-rag-kb",
+  "version": "1.0.0",
+  "private": true,
+  "description": "企业级电池产线 RAG 知识库系统",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "dev:rag": "cd services/rag && python -m uvicorn app.main:app --reload --port 8000",
+    "dev": "pnpm run --parallel dev:web dev:api",
+    "build:web": "pnpm --filter web build",
+    "build:api": "pnpm --filter api build",
+    "build": "pnpm run build:web && pnpm run build:api"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10"
+  }
+}
