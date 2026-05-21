@@ -22,6 +22,7 @@ export default function SettingsPage() {
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"rag" | "users">("rag");
   const [ragRuntime, setRagRuntime] = useState<Record<string, string>>({});
+  const [pageLoading, setPageLoading] = useState(true);
 
   const loadSettings = () => {
     api.get<{ data: Array<{ key: string; value: string }> }>("/admin/settings").then(r => {
@@ -29,7 +30,7 @@ export default function SettingsPage() {
       r.data?.forEach?.((s: any) => { m[s.key] = s.value; });
       setSettings(m); setInitialSettings(m);
     }).catch(() => {});
-    api.get<{ data: UserRow[] }>("/users").then(r => setUsers(r.data || [])).catch(() => {});
+    api.get<{ data: UserRow[] }>("/users").then(r => setUsers(r.data || [])).catch(() => {}).finally(() => setPageLoading(false));
     // Get actual runtime values from RAG
     fetch("http://localhost:8001/rag/health").then(r => r.json()).then(d => {
       setRagRuntime({
@@ -65,6 +66,8 @@ export default function SettingsPage() {
   };
 
   const isModified = (key: string) => settings[key] !== initialSettings[key];
+
+  if (pageLoading) return <div className="p-6 space-y-6"><div className="skeleton h-8 w-40 rounded-lg" /><div className="space-y-4">{[1,2,3,4].map(i=><div key={i} className="skeleton h-20 rounded-xl" />)}</div></div>;
 
   return (
     <div className="p-6 space-y-6 h-full overflow-y-auto">
