@@ -1,76 +1,67 @@
 import { useState, useEffect } from "react";
-import { Save, Server, Cpu, Database, SlidersHorizontal } from "lucide-react";
+import { Save, Server, Cpu, Database, SlidersHorizontal, Users, UserPlus, Shield } from "lucide-react";
 import { api } from "../services/api";
 import { showToast } from "../components/ui/Toast";
 
+interface UserRow { id: string; name: string; email: string; role: string; status: string; created_at: string; }
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [users, setUsers] = useState<UserRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<"rag" | "users">("rag");
 
   useEffect(() => {
-    api.get<{ data: Array<{ key: string; value: string }> }>("/admin/settings").then((res) => {
-      const map: Record<string, string> = {};
-      res.data?.forEach?.((s: { key: string; value: string }) => { map[s.key] = s.value; });
-      setSettings(map);
-    }).catch(() => {});
+    api.get<{ data: Array<{ key: string; value: string }> }>("/admin/settings").then(r => { const m: Record<string,string>={}; r.data?.forEach?.((s:any) => { m[s.key]=s.value; }); setSettings(m); }).catch(() => {});
+    api.get<{ data: UserRow[] }>("/users").then(r => setUsers(r.data||[])).catch(() => {});
   }, []);
 
-  const handleSave = async (key: string, value: string) => {
-    setSaving(true);
-    try {
-      await api.patch("/admin/settings", { key, value });
-      showToast("success", "设置已保存");
-    } catch {
-      showToast("error", "保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleSave = async (key: string, value: string) => { setSaving(true); try { await api.patch("/admin/settings", {key, value}); showToast("success", "已保存"); } catch { showToast("error", "保存失败"); } finally { setSaving(false); }; };
+  const handleRoleChange = async (userId: string, role: string) => { try { await api.patch(`/users/${userId}`, {role}); showToast("success", "角色已更新"); api.get<{ data: UserRow[] }>("/users").then(r => setUsers(r.data||[])).catch(() => {}); } catch { showToast("error", "更新失败"); } };
 
-  const configs = [
-    { key: "rag_top_k", label: "默认 TopK", icon: SlidersHorizontal, desc: "检索返回的最大结果数" },
-    { key: "rag_temperature", label: "模型温度", icon: Cpu, desc: "LLM 生成温度 (0-1)" },
-    { key: "rag_max_context_chars", label: "上下文字符数", icon: Database, desc: "RAG 注入的最大上下文字符" },
-    { key: "embedding_model", label: "Embedding 模型", icon: Server, desc: "当前: fallback (384-dim hash)" },
-  ];
+  const paramHelp: Record<string, string> = { rag_top_k: "每次检索返回的文档片段数量。值越大回答越全面但速度越慢。推荐 5。", rag_temperature: "LLM 生成温度 0-1。0=精准保守，1=富有创意。生产环境建议 0.2。", rag_max_context_chars: "注入 LLM 的上下文字符上限。超过会被截断。推荐 12000。", embedding_model: "将文本转为向量的模型。fallback 是轻量 Hash 模式，无需 GPU。" };
 
   return (
-    <div className="p-6 space-y-8 max-w-2xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-text tracking-tight">系统设置</h1>
-        <p className="mt-1 text-sm text-text-secondary">RAG 参数配置，修改后立即生效</p>
+    <div className="p-6 space-y-6 h-full overflow-y-auto">
+      <div><h1 className="text-2xl font-bold text-text tracking-tight">系统设置</h1><p className="mt-1 text-sm text-text-secondary">RAG 参数 ＋ 用户管理</p></div>
+      <div className="flex gap-2">
+        {[{ id: "rag", label: "RAG 参数", icon: SlidersHorizontal }, { id: "users", label: "用户管理", icon: Users }].map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab===t.id ? "bg-accent text-white shadow-sm" : "text-text-secondary hover:bg-surface-hover"}`}><t.icon className="h-4 w-4" />{t.label}</button>
+        ))}
       </div>
 
-      <div className="space-y-3">
-        {configs.map(({ key, label, icon: Icon, desc }) => (
-          <div key={key} className="glass rounded-xl p-5 shadow-sm-soft">
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                <Icon className="h-4 w-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <label className="text-sm font-medium text-text">{label}</label>
-                <p className="text-xs text-text-muted mt-0.5">{desc}</p>
-                <div className="flex items-center gap-2 mt-3">
-                  <input
-                    value={settings[key] || ""}
-                    onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))}
-                    className="flex-1 rounded-lg border border-border bg-surface-page px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20"
-                  />
-                  <button
-                    onClick={() => handleSave(key, settings[key])}
-                    disabled={saving}
-                    className="flex items-center gap-1.5 rounded-lg bg-primary text-white px-4 py-2 text-sm font-medium hover:bg-primary-hover disabled:opacity-40 transition-all active:scale-[0.97]"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                    保存
-                  </button>
+      {activeTab === "rag" ? (
+        <div className="space-y-4">
+          {[{ key: "rag_top_k", label: "检索 TopK", icon: SlidersHorizontal }, { key: "rag_temperature", label: "模型温度", icon: Cpu }, { key: "rag_max_context_chars", label: "上下文字符", icon: Database }, { key: "embedding_model", label: "Embedding 模型", icon: Server }].map(({ key, label, icon: Icon }) => (
+            <div key={key} className="glass rounded-xl p-5 shadow-sm-soft">
+              <div className="flex items-start gap-3"><div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent"><Icon className="h-4 w-4" /></div>
+                <div className="flex-1 min-w-0"><label className="text-sm font-medium text-text">{label}</label><p className="text-xs text-text-muted mt-1 leading-relaxed">{paramHelp[key]}</p>
+                  <div className="flex items-center gap-2 mt-3"><input value={settings[key]||""} onChange={e => setSettings(s => ({...s, [key]: e.target.value}))} className="flex-1 rounded-lg border border-border bg-surface-page px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20" />
+                    <button onClick={() => handleSave(key, settings[key])} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-primary text-white px-4 py-2 text-sm font-medium hover:bg-primary-hover disabled:opacity-40 transition-all active:scale-[0.97]"><Save className="h-3.5 w-3.5" />保存</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="glass rounded-xl shadow-sm-soft overflow-hidden">
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-divider bg-surface-page/50"><th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">用户</th><th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">邮箱</th><th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">角色</th><th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">状态</th><th className="text-left px-4 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">创建时间</th></tr></thead><tbody>
+            {users.map(u => (
+              <tr key={u.id} className="border-b border-divider hover:bg-surface-hover transition-colors">
+                <td className="px-4 py-3 font-medium text-text">{u.name}</td><td className="px-4 py-3 text-text-secondary">{u.email}</td>
+                <td className="px-4 py-3">
+                  <select value={u.role} onChange={e => handleRoleChange(u.id, e.target.value)} className="rounded-lg border border-border bg-surface-page px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-accent/20">
+                    {["viewer","operator","process_engineer","equipment_engineer","quality_engineer","knowledge_admin","system_admin"].map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </td>
+                <td className="px-4 py-3"><span className={`inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1 ${u.status==='active'?'bg-success-soft text-success':'bg-text-muted/10 text-text-muted'}`}><span className={`w-1.5 h-1.5 rounded-full ${u.status==='active'?'bg-success':'bg-text-muted'}`} />{u.status==='active'?'活跃':'停用'}</span></td>
+                <td className="px-4 py-3 text-xs text-text-muted">{u.created_at?.substring(0,10)}</td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        </div>
+      )}
     </div>
   );
 }
