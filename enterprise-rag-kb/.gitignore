@@ -31,3 +31,12 @@ test_screenshots/
 
 # Environment (contains secrets)
 .env
+
+# macOS
+.DS_Store
+
+# Repo root docs (moved to enterprise-rag-kb/docs/)
+ONBOARDING.md
+enterprise-rag-kb-*.md
+agent-harness/
+data/
