@@ -32,11 +32,12 @@ router.put(
         throw new AppError(ErrorCodes.VALIDATION_ERROR, "请提供要更新的设置项。", 400);
       }
 
-      // Convert all values to strings for storage
+      // Only allow known setting keys
+      const knownKeys = ["rag_top_k", "rag_temperature", "rag_max_context_chars", "embedding_model", "chroma_collection"];
       const stringUpdates: Record<string, string> = {};
-      for (const [key, value] of Object.entries(updates)) {
-        if (value !== undefined) {
-          stringUpdates[key] = String(value);
+      for (const key of knownKeys) {
+        if (updates[key] !== undefined) {
+          stringUpdates[key] = String(updates[key]);
         }
       }
 

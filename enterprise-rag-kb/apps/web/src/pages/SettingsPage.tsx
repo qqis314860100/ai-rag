@@ -31,11 +31,13 @@ export default function SettingsPage() {
       setSettings(m); setInitialSettings(m);
     }).catch(() => {});
     api.get<{ data: UserRow[] }>("/users").then(r => setUsers(r.data || [])).catch(() => {}).finally(() => setPageLoading(false));
-    // Get actual runtime values from RAG
-    fetch("http://localhost:8001/rag/health").then(r => r.json()).then(d => {
+    // Get RAG runtime status (proxied through API to avoid CORS)
+    fetch("/api/admin/health").then(r => r.json()).then(d => {
+      const svc = d.data?.services || {};
       setRagRuntime({
-        embedding_model: d.embedding_model || "-",
-        collection: d.chroma_collection || "-",
+        rag_status: svc.rag === "ok" ? "运行中" : "异常",
+        api_status: svc.api === "ok" ? "运行中" : "异常",
+        db_status: svc.database === "ok" ? "正常" : "异常",
       });
     }).catch(() => {});
   };
@@ -96,16 +98,17 @@ export default function SettingsPage() {
       {activeTab === "rag" ? (
         <div className="space-y-4">
           {/* Runtime banner */}
-          {ragRuntime.embedding_model && (
+          {ragRuntime.rag_status && (
             <div className="flex items-start gap-2 rounded-xl bg-info-soft border border-info/20 px-4 py-3 text-sm">
               <AlertCircle className="h-4 w-4 text-info shrink-0 mt-0.5" />
               <div>
-                <p className="text-text font-medium">当前运行值</p>
+                <p className="text-text font-medium">服务状态</p>
                 <p className="text-text-secondary text-xs mt-0.5">
-                  embedding: <code className="bg-surface px-1 rounded">{ragRuntime.embedding_model}</code>
-                  {" · "}collection: <code className="bg-surface px-1 rounded">{ragRuntime.collection}</code>
+                  RAG: <code className="bg-surface px-1 rounded">{ragRuntime.rag_status}</code>
+                  {" · "}API: <code className="bg-surface px-1 rounded">{ragRuntime.api_status}</code>
+                  {" · "}DB: <code className="bg-surface px-1 rounded">{ragRuntime.db_status}</code>
                 </p>
-                <p className="text-text-muted text-xs mt-1">以下设置保存到数据库。若与运行值不同，需重启 RAG 服务生效。</p>
+                <p className="text-text-muted text-xs mt-1">以下设置保存到数据库。重启 RAG 服务后生效。</p>
               </div>
             </div>
           )}
