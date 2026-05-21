@@ -1,0 +1,203 @@
+/* ══════════════════════════════════════════════════════════════
+   Design Tokens — Enterprise RAG Knowledge Base
+   Apple-inspired minimalist design language with Sitor warm palette
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Palette ── */
+  --color-white: #ffffff;
+  --color-black: #1c1917;
+
+  /* Primary: warm stone */
+  --color-primary:        #44403c;
+  --color-primary-hover:  #292524;
+  --color-primary-light:  rgba(68, 64, 60, 0.08);
+  --color-primary-soft:   #eeedeb;
+
+  /* Accent: warm gold */
+  --color-accent:         #d4a574;
+  --color-accent-hover:   #c4955f;
+  --color-accent-light:   rgba(212, 165, 116, 0.12);
+  --color-accent-soft:    #fdf6ee;
+
+  /* Semantic */
+  --color-success:        #10b981;
+  --color-success-soft:   #ecfdf5;
+  --color-warning:        #f59e0b;
+  --color-warning-soft:   #fffbeb;
+  --color-danger:         #ef4444;
+  --color-danger-soft:    #fef2f2;
+  --color-info:           #3b82f6;
+  --color-info-soft:      #eff6ff;
+
+  /* Surfaces */
+  --color-surface:        #ffffff;
+  --color-surface-page:   #f5f5f0;
+  --color-surface-hover:  rgba(0, 0, 0, 0.04);
+  --color-surface-glass:  rgba(255, 255, 255, 0.72);
+
+  /* Text */
+  --color-text:           #1c1917;
+  --color-text-secondary: #57534e;
+  --color-text-muted:     #a8a29e;
+  --color-text-inverse:   #ffffff;
+
+  /* Borders & Dividers */
+  --color-border:         #e7e5e4;
+  --color-border-hover:   #d6d3d1;
+  --color-divider:        rgba(0, 0, 0, 0.06);
+
+  /* ── Spacing Scale (4px base) ── */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Border Radius ── */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   18px;
+  --radius-xl:   24px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm:  0 1px 3px  rgba(0, 0, 0, 0.04), 0 1px 2px  rgba(0, 0, 0, 0.06);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.04), 0 2px 4px  rgba(0, 0, 0, 0.04);
+  --shadow-lg:  0 16px 40px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+  --shadow-xl:  0 24px 56px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.04);
+
+  /* ── Glass Effect ── */
+  --glass-blur:      20px;
+  --glass-saturate:  180%;
+  --glass-bg:        rgba(255, 255, 255, 0.72);
+  --glass-border:     rgba(0, 0, 0, 0.06);
+
+  /* ── Typography ── */
+  --font-sans:  "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+  --font-mono:  "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  --font-size-xs:   11px;
+  --font-size-sm:   13px;
+  --font-size-base: 15px;
+  --font-size-lg:   18px;
+  --font-size-xl:   24px;
+  --font-size-2xl:  32px;
+  --font-size-3xl:  48px;
+  --font-weight-normal:   400;
+  --font-weight-medium:   510;
+  --font-weight-semibold: 590;
+  --font-weight-bold:     680;
+  --line-height-tight:  1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.625;
+
+  /* ── Motion ── */
+  --duration-fast:    150ms;
+  --duration-normal:  250ms;
+  --duration-slow:    400ms;
+  --ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-in:  cubic-bezier(0.42, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Glass utility ── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+}
+
+/* ── Animation Keyframes ── */
+/* ── Focus ring ── */
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 165, 116, 0.4); }
+  50% { box-shadow: 0 0 12px 3px rgba(212, 165, 116, 0.2); }
+}
+
+/* ── Animation Utility Classes ── */
+.animate-fade-in     { animation: fadeIn var(--duration-normal) var(--ease-out) both; }
+.animate-fade-in-up  { animation: fadeInUp var(--duration-normal) var(--ease-out) both; }
+.animate-fade-in-down{ animation: fadeInDown var(--duration-normal) var(--ease-out) both; }
+.animate-scale-in    { animation: scaleIn var(--duration-normal) var(--ease-spring) both; }
+.animate-slide-down  { animation: slideDown var(--duration-fast) var(--ease-out) both; }
+
+/* Staggered children — apply to parent, children get nth-child delays */
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 300ms; }
+.stagger > *:nth-child(7) { animation-delay: 360ms; }
+.stagger > *:nth-child(8) { animation-delay: 420ms; }
+
+/* Shimmer loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, var(--color-border) 0%, rgba(0,0,0,0.06) 40%, var(--color-border) 80%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* Hover lift for cards */
+.hover-lift {
+  transition: transform var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
