@@ -9,3 +9,9 @@ services/rag/data/
 .DS_Store
 test_screenshots/
 .vite/
+.clawhub/
+skills/
+evals/
+tests/
+package-lock.json
+*.egg-info/
