@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { ThumbsUp, ThumbsDown, Copy, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, Pencil, AlertCircle } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, Pencil, AlertCircle } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import { api } from "../../services/api";
@@ -19,6 +19,7 @@ interface ChatThreadProps {
   onInitialQuestion: (query: string) => void;
   onRetry: () => void;
   onEditUser: (messageId: string, content: string) => void;
+  onDeleteMessage: (messageId: string) => void;
   onPreviewSource: (source: Source) => void;
 }
 
@@ -27,7 +28,7 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onPreviewSource }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
@@ -124,31 +125,37 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
             style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}
           >
-            {/* Message text — no bubbles, plain text */}
+            {/* Message text */}
             <div className={`max-w-[85%] ${isUser ? "text-right" : "text-left"}`}>
-              {!isUser ? (
+              {isUser ? (
+                editingMsgId === msg.id ? (
+                  /* Edit mode */
+                  <div className="flex flex-col gap-2">
+                    <textarea value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgId(null); }}
+                      className="w-full min-h-[80px] px-4 py-3 text-[15px] leading-relaxed border border-border rounded-2xl bg-surface-page focus:outline-none focus:border-accent resize-none"
+                      autoFocus />
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setEditingMsgId(null)}
+                        className="p-2 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors" title="取消">
+                        <X className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} disabled={!editValue.trim()}
+                        className="p-2 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 transition-colors" title="确认">
+                        <Check className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* User bubble — light warm bg */
+                  <div className="group inline-block rounded-2xl bg-[#F3F1EE] px-5 py-3">
+                    <p className="text-[15px] leading-relaxed text-text whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                )
+              ) : (
+                /* AI message — plain text, no bubble */
                 <div className="text-[15px] leading-relaxed text-text">
                   <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
-                </div>
-              ) : editingMsgId === msg.id ? (
-                <div className="flex flex-col gap-2 min-w-[280px]">
-                  <textarea value={editValue} onChange={(e) => setEditValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onEditUser(msg.id, editValue); setEditingMsgId(null); } if (e.key === "Escape") setEditingMsgId(null); }}
-                    className="w-full min-h-[80px] px-3 py-2 text-[15px] border border-border rounded-xl bg-surface focus:outline-none focus:border-accent resize-none"
-                    autoFocus placeholder="编辑消息..." />
-                  <div className="flex items-center justify-end gap-2">
-                    <button onClick={() => setEditingMsgId(null)} className="px-3 py-1.5 text-xs rounded-lg bg-surface hover:bg-surface-hover text-text-secondary transition-colors">取消</button>
-                    <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} disabled={!editValue.trim()}
-                      className="px-3 py-1.5 text-xs rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 transition-colors">保存并发送</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="group relative">
-                  <p className="text-[15px] leading-relaxed text-text">{msg.content}</p>
-                  <button onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
-                    className="absolute -left-7 top-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-text-muted hover:text-text" title="编辑">
-                    <Pencil className="h-3 w-3" />
-                  </button>
                 </div>
               )}
 
@@ -179,23 +186,33 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               )}
             </div>
 
-            {/* Time + actions row — small text below message */}
-            <div className={`flex items-center gap-3 mt-1.5 ${isUser ? "justify-end" : "justify-start"}`}>
-              <span className="text-[11px] text-text-muted">{formatTime(msg.created_at)}</span>
-              <div className="flex items-center gap-0.5 opacity-0 hover:opacity-100 transition-opacity">
+            {/* Time + actions row */}
+            <div className={`flex items-center gap-2 mt-1.5 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+              <span className="text-[11px] text-text-muted select-none">{formatTime(msg.created_at)}</span>
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => handleCopy(msg.id, msg.content)}
                   className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
                   <Copy className="h-3 w-3" />
                 </button>
-                <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
-                  className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
-                  <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
+                {isUser && (
+                  <button onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
+                    className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="编辑">
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+                <button onClick={() => onDeleteMessage(msg.id)}
+                  className="p-0.5 rounded text-text-muted hover:text-danger transition-colors" title="删除">
+                  <Trash2 className="h-3 w-3" />
                 </button>
-                {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
-                <button onClick={() => handleFeedback(msg.id, "down")} disabled={voting[msg.id]}
-                  className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="踩">
-                  <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
-                </button>
+                {!isUser && (
+                  <>
+                    <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
+                      className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
+                      <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
+                    </button>
+                    {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
+                  </>
+                )}
               </div>
             </div>
           </div>

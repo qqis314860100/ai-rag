@@ -138,6 +138,11 @@ export default function ChatPage() {
     handleSend(newContent.trim());
   }, [messages, handleSend, isSending]);
 
+  const handleDeleteMessage = useCallback((messageId: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    showToast("success", "消息已删除");
+  }, []);
+
   const activeTitle = activeSessionId
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
     : "";
@@ -226,6 +231,7 @@ export default function ChatPage() {
               onInitialQuestion={handleInitialQuestion}
               onRetry={handleRetry}
               onEditUser={handleEditUser}
+              onDeleteMessage={handleDeleteMessage}
               onPreviewSource={setPreviewSource}
             />
           </div>
