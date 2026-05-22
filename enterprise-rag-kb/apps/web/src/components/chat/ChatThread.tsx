@@ -19,9 +19,10 @@ interface ChatThreadProps {
   onInitialQuestion: (query: string) => void;
   onRetry: () => void;
   onEditUser: (messageId: string, content: string) => void;
+  onPreviewSource: (source: Source) => void;
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onCopy, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onCopy, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onPreviewSource }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
@@ -29,8 +30,12 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
   const [voting, setVoting] = useState<Record<string, boolean>>({});
 
+  const prevLoading = useRef(loading);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // When stream just completed, use instant scroll to avoid flicker
+    const justFinished = prevLoading.current && !loading;
+    prevLoading.current = loading;
+    bottomRef.current?.scrollIntoView({ behavior: justFinished ? "instant" : "smooth" });
   }, [messages, streamingContent, loading]);
 
   // Fetch feedback counts for all messages
@@ -127,7 +132,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             {msg.role === "assistant" ? (
               <div className="rounded-lg glass shadow-sm-soft px-5 py-4">
                 <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed">
-                  <MarkdownContent content={msg.content} />
+                  <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
                 </div>
 
                 {/* Footer */}
@@ -195,29 +200,46 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             ) : (
               <div className="group relative rounded-lg bg-primary px-5 py-3 text-sm leading-relaxed text-white shadow-md-soft">
                 {editingMsgId === msg.id ? (
-                  <div className="flex gap-2">
-                    <input
+                  <div className="flex flex-col gap-2 min-w-[280px]">
+                    <textarea
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") { onEditUser(msg.id, editValue); setEditingMsgId(null); }
-                        if (e.key === "Escape") setEditingMsgId(null);
+                        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onEditUser(msg.id, editValue); setEditingMsgId(null); }
+                        if (e.key === "Escape") { setEditingMsgId(null); }
                       }}
-                      className="flex-1 px-2 py-1 text-sm text-text border border-border rounded bg-surface focus:outline-none focus:border-accent"
+                      className="w-full min-h-[80px] px-3 py-2 text-sm text-text border border-white/20 rounded-lg bg-white/10 focus:outline-none focus:border-white/40 resize-none placeholder:text-white/40"
                       autoFocus
+                      placeholder="编辑消息..."
                     />
-                    <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover">发送</button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setEditingMsgId(null)}
+                        className="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-white/70 hover:bg-white/20 transition-colors"
+                      >
+                        取消
+                      </button>
+                      <button
+                        onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }}
+                        disabled={!editValue.trim()}
+                        className="px-3 py-1.5 text-xs rounded-lg bg-white/20 text-white hover:bg-white/30 disabled:opacity-40 transition-colors"
+                      >
+                        保存并发送
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   msg.content
                 )}
-                <button
-                  onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
-                  className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
-                  title="编辑消息"
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
+                {editingMsgId !== msg.id && (
+                  <button
+                    onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
+                    className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+                    title="编辑消息"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
               </div>
             )}
           </div>

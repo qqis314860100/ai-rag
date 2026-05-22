@@ -185,8 +185,8 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Main chat area */}
-      <div className="flex flex-1 flex-col min-w-0 min-h-0">
+      {/* Main chat area — centered */}
+      <div className="flex flex-1 flex-col min-w-0 min-h-0 max-w-3xl mx-auto w-full">
         <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-divider bg-surface-page">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -219,6 +219,7 @@ export default function ChatPage() {
           onInitialQuestion={handleInitialQuestion}
           onRetry={handleRetry}
           onEditUser={handleEditUser}
+          onPreviewSource={setPreviewSource}
         />
 
         <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">

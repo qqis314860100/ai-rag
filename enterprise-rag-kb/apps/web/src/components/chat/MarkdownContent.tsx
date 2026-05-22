@@ -127,13 +127,41 @@ export function renderMarkdown(md: string): string {
 
 interface MarkdownContentProps {
   content: string;
+  sources?: Array<{ document_title: string; chunk_id: string }>;
+  onSourceClick?: (index: number) => void;
 }
 
-export function MarkdownContent({ content }: MarkdownContentProps) {
+export function MarkdownContent({ content, sources, onSourceClick }: MarkdownContentProps) {
+  let html = renderMarkdown(content);
+
+  // Replace [来源 N] with clickable document-title links
+  if (sources && sources.length > 0) {
+    html = html.replace(
+      /\[来源\s*(\d+)\]/g,
+      (_match: string, numStr: string) => {
+        const idx = parseInt(numStr, 10) - 1;
+        const src = sources[idx];
+        const title = src?.document_title || `来源 ${numStr}`;
+        return `<a href="#" class="source-ref-link inline-flex items-center gap-1 text-accent font-medium underline hover:text-accent/80" data-source-idx="${idx}" title="${title}">${title}</a>`;
+      }
+    );
+  }
+
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onSourceClick) return;
+    const target = e.target as HTMLElement;
+    const link = target.closest(".source-ref-link") as HTMLElement | null;
+    if (link?.dataset.sourceIdx != null) {
+      e.preventDefault();
+      onSourceClick(parseInt(link.dataset.sourceIdx, 10));
+    }
+  };
+
   return (
     <div
       className="markdown-content"
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+      dangerouslySetInnerHTML={{ __html: html }}
+      onClick={handleClick}
     />
   );
 }
