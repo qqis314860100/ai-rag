@@ -1,6 +1,14 @@
 import os
 import sqlite3
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from project root (enterprise-rag-kb/) — has priority over local .env
+_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+load_dotenv(_root / ".env")
+# Also load local .env (services/rag/) for overrides
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
