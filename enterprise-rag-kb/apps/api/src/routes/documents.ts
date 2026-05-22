@@ -414,4 +414,65 @@ router.delete("/documents/:id/comments/:commentId", async (req: Request, res: Re
   }
 });
 
+// POST /api/documents/sync-from-rag - sync documents from RAG/Chroma into SQLite
+router.post("/documents/sync-from-rag", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const config = loadConfig();
+    const ragUrl = `${config.ragServiceUrl}/rag/documents`;
+
+    const response = await fetch(ragUrl, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      throw new AppError(ErrorCodes.RAG_SERVICE_ERROR, "RAG 服务文档列表请求失败。", 502);
+    }
+
+    const { documents: ragDocs } = (await response.json()) as { documents: Array<{ document_id: string; title: string; chunk_count: number; category: string; section_paths: string[] }> };
+
+    let created = 0;
+    let updated = 0;
+
+    for (const rd of ragDocs) {
+      const existing = getDocumentById(rd.document_id);
+      if (existing) {
+        updateDocument(rd.document_id, {
+          title: rd.title,
+          category: rd.category || "未分类",
+          indexStatus: "ready",
+          chunkCount: rd.chunk_count,
+        });
+        updated++;
+      } else {
+        createDocument({
+          title: rd.title,
+          category: rd.category || "未分类",
+          securityLevel: "internal",
+          filePath: "",
+          fileName: "",
+          fileType: "unknown",
+          fileSize: 0,
+          createdBy: req.user?.id,
+        });
+        // Override the generated ID with the RAG document_id
+        const db = getDb();
+        const now = new Date().toISOString();
+        // Update the most recently created document to have the RAG document_id
+        const latest = db.prepare("SELECT id FROM documents ORDER BY created_at DESC LIMIT 1").get() as { id: string } | undefined;
+        if (latest) {
+          db.prepare("UPDATE documents SET id = ?, chunk_count = ?, index_status = 'ready' WHERE id = ?")
+            .run(rd.document_id, rd.chunk_count, latest.id);
+          // Also update message_sources that reference this document_id
+          db.prepare("UPDATE message_sources SET document_id = ? WHERE document_id = ?")
+            .run(rd.document_id, latest.id);
+        }
+        created++;
+      }
+    }
+
+    auditFromRequest(req, "document.sync", "document", undefined, { created, updated, total: ragDocs.length });
+
+    sendSuccess(res, { created, updated, total: ragDocs.length }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

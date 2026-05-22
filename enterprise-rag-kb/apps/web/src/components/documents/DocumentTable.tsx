@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Upload, RefreshCw, Search } from "lucide-react";
+import { Upload, RefreshCw, Search, Database } from "lucide-react";
 import { api } from "../../services/api";
 import type { Document, PaginatedResponse, ApiResponse } from "../../types";
 import { Button, Input, Badge, Spinner, EmptyState, getBadgeLabel } from "../ui";
@@ -13,6 +13,7 @@ export default function DocumentTable() {
   const [totalPages, setTotalPages] = useState(0);
   const [keyword, setKeyword] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const pageSize = 15;
 
   const fetchDocuments = useCallback(async () => {
@@ -56,6 +57,19 @@ export default function DocumentTable() {
     }
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.post<{ data: { created: number; updated: number; total: number } }>("/documents/sync-from-rag");
+      fetchDocuments();
+      alert(`同步完成：新增 ${res.data.created} 个，更新 ${res.data.updated} 个，共 ${res.data.total} 个文档`);
+    } catch {
+      alert("同步失败，请检查 RAG 服务状态");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* Toolbar */}
@@ -71,10 +85,16 @@ export default function DocumentTable() {
             />
           </div>
         </div>
-        <Button onClick={() => setUploadOpen(true)}>
-          <Upload className="h-4 w-4" />
-          上传文档
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={handleSync} disabled={syncing}>
+            <Database className="h-4 w-4" />
+            {syncing ? "同步中..." : "同步文档"}
+          </Button>
+          <Button onClick={() => setUploadOpen(true)}>
+            <Upload className="h-4 w-4" />
+            上传文档
+          </Button>
+        </div>
       </div>
 
       {/* Table */}

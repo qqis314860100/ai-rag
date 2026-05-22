@@ -29,6 +29,38 @@ def health():
     }
 
 
+@router.get("/documents")
+def list_rag_documents():
+    """List all unique documents in Chroma with metadata."""
+    try:
+        from ..retrieval.vector_store import _get_collection
+        coll = _get_collection()
+        all_data = coll.get()
+        docs: dict[str, dict] = {}
+        for i, meta in enumerate(all_data.get("metadatas", []) or []):
+            if not meta:
+                continue
+            doc_id = meta.get("document_id", "unknown")
+            title = meta.get("title", doc_id)
+            section = meta.get("section_path", "")
+            if doc_id not in docs:
+                docs[doc_id] = {
+                    "document_id": doc_id,
+                    "title": title,
+                    "chunk_count": 0,
+                    "section_paths": [],
+                    "category": section.split(" / ")[0] if section else "",
+                }
+            docs[doc_id]["chunk_count"] += 1
+            if section and section not in docs[doc_id]["section_paths"]:
+                docs[doc_id]["section_paths"].append(section)
+
+        return {"documents": sorted(docs.values(), key=lambda d: d["title"])}
+    except Exception as e:
+        logger.exception("Failed to list documents")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/documents/ingest", response_model=IngestResult)
 def ingest(request: IngestRequest):
     try:
