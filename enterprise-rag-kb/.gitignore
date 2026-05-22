@@ -8,6 +8,7 @@ services/rag/data/
 .env
 .DS_Store
 test_screenshots/
+screenshots/
 .vite/
 .clawhub/
 skills/
@@ -15,6 +16,9 @@ evals/
 tests/
 package-lock.json
 *.egg-info/
+
+
+
 
 # Build artifacts
 *.egg-info/

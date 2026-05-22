@@ -18,7 +18,7 @@ export default function ChatPage() {
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const { stream, sendStream, cancelStream } = useStreamChat();
+  const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
   // Load sessions on mount
   const loadSessions = useCallback(async () => {
@@ -94,7 +94,7 @@ export default function ChatPage() {
 
   const handleSend = useCallback(
     async (message: string) => {
-      if (!message.trim()) return;
+      if (!message.trim() || isSending) return;
 
       // Get or create session
       let sid = activeSessionId;
@@ -123,26 +123,48 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, userMsg]);
       setSelectedSources(null);
 
-      // Send with streaming
+      // Send with streaming — sendStream internally checks sendingRef too
       await sendStream(sid, message, 5);
-
-      // Stream completion is handled by the effect above
     },
-    [activeSessionId, sendStream, loadSessions]
+    [activeSessionId, sendStream, loadSessions, isSending]
   );
 
   const handleFollowUp = useCallback(
     (query: string) => {
+      if (isSending) return;
       handleSend(query);
     },
-    [handleSend]
+    [handleSend, isSending]
   );
 
   const handleInitialQuestion = useCallback(
     (query: string) => {
+      if (isSending) return;
       handleSend(query);
     },
-    [handleSend]
+    [handleSend, isSending]
+  );
+
+  const handleRetry = useCallback(() => {
+    // Find the last user message and resend it
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUserMsg) return;
+    // Remove the failed streaming content from the stream state
+    // and resend the user message
+    handleSend(lastUserMsg.content);
+  }, [messages, handleSend]);
+
+  const handleEditUser = useCallback(
+    (messageId: string, newContent: string) => {
+      if (!newContent.trim() || isSending) return;
+      // Remove this user message and all subsequent assistant messages
+      const idx = messages.findIndex((m) => m.id === messageId);
+      if (idx === -1) return;
+      setMessages((prev) => prev.slice(0, idx));
+      // Send the edited message (this will create a new user message)
+      handleSend(newContent.trim());
+    },
+    [messages, handleSend, isSending]
   );
 
   return (
@@ -188,11 +210,15 @@ export default function ChatPage() {
           messages={messages}
           loading={stream.loading}
           streamingContent={stream.content}
+          streamError={stream.error}
+          streamStopped={stream.stopped}
           selectedSources={selectedSources}
           onSelectSources={setSelectedSources}
           onFollowUp={handleFollowUp}
           onCancelStream={cancelStream}
           onInitialQuestion={handleInitialQuestion}
+          onRetry={handleRetry}
+          onEditUser={handleEditUser}
         />
 
         <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">

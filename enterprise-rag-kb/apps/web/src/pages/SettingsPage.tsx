@@ -47,7 +47,7 @@ export default function SettingsPage() {
   const handleSave = async (key: string, value: string) => {
     setSaving(s => ({ ...s, [key]: true }));
     try {
-      await api.put("/admin/settings", { key, value });
+      await api.put("/admin/settings", { [key]: value });
       setSavedKeys(s => new Set(s).add(key));
       setInitialSettings(s => ({ ...s, [key]: value }));
       showToast("success", `"${key}" 已保存`);

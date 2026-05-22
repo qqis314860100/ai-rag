@@ -17,6 +17,8 @@ import { AppError, ErrorCodes } from "../utils/errors";
 import { auditFromRequest } from "../services/auditService";
 import { requirePermission } from "../middleware/auth";
 import { ingestDocument, reindexDocument } from "../services/ragClient";
+import { getDb } from "../db";
+import { listComments, createComment, updateComment, softDeleteComment } from "../db/docComments";
 
 const config = loadConfig();
 
@@ -275,6 +277,24 @@ router.delete(
   }
 );
 
+// GET /api/documents/chunks/:chunk_id - get chunk content
+router.get("/documents/chunks/:chunk_id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const db = getDb();
+    const row = db.prepare(
+      "SELECT snippet FROM message_sources WHERE chunk_id = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(req.params.chunk_id) as { snippet: string } | undefined;
+
+    if (!row?.snippet) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "Chunk 内容不存在。", 404);
+    }
+
+    sendSuccess(res, { content: row.snippet }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/documents/:id/reindex - reindex single document
 router.post(
   "/documents/:id/reindex",
@@ -331,5 +351,67 @@ router.post(
     }
   }
 );
+
+// GET /api/documents/:id/comments - list comments
+router.get("/documents/:id/comments", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const chunkId = req.query.chunk_id as string | undefined;
+    const comments = listComments(req.params.id as string, chunkId);
+    sendSuccess(res, { items: comments }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/documents/:id/comments - create comment
+router.post("/documents/:id/comments", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content, chunk_id, parent_id } = req.body;
+    if (!content || typeof content !== "string" || content.trim().length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "评论内容不能为空。", 400);
+    }
+    const comment = createComment({
+      documentId: req.params.id as string,
+      chunkId: chunk_id,
+      userId: req.user?.id || "anonymous",
+      userName: req.user?.name || "匿名",
+      content: content.trim(),
+      parentId: parent_id,
+    });
+    sendSuccess(res, comment, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/documents/:id/comments/:commentId - edit comment
+router.patch("/documents/:id/comments/:commentId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content } = req.body;
+    if (!content || typeof content !== "string" || content.trim().length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "评论内容不能为空。", 400);
+    }
+    const updated = updateComment(req.params.commentId as string, req.user?.id || "anonymous", content.trim());
+    if (!updated) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "评论不存在或无权编辑。", 404);
+    }
+    sendSuccess(res, updated, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/documents/:id/comments/:commentId - delete comment
+router.delete("/documents/:id/comments/:commentId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = softDeleteComment(req.params.commentId as string, req.user?.id || "anonymous");
+    if (!deleted) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "评论不存在或无权删除。", 404);
+    }
+    sendSuccess(res, { deleted: true }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;

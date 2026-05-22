@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { User, ThumbsUp, ThumbsDown, Copy, StopCircle, Sparkles, FileSearch, ChevronRight } from "lucide-react";
+import { User, ThumbsUp, ThumbsDown, Copy, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, Pencil, AlertCircle } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import { api } from "../../services/api";
@@ -9,17 +9,23 @@ interface ChatThreadProps {
   messages: ChatMessage[];
   loading: boolean;
   streamingContent: string;
+  streamError: string | null;
+  streamStopped: boolean;
   selectedSources: Source[] | null;
   onSelectSources: (sources: Source[] | null) => void;
   onCopy?: (content: string) => void;
   onFollowUp: (query: string) => void;
   onCancelStream: () => void;
   onInitialQuestion: (query: string) => void;
+  onRetry: () => void;
+  onEditUser: (messageId: string, content: string) => void;
 }
 
-export default function ChatThread({ messages, loading, streamingContent, selectedSources, onSelectSources, onCopy, onFollowUp, onCancelStream, onInitialQuestion }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onCopy, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
   const [voting, setVoting] = useState<Record<string, boolean>>({});
 
@@ -109,7 +115,7 @@ export default function ChatThread({ messages, loading, streamingContent, select
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
       {messages.map((msg, i) => (
-        <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+        <div key={msg.id} className={`flex gap-3 items-start ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}>
           {msg.role === "assistant" && (
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent shadow-sm-soft">
@@ -117,7 +123,7 @@ export default function ChatThread({ messages, loading, streamingContent, select
             </div>
           )}
 
-          <div className={`max-w-[72%] ${msg.role === "user" ? "" : ""}`}>
+          <div className="max-w-[72%]">
             {msg.role === "assistant" ? (
               <div className="rounded-lg glass shadow-sm-soft px-5 py-4">
                 <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed">
@@ -187,17 +193,40 @@ export default function ChatThread({ messages, loading, streamingContent, select
                 )}
               </div>
             ) : (
-              <div className="rounded-lg bg-primary px-5 py-3 text-sm leading-relaxed text-white shadow-md-soft">
-                {msg.content}
-              </div>
-            )}
-
-            {msg.role === "user" && (
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
-                <User className="h-4 w-4" />
+              <div className="group relative rounded-lg bg-primary px-5 py-3 text-sm leading-relaxed text-white shadow-md-soft">
+                {editingMsgId === msg.id ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { onEditUser(msg.id, editValue); setEditingMsgId(null); }
+                        if (e.key === "Escape") setEditingMsgId(null);
+                      }}
+                      className="flex-1 px-2 py-1 text-sm text-text border border-border rounded bg-surface focus:outline-none focus:border-accent"
+                      autoFocus
+                    />
+                    <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover">发送</button>
+                  </div>
+                ) : (
+                  msg.content
+                )}
+                <button
+                  onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
+                  className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+                  title="编辑消息"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
               </div>
             )}
           </div>
+
+          {msg.role === "user" && (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
+              <User className="h-4 w-4" />
+            </div>
+          )}
         </div>
       ))}
 
@@ -234,6 +263,43 @@ export default function ChatThread({ messages, loading, streamingContent, select
                 <StopCircle size={14} />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error/Stopped state — shown when stream ends with error or is stopped */}
+      {!loading && streamError && !streamStopped && (
+        <div className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-danger-soft text-danger shadow-sm-soft">
+            <AlertCircle className="h-4 w-4" />
+          </div>
+          <div className="max-w-[72%]">
+            <div className="rounded-lg bg-danger-soft/50 border border-danger/20 px-5 py-4">
+              <p className="text-sm text-text-secondary">{streamError}</p>
+              <button
+                onClick={onRetry}
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-xs font-medium text-accent transition-colors"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />重试
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!loading && streamStopped && (
+        <div className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-hover text-text-muted shadow-sm-soft">
+            <StopCircle className="h-4 w-4" />
+          </div>
+          <div className="max-w-[72%]">
+            <p className="text-sm text-text-muted mb-1">已中断</p>
+            <button
+              onClick={onRetry}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-xs font-medium text-accent border border-border transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />重试
+            </button>
           </div>
         </div>
       )}

@@ -82,6 +82,7 @@ def extract_sources(context_chunks: list[dict]) -> list[dict]:
             "page_number": c.get("page_number", 0),
             "score": c.get("score", 0),
             "snippet": c.get("content", "")[:200],
+            "content": c.get("content", ""),
         }
         for c in context_chunks
     ]

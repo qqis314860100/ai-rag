@@ -120,6 +120,19 @@ export interface IndexStatus {
   last_rebuild_at?: string;
 }
 
+export interface DocComment {
+  id: string;
+  document_id: string;
+  chunk_id: string | null;
+  user_id: string;
+  user_name: string;
+  content: string;
+  parent_id: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type DocumentStatus = Document["status"];
 export type IndexStatusType = Document["index_status"];
 export type SecurityLevel = Document["security_level"];

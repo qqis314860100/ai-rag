@@ -149,6 +149,7 @@ def chat_stream(request: ChatRequest):
                             "page_number": s.get("page_number", 0),
                             "score": s.get("score", 0),
                             "snippet": s.get("content", "")[:200],
+                            "content": s.get("content", ""),
                         } for s in sources],
                         "confidence": _estimate_confidence(hits),
                         "followups": _suggest_followups(request.query, hits),

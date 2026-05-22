@@ -9,10 +9,12 @@ export interface StreamState {
   confidence: number;
   followups: string[];
   messageId: string;
+  error: string | null;
+  stopped: boolean;
 }
 
-const TICK_MS = 50;       // typewriter tick interval
-const CHARS_PER_TICK = 1;  // characters revealed per tick (~20 chars/sec, clearly visible)
+const TICK_MS = 30;       // typewriter tick interval (~33 fps)
+const CHARS_PER_TICK = 4;  // characters revealed per tick (~120 chars/sec, fast but readable)
 
 export function useStreamChat() {
   const [stream, setStream] = useState<StreamState>({
@@ -22,9 +24,12 @@ export function useStreamChat() {
     confidence: 0,
     followups: [],
     messageId: "",
+    error: null,
+    stopped: false,
   });
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sendingRef = useRef(false);        // synchronous guard against duplicate sends
   const fullRef = useRef("");              // all received tokens
   const doneRef = useRef(false);            // stream done?
   const metaRef = useRef<{ sources?: Source[]; confidence?: number; followups?: string[] }>({});
@@ -39,7 +44,11 @@ export function useStreamChat() {
 
   const sendStream = useCallback(
     async (sessionId: string, message: string, topK: number) => {
+      if (sendingRef.current) return;
+      sendingRef.current = true;
+
       abortRef.current?.abort();
+      abortRef.current = new AbortController();
       stopTimer();
 
       fullRef.current = "";
@@ -47,7 +56,7 @@ export function useStreamChat() {
       metaRef.current = {};
       savedRef.current = {};
 
-      setStream({ loading: true, content: "", sources: [], confidence: 0, followups: [], messageId: "" });
+      setStream({ loading: true, content: "", sources: [], confidence: 0, followups: [], messageId: "", error: null, stopped: false });
 
       // Typewriter timer: independently drives the displayed content
       timerRef.current = setInterval(() => {
@@ -60,6 +69,7 @@ export function useStreamChat() {
           // All content revealed and stream is done → finalize
           if (done && shown >= full.length) {
             stopTimer();
+            sendingRef.current = false;
             return {
               ...prev,
               loading: false,
@@ -68,6 +78,8 @@ export function useStreamChat() {
               confidence: metaRef.current.confidence || 0,
               followups: metaRef.current.followups || [],
               messageId: savedRef.current.message_id || "",
+              error: null,
+              stopped: false,
             };
           }
 
@@ -86,7 +98,7 @@ export function useStreamChat() {
       try {
         const reader = await sseStream("/chat", {
           session_id: sessionId, message, top_k: topK, stream: true,
-        });
+        }, abortRef.current.signal);
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -129,13 +141,15 @@ export function useStreamChat() {
 
       } catch (err) {
         stopTimer();
-        if (!abortRef.current?.signal.aborted) {
-          setStream((prev) => ({
-            ...prev,
-            loading: false,
-            content: prev.content || "请求失败，请重试。",
-          }));
-        }
+        sendingRef.current = false;
+        const wasAborted = abortRef.current?.signal.aborted;
+        setStream((prev) => ({
+          ...prev,
+          loading: false,
+          error: wasAborted ? null : (err instanceof TypeError ? "网络异常，请检查连接后重试" : "请求失败，请重试"),
+          stopped: !!wasAborted,
+          content: prev.content,
+        }));
       }
     },
     [stopTimer]
@@ -144,8 +158,9 @@ export function useStreamChat() {
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();
     stopTimer();
-    setStream((prev) => ({ ...prev, loading: false }));
+    sendingRef.current = false;
+    setStream((prev) => ({ ...prev, loading: false, stopped: true, error: null }));
   }, [stopTimer]);
 
-  return { stream, sendStream, cancelStream };
+  return { stream, sendStream, cancelStream, get isSending() { return sendingRef.current; } };
 }

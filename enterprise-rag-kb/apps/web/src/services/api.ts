@@ -67,11 +67,12 @@ export function uploadWithProgress(
 }
 
 /** SSE stream helper */
-export async function sseStream(path: string, body: unknown): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+export async function sseStream(path: string, body: unknown, signal?: AbortSignal): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));

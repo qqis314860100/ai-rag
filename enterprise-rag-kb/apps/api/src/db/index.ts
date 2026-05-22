@@ -243,6 +243,19 @@ function createTablesV2(database: Database.Database): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS doc_comments (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      chunk_id TEXT,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      parent_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','deleted')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       operator_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -335,6 +348,8 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_operator_id ON audit_logs(operator_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_doc_comments_doc ON doc_comments(document_id, chunk_id);
+    CREATE INDEX IF NOT EXISTS idx_doc_comments_parent ON doc_comments(parent_id);
   `);
 }
 

@@ -97,7 +97,8 @@ class Source(BaseModel):
     section_path: str = ""
     page_number: int = 0
     score: float
-    snippet: str
+    snippet: str = ""
+    content: str = ""
 
 
 class ChatRequest(BaseModel):

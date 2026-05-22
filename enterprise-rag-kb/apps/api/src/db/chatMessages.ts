@@ -64,7 +64,7 @@ export function createMessage(input: CreateMessageInput): ChatMessageRow {
       insertSource.run(
         uuidv4(), id,
         s.chunk_id || "", s.document_id || null, s.document_title || "", s.section_path || "",
-        s.score || 0, s.snippet || "", now
+        s.score || 0, s.content || s.snippet || "", now
       );
     }
   }
