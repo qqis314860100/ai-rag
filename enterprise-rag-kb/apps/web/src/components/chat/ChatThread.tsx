@@ -122,7 +122,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
         return (
           <div key={msg.id}
-            className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}
+            className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
             style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}
           >
             {/* Message text */}
