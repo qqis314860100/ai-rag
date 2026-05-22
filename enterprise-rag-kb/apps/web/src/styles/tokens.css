@@ -1,6 +1,6 @@
 /* ══════════════════════════════════════════════════════════════
    Design Tokens — Enterprise RAG Knowledge Base
-   Apple-inspired minimalist design language with Sitor warm palette
+   Sitor-inspired warm minimalist design system
    ══════════════════════════════════════════════════════════════ */
 
 :root {
@@ -8,44 +8,63 @@
   --color-white: #ffffff;
   --color-black: #1c1917;
 
-  /* Primary: warm stone */
+  /* Primary: warm stone — 主按钮、标题、强调 */
   --color-primary:        #44403c;
   --color-primary-hover:  #292524;
   --color-primary-light:  rgba(68, 64, 60, 0.08);
-  --color-primary-soft:   #eeedeb;
+  --color-primary-soft:   #eceae7;
 
-  /* Accent: warm gold */
+  /* Accent: warm gold — 链接、高亮、强调色 */
   --color-accent:         #d4a574;
-  --color-accent-hover:   #c4955f;
+  --color-accent-hover:   #c29463;
   --color-accent-light:   rgba(212, 165, 116, 0.12);
   --color-accent-soft:    #fdf6ee;
 
-  /* Semantic */
+  /* Semantic — 功能色 */
   --color-success:        #10b981;
   --color-success-soft:   #ecfdf5;
   --color-warning:        #f59e0b;
   --color-warning-soft:   #fffbeb;
   --color-danger:         #ef4444;
+  --color-danger-hover:   #dc2626;
   --color-danger-soft:    #fef2f2;
   --color-info:           #3b82f6;
   --color-info-soft:      #eff6ff;
 
-  /* Surfaces */
+  /* Fresh: 棕红强调 — 特殊标记 */
+  --color-fresh:          #b3462a;
+  --color-fresh-strong:   #8a3420;
+  --color-fresh-soft:     #fbece4;
+
+  /* Updated: 青绿标记 */
+  --color-updated:        #4a7c6f;
+  --color-updated-strong: #3a6359;
+  --color-updated-soft:   #e8f5f0;
+
+  /* Gradient */
+  --color-gradient-start: #44403c;
+  --color-gradient-end:   #78716c;
+
+  /* Surfaces — 页面层级 */
   --color-surface:        #ffffff;
   --color-surface-page:   #f5f5f0;
   --color-surface-hover:  rgba(0, 0, 0, 0.04);
   --color-surface-glass:  rgba(255, 255, 255, 0.72);
 
-  /* Text */
+  /* Text — 文字层级 */
   --color-text:           #1c1917;
   --color-text-secondary: #57534e;
   --color-text-muted:     #a8a29e;
   --color-text-inverse:   #ffffff;
+  --color-reasoning:      #a8a29e;
 
   /* Borders & Dividers */
   --color-border:         #e7e5e4;
   --color-border-hover:   #d6d3d1;
   --color-divider:        rgba(0, 0, 0, 0.06);
+
+  /* Code block */
+  --color-code-bg:        #1e1e2e;
 
   /* ── Spacing Scale (4px base) ── */
   --space-0:  0;
@@ -62,46 +81,47 @@
   /* ── Border Radius ── */
   --radius-sm:   8px;
   --radius-md:   12px;
-  --radius-lg:   18px;
-  --radius-xl:   24px;
-  --radius-full: 9999px;
+  --radius-lg:   16px;
+  --radius-xl:   18px;
+  --radius-full: 50%;
 
-  /* ── Shadows ── */
-  --shadow-sm:  0 1px 3px  rgba(0, 0, 0, 0.04), 0 1px 2px  rgba(0, 0, 0, 0.06);
-  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.04), 0 2px 4px  rgba(0, 0, 0, 0.04);
-  --shadow-lg:  0 16px 40px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
-  --shadow-xl:  0 24px 56px rgba(0, 0, 0, 0.08), 0 8px 20px rgba(0, 0, 0, 0.04);
+  /* ── Shadows — 柔和阴影系统 ── */
+  --shadow-sm:  0 1px 4px  rgba(0, 0, 0, 0.04);
+  --shadow-md:  0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-xl:  0 16px 40px rgba(0, 0, 0, 0.16);
 
   /* ── Glass Effect ── */
   --glass-blur:      20px;
   --glass-saturate:  180%;
   --glass-bg:        rgba(255, 255, 255, 0.72);
-  --glass-border:     rgba(0, 0, 0, 0.06);
+  --glass-border:    rgba(0, 0, 0, 0.06);
 
-  /* ── Typography ── */
-  --font-sans:  "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
-  --font-mono:  "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  /* ── Typography — Sitor 字体系统 ── */
+  --font-sans:   "Inter", "Noto Sans SC", system-ui, -apple-system, "SF Pro Display", "PingFang SC", sans-serif;
+  --font-serif:  "Instrument Serif", "Noto Serif SC", Georgia, "Times New Roman", "Songti SC", serif;
+  --font-mono:   "SF Mono", "JetBrains Mono", "Fira Code", "Menlo", "Monaco", monospace;
   --font-size-xs:   11px;
   --font-size-sm:   13px;
   --font-size-base: 15px;
-  --font-size-lg:   18px;
-  --font-size-xl:   24px;
-  --font-size-2xl:  32px;
-  --font-size-3xl:  48px;
+  --font-size-lg:   17px;
+  --font-size-xl:   19px;
+  --font-size-2xl:  24px;
+  --font-size-3xl:  32px;
   --font-weight-normal:   400;
-  --font-weight-medium:   510;
-  --font-weight-semibold: 590;
-  --font-weight-bold:     680;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
   --line-height-tight:  1.25;
-  --line-height-normal: 1.5;
-  --line-height-relaxed: 1.625;
+  --line-height-normal:  1.5;
+  --line-height-relaxed: 1.7;
 
   /* ── Motion ── */
   --duration-fast:    150ms;
   --duration-normal:  250ms;
   --duration-slow:    400ms;
-  --ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --ease-in:  cubic-bezier(0.42, 0, 1, 1);
+  --ease-out:    cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-in:     cubic-bezier(0.42, 0, 1, 1);
   --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
