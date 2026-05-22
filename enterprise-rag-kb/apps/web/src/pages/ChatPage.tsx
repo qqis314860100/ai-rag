@@ -179,10 +179,10 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* ── Main Chat Area ── */}
-      <div className="flex flex-1 flex-col min-w-0 min-h-0 bg-surface-page">
-        {/* Chat Header — 57px, Sitor style */}
-        <header className="shrink-0 flex items-center gap-3 h-[57px] px-4 border-b border-divider bg-surface-page">
+      {/* ── Main Chat Area — Sitor layout: scroll full-width, content centered ── */}
+      <div className="flex flex-1 flex-col min-w-0 min-h-0 bg-white">
+        {/* Chat Header */}
+        <header className="shrink-0 flex items-center gap-3 h-[57px] px-4 border-b border-divider bg-white">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
@@ -210,25 +210,30 @@ export default function ChatPage() {
           </button>
         </header>
 
-        {/* Centered chat content */}
-        <div className="flex-1 flex flex-col min-h-0 max-w-3xl mx-auto w-full">
-          <ChatThread
-            messages={messages}
-            loading={stream.loading}
-            streamingContent={stream.content}
-            streamError={stream.error}
-            streamStopped={stream.stopped}
-            selectedSources={selectedSources}
-            onSelectSources={setSelectedSources}
-            onFollowUp={handleFollowUp}
-            onCancelStream={cancelStream}
-            onInitialQuestion={handleInitialQuestion}
-            onRetry={handleRetry}
-            onEditUser={handleEditUser}
-            onPreviewSource={setPreviewSource}
-          />
+        {/* Scroll area: full-width white bg, scrollbar inside */}
+        <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
+          <div className="max-w-3xl mx-auto px-4">
+            <ChatThread
+              messages={messages}
+              loading={stream.loading}
+              streamingContent={stream.content}
+              streamError={stream.error}
+              streamStopped={stream.stopped}
+              selectedSources={selectedSources}
+              onSelectSources={setSelectedSources}
+              onFollowUp={handleFollowUp}
+              onCancelStream={cancelStream}
+              onInitialQuestion={handleInitialQuestion}
+              onRetry={handleRetry}
+              onEditUser={handleEditUser}
+              onPreviewSource={setPreviewSource}
+            />
+          </div>
+        </div>
 
-          <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">
+        {/* Input: centered, sticky bottom, white bg */}
+        <div className="shrink-0 bg-white">
+          <div className="max-w-3xl mx-auto px-4 py-3">
             <ChatInput onSend={handleSend} loading={stream.loading} />
           </div>
         </div>

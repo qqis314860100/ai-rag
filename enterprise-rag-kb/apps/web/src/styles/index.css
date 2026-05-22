@@ -19,3 +19,28 @@
 @keyframes cursorBlink {
   50% { opacity: 0; }
 }
+
+/* Sitor-style thin scrollbar */
+.chat-scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.chat-scroll-area:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+.chat-scroll-area::-webkit-scrollbar {
+  width: 5px;
+}
+.chat-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 10px;
+}
+.chat-scroll-area:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+.chat-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
