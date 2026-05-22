@@ -113,7 +113,7 @@ export function renderMarkdown(md: string): string {
       continue;
     }
 
-    result.push(`<p class="mb-1">${renderMarkdownLine(line)}</p>`);
+    result.push(`<p class="mb-2">${renderMarkdownLine(line)}</p>`);
     i++;
   }
 

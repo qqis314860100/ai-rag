@@ -101,11 +101,11 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   if (messages.length === 0 && !loading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center text-center px-8 py-12">
-        <div className="w-16 h-16 rounded-lg glass flex items-center justify-center mb-6 shadow-md-soft">
+        <div className="w-16 h-16 rounded-2xl bg-accent-soft flex items-center justify-center mb-6">
           <Sparkles className="h-7 w-7 text-accent" />
         </div>
-        <h2 className="text-xl font-semibold text-text tracking-tight">智能问答助手</h2>
-        <p className="mt-2 max-w-md text-sm text-text-secondary leading-relaxed">
+        <h2 className="text-[17px] font-serif font-normal text-text tracking-tight">智能问答助手</h2>
+        <p className="mt-2 max-w-md text-[15px] text-text-secondary leading-relaxed">
           基于电池产线知识库，为你提供准确、可追溯的技术问答。每次回答都会标注引用来源。
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-2.5">
@@ -118,7 +118,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             <button
               key={q}
               onClick={() => onInitialQuestion(q)}
-              className="px-4 py-2.5 rounded-xl border border-border bg-surface text-sm text-text-secondary hover:border-accent hover:text-accent hover:bg-accent-soft/50 transition-all duration-normal ease-out shadow-sm-soft"
+              className="px-4 py-2.5 rounded-xl border border-border bg-surface text-[13px] text-text-secondary hover:border-accent hover:text-accent hover:bg-accent-soft/50 transition-all duration-normal ease-out"
             >
               {q}
             </button>
@@ -129,19 +129,19 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-8">
       {messages.map((msg, i) => (
         <div key={msg.id} className={`flex gap-3 items-start ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}>
           {msg.role === "assistant" && (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent shadow-sm-soft">
-              <Sparkles className="h-4 w-4" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent mt-0.5">
+              <Sparkles className="h-3.5 w-3.5" />
             </div>
           )}
 
           <div className="max-w-[72%]">
             {msg.role === "assistant" ? (
-              <div className="rounded-lg glass shadow-sm-soft px-5 py-4">
+              <div className="rounded-xl bg-surface px-5 py-4">
                 <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed">
                   <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
                 </div>
@@ -209,7 +209,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                 )}
               </div>
             ) : (
-              <div className="group relative rounded-lg bg-primary px-5 py-3 text-sm leading-relaxed text-white shadow-md-soft">
+              <div className="group relative rounded-xl bg-primary px-5 py-3 text-[15px] leading-relaxed text-white">
                 {editingMsgId === msg.id ? (
                   <div className="flex flex-col gap-2 min-w-[280px]">
                     <textarea
@@ -256,8 +256,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
           </div>
 
           {msg.role === "user" && (
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">
-              <User className="h-4 w-4" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary mt-0.5">
+              <User className="h-3.5 w-3.5" />
             </div>
           )}
         </div>
@@ -266,10 +266,10 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       {/* Streaming message */}
       {loading && streamingContent && (
         <div className="flex gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent shadow-sm-soft animate-pulse" style={{ animationDuration: "2s" }}>
-            <Sparkles className="h-4 w-4" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent mt-0.5 animate-pulse" style={{ animationDuration: "2s" }}>
+            <Sparkles className="h-3.5 w-3.5" />
           </div>
-          <div className="max-w-[72%] rounded-lg glass shadow-sm-soft px-5 py-4 ring-1 ring-accent/20">
+          <div className="max-w-[72%] rounded-xl bg-surface px-5 py-4 ring-1 ring-accent/20">
             <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed">
               <MarkdownContent content={streamingContent} />
               <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
