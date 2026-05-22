@@ -134,7 +134,7 @@ interface MarkdownContentProps {
 export function MarkdownContent({ content, sources, onSourceClick }: MarkdownContentProps) {
   let html = renderMarkdown(content);
 
-  // Replace [来源 N] with clickable document-title links
+  // Replace [来源 N] with academic-style citation links: [N. 文档名称]
   if (sources && sources.length > 0) {
     html = html.replace(
       /\[来源\s*(\d+)\]/g,
@@ -142,7 +142,7 @@ export function MarkdownContent({ content, sources, onSourceClick }: MarkdownCon
         const idx = parseInt(numStr, 10) - 1;
         const src = sources[idx];
         const title = src?.document_title || `来源 ${numStr}`;
-        return `<a href="#" class="source-ref-link inline-flex items-center gap-1 text-accent font-medium underline hover:text-accent/80" data-source-idx="${idx}" title="${title}">${title}</a>`;
+        return `<a href="#" class="source-ref-link inline text-xs text-text-muted hover:text-accent transition-colors" data-source-idx="${idx}" title="${title}">[${numStr}. ${title}]</a>`;
       }
     );
   }

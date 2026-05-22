@@ -185,8 +185,8 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Main chat area — centered */}
-      <div className="flex flex-1 flex-col min-w-0 min-h-0 max-w-3xl mx-auto w-full">
+      {/* Main chat area */}
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
         <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-divider bg-surface-page">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -206,24 +206,27 @@ export default function ChatPage() {
           )}
         </div>
 
-        <ChatThread
-          messages={messages}
-          loading={stream.loading}
-          streamingContent={stream.content}
-          streamError={stream.error}
-          streamStopped={stream.stopped}
-          selectedSources={selectedSources}
-          onSelectSources={setSelectedSources}
-          onFollowUp={handleFollowUp}
-          onCancelStream={cancelStream}
-          onInitialQuestion={handleInitialQuestion}
-          onRetry={handleRetry}
-          onEditUser={handleEditUser}
-          onPreviewSource={setPreviewSource}
-        />
+        {/* Centered chat content */}
+        <div className="flex-1 flex flex-col min-h-0 max-w-3xl mx-auto w-full">
+          <ChatThread
+            messages={messages}
+            loading={stream.loading}
+            streamingContent={stream.content}
+            streamError={stream.error}
+            streamStopped={stream.stopped}
+            selectedSources={selectedSources}
+            onSelectSources={setSelectedSources}
+            onFollowUp={handleFollowUp}
+            onCancelStream={cancelStream}
+            onInitialQuestion={handleInitialQuestion}
+            onRetry={handleRetry}
+            onEditUser={handleEditUser}
+            onPreviewSource={setPreviewSource}
+          />
 
-        <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">
-          <ChatInput onSend={handleSend} loading={stream.loading} />
+          <div className="shrink-0 border-t border-divider bg-surface-page px-4 py-3">
+            <ChatInput onSend={handleSend} loading={stream.loading} />
+          </div>
         </div>
       </div>
 

@@ -30,12 +30,23 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
   const [voting, setVoting] = useState<Record<string, boolean>>({});
 
-  const prevLoading = useRef(loading);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const prevContentLen = useRef(0);
   useEffect(() => {
-    // When stream just completed, use instant scroll to avoid flicker
-    const justFinished = prevLoading.current && !loading;
-    prevLoading.current = loading;
-    bottomRef.current?.scrollIntoView({ behavior: justFinished ? "instant" : "smooth" });
+    // Only auto-scroll during active streaming (content growing)
+    // Don't scroll on completion — prevents flicker
+    if (loading && streamingContent.length > prevContentLen.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+    prevContentLen.current = streamingContent.length;
+    // Also scroll on new messages (user sent or switched session)
+    if (!loading && messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      const justAdded = lastMsg && Date.now() - new Date(lastMsg.created_at).getTime() < 500;
+      if (justAdded) {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      }
+    }
   }, [messages, streamingContent, loading]);
 
   // Fetch feedback counts for all messages
