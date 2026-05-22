@@ -115,7 +115,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   }
 
   return (
-    <div className="py-6 space-y-8">
+    <div className="py-6 space-y-10">
       {messages.map((msg, i) => {
         const isUser = msg.role === "user";
         const fb = feedbackCounts[msg.id] || { up: 0, down: 0 };
@@ -125,8 +125,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
             style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}
           >
-            {/* Message text */}
-            <div className={`max-w-[85%] ${isUser ? "text-right" : "text-left"}`}>
+            {/* Message body */}
+            <div className={`max-w-[80%]`}>
               {isUser ? (
                 editingMsgId === msg.id ? (
                   /* Edit mode */
@@ -147,47 +147,47 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 ) : (
-                  /* User bubble — light warm bg */
-                  <div className="group inline-block rounded-2xl bg-[#F3F1EE] px-5 py-3">
-                    <p className="text-[15px] leading-relaxed text-text whitespace-pre-wrap">{msg.content}</p>
-                  </div>
+                  /* User bubble — warm light bg */
+                  <span className="inline-block rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap">
+                    {msg.content}
+                  </span>
                 )
               ) : (
-                /* AI message — plain text, no bubble */
+                /* AI message — plain text */
                 <div className="text-[15px] leading-relaxed text-text">
                   <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
                 </div>
               )}
-
-              {/* AI message: sources + follow-ups */}
-              {!isUser && (
-                <>
-                  {msg.sources && msg.sources.length > 0 && (
-                    <button onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
-                      className="inline-flex items-center gap-1 mt-2 text-xs text-accent hover:text-accent-hover transition-colors">
-                      <FileSearch className="h-3 w-3" />
-                      查看 {msg.sources.length} 条引用
-                      {msg.confidence !== undefined && msg.confidence > 0 && (
-                        <span className="text-text-muted ml-1">· 置信度 {(msg.confidence * 100).toFixed(0)}%</span>
-                      )}
-                    </button>
-                  )}
-                  {msg.followups && msg.followups.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {msg.followups.map((q, j) => (
-                        <button key={j} onClick={() => onFollowUp(q)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs text-text-secondary hover:border-accent hover:text-accent transition-colors">
-                          {q}<ChevronRight className="h-3 w-3" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
 
-            {/* Time + actions row */}
-            <div className={`flex items-center gap-2 mt-1.5 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+            {/* AI: sources + follow-ups */}
+            {!isUser && (
+              <>
+                {msg.sources && msg.sources.length > 0 && (
+                  <button onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
+                    className="inline-flex items-center gap-1 mt-2 text-xs text-accent hover:text-accent-hover transition-colors">
+                    <FileSearch className="h-3 w-3" />
+                    查看 {msg.sources.length} 条引用
+                    {msg.confidence !== undefined && msg.confidence > 0 && (
+                      <span className="text-text-muted ml-1">· 置信度 {(msg.confidence * 100).toFixed(0)}%</span>
+                    )}
+                  </button>
+                )}
+                {msg.followups && msg.followups.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {msg.followups.map((q, j) => (
+                      <button key={j} onClick={() => onFollowUp(q)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs text-text-secondary hover:border-accent hover:text-accent transition-colors">
+                        {q}<ChevronRight className="h-3 w-3" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Time + actions — time always on left, actions on hover */}
+            <div className="flex items-center gap-2 mt-2">
               <span className="text-[11px] text-text-muted select-none">{formatTime(msg.created_at)}</span>
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => handleCopy(msg.id, msg.content)}
