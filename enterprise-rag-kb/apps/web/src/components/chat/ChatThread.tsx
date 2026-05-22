@@ -147,10 +147,26 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 ) : (
-                  /* User bubble — warm light bg */
-                  <span className="inline-block rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap">
-                    {msg.content}
-                  </span>
+                  /* User bubble — click to edit, hover shows copy+delete */
+                  <div className="relative group/bubble inline-block">
+                    <div
+                      onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
+                      className="inline-block rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap cursor-pointer hover:bg-[#EDEAE6] transition-colors"
+                    >
+                      {msg.content}
+                    </div>
+                    {/* Floating copy + delete on hover */}
+                    <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.id, msg.content); }}
+                        className="p-1 rounded-lg bg-white border border-border shadow-sm text-text-muted hover:text-text transition-colors" title="复制">
+                        <Copy className="h-3 w-3" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); onDeleteMessage(msg.id); }}
+                        className="p-1 rounded-lg bg-white border border-border shadow-sm text-text-muted hover:text-danger transition-colors" title="删除">
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
                 )
               ) : (
                 /* AI message — plain text */
@@ -186,34 +202,27 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               </>
             )}
 
-            {/* Time + actions — time always on left, actions on hover */}
+            {/* Time + actions — time always on left */}
             <div className="flex items-center gap-2 mt-2">
               <span className="text-[11px] text-text-muted select-none">{formatTime(msg.created_at)}</span>
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => handleCopy(msg.id, msg.content)}
-                  className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
-                  <Copy className="h-3 w-3" />
-                </button>
-                {isUser && (
-                  <button onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
-                    className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="编辑">
-                    <Pencil className="h-3 w-3" />
+              {/* AI: feedback actions on hover. User: actions float on bubble itself */}
+              {!isUser && (
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => handleCopy(msg.id, msg.content)}
+                    className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
+                    <Copy className="h-3 w-3" />
                   </button>
-                )}
-                <button onClick={() => onDeleteMessage(msg.id)}
-                  className="p-0.5 rounded text-text-muted hover:text-danger transition-colors" title="删除">
-                  <Trash2 className="h-3 w-3" />
-                </button>
-                {!isUser && (
-                  <>
-                    <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
-                      className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
-                      <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
-                    </button>
-                    {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
-                  </>
-                )}
-              </div>
+                  <button onClick={() => onDeleteMessage(msg.id)}
+                    className="p-0.5 rounded text-text-muted hover:text-danger transition-colors" title="删除">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
+                    className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
+                    <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
+                  </button>
+                  {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
+                </div>
+              )}
             </div>
           </div>
         );
