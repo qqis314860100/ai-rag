@@ -70,6 +70,11 @@ pnpm dev:rag      # RAG 服务 (Python)
 - 先验证功能真的可用，再提交
 - 一个 commit 只改一个服务，不能混 `web` / `api` / `rag`
 
+### 聊天体验文档
+
+- [需求文档](docs/CHAT_EXPERIENCE_SPEC.md)
+- [开发计划](docs/CHAT_EXPERIENCE_PLAN.md)
+
 ## 三个服务
 
 | 服务 | 端口 | 命令 |
