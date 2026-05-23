@@ -79,27 +79,35 @@ export default function AnalyticsPage() {
   const { documents, sessions, messages, feedback, categories, popularQueries, recentSessions } = data;
   const maxCat = Math.max(1, ...categories.map(e => e.count || 0));
   const indexRate = documents.total > 0 ? Math.round((documents.indexed / documents.total) * 100) : 0;
+  const feedbackTotal = feedback.up + feedback.down;
+  const feedbackRate = feedbackTotal > 0 ? Math.round((feedback.up / feedbackTotal) * 100) : 0;
 
   return (
     <div className="p-6 space-y-6 h-full overflow-y-auto">
       <div>
-        <h1 className="text-2xl font-semibold text-text">数据统计</h1>
-        <p className="mt-1 text-sm text-text-secondary">知识库运行数据概览与趋势分析</p>
+        <h1 className="text-2xl font-semibold text-text">统计看板</h1>
+        <p className="mt-1 text-sm text-text-secondary">聊天、知识库、SOP 与反馈数据的统一概览</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 stagger">
         <div className="animate-fade-in-up" style={{ animationDelay: "0ms" }}>
           <StatCard icon={FileText} label="文档总数" value={documents.total} sub={`${documents.indexed} 已索引 · ${documents.processing} 处理中`} color="var(--color-accent)" />
         </div>
         <div className="animate-fade-in-up" style={{ animationDelay: "40ms" }}>
-          <StatCard icon={MessageSquare} label="消息总数" value={messages.total} sub={`${sessions.total} 会话 · ${sessions.today} 今日`} color="#6366f1" />
+          <StatCard icon={TrendingUp} label="今日会话" value={sessions.today} sub={`共 ${sessions.total} 会话`} color="#6366f1" />
         </div>
         <div className="animate-fade-in-up" style={{ animationDelay: "80ms" }}>
-          <StatCard icon={Activity} label="索引率" value={`${indexRate}%`} sub={indexRate >= 95 ? "健康" : indexRate >= 80 ? "需关注" : "异常"} color={indexRate >= 95 ? "#22c55e" : indexRate >= 80 ? "#f59e0b" : "#ef4444"} />
+          <StatCard icon={MessageSquare} label="消息总数" value={messages.total} sub="条" color="#0ea5e9" />
         </div>
         <div className="animate-fade-in-up" style={{ animationDelay: "120ms" }}>
-          <StatCard icon={Users} label="今日活跃" value={sessions.today} sub={`反馈: ${feedback.up}赞 ${feedback.down}踩`} color="#8b5cf6" />
+          <StatCard icon={ThumbsUp} label="用户反馈" value={feedback.up} sub={`${feedback.down} 踩 · 好评率 ${feedbackRate}%`} color="#22c55e" />
+        </div>
+        <div className="animate-fade-in-up" style={{ animationDelay: "160ms" }}>
+          <StatCard icon={Activity} label="索引率" value={`${indexRate}%`} sub={indexRate >= 95 ? "健康" : indexRate >= 80 ? "需关注" : "异常"} color={indexRate >= 95 ? "#22c55e" : indexRate >= 80 ? "#f59e0b" : "#ef4444"} />
+        </div>
+        <div className="animate-fade-in-up" style={{ animationDelay: "200ms" }}>
+          <StatCard icon={Users} label="今日活跃" value={sessions.today} sub="活跃会话" color="#8b5cf6" />
         </div>
       </div>
 

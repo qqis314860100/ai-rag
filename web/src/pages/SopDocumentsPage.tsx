@@ -46,7 +46,7 @@ export default function SopDocumentsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("确认删除该SOP文档？此操作不可撤销。")) return;
+    if (!window.confirm("确认删除该工艺SOP？此操作不可撤销。")) return;
     try {
       await api.delete(`/documents/${id}`);
       fetchDocuments();
@@ -56,7 +56,7 @@ export default function SopDocumentsPage() {
   return (
     <div className="p-6 space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold text-text">SOP文档</h1>
+        <h1 className="text-2xl font-semibold text-text">工艺SOP</h1>
         <p className="mt-1 text-sm text-text-secondary">
           标准作业程序文档，按工序、工站组织管理
         </p>
@@ -67,7 +67,7 @@ export default function SopDocumentsPage() {
           <div className="relative w-72">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <Input
-              placeholder="搜索SOP文档..."
+              placeholder="搜索工艺SOP..."
               value={keyword}
               onChange={(e) => { setKeyword(e.target.value); setPage(1); }}
               className="pl-9"
@@ -86,7 +86,7 @@ export default function SopDocumentsPage() {
         <div className="flex items-center justify-center py-20"><Spinner /></div>
       ) : documents.length === 0 ? (
         <EmptyState
-          title="暂无SOP文档"
+          title="暂无工艺SOP"
           description="上传标准作业程序文档后，即可按工序和工站进行管理。"
           action={<Button onClick={() => setUploadOpen(true)}><Upload className="h-4 w-4" />上传SOP</Button>}
         />

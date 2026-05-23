@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Home, MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose } from "lucide-react";
+import { MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose } from "lucide-react";
 
 const primaryNav = [
-  { to: "/", icon: Home, label: "首页" },
-  { to: "/chat", icon: MessageSquare, label: "AI问答" },
-  { to: "/documents", icon: BookOpen, label: "知识库" },
-  { to: "/sop", icon: FileText, label: "SOP文档" },
+  { to: "/chat", icon: MessageSquare, label: "聊天" },
+  { to: "/analytics", icon: BarChart3, label: "统计看板" },
+  { to: "/documents", icon: BookOpen, label: "知识库管理" },
+  { to: "/sop", icon: FileText, label: "工艺SOP" },
 ];
 
 const secondaryNav = [
   { to: "/favorites", icon: Star, label: "收藏" },
-  { to: "/analytics", icon: BarChart3, label: "数据统计" },
   { to: "/settings", icon: Settings, label: "系统设置" },
 ];
 
@@ -41,7 +40,7 @@ export default function SideNav() {
           <NavLink
             key={to + label}
             to={to}
-            end={label === "首页"}
+            end
             className={({ isActive }) =>
               `flex items-center rounded-lg transition-all duration-fast ${
                 expanded ? "gap-3 px-3" : "justify-center"

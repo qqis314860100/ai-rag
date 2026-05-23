@@ -327,7 +327,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
 
       {/* Footer */}
       <div className="px-4 py-2.5 border-t border-divider shrink-0 flex items-center justify-between">
-        <a href="/documents" className="flex items-center gap-1.5 text-xs text-accent hover:underline"><ExternalLink className="h-3 w-3" />文档管理</a>
+        <a href="/documents" className="flex items-center gap-1.5 text-xs text-accent hover:underline"><ExternalLink className="h-3 w-3" />知识库管理</a>
         <span className="text-[10px] text-text-muted">chunk: {source.chunk_id?.substring(0, 12)}</span>
       </div>
     </div>

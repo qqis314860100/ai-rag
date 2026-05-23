@@ -1,5 +1,4 @@
 export { default as ChatPage } from "./ChatPage";
-export { default as DashboardPage } from "./DashboardPage";
 export { default as DocumentsPage } from "./DocumentsPage";
 export { default as SopDocumentsPage } from "./SopDocumentsPage";
 export { default as FavoritesPage } from "./FavoritesPage";
