@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { X, FileText, ArrowRight, ShieldCheck, Copy } from "lucide-react";
 import type { Source } from "../../types";
 
@@ -6,6 +7,8 @@ interface SourcePanelProps {
   onClose: () => void;
   onFollowUp?: (query: string) => void;
   onPreview?: (source: Source) => void;
+  highlightIdx?: number | null;
+  onHighlightDone?: () => void;
 }
 
 function scoreMeta(score: number) {
@@ -15,7 +18,24 @@ function scoreMeta(score: number) {
   return { color: "text-warning", bg: "bg-warning/10", border: "border-warning/30", label: "低相关度", icon: FileText };
 }
 
-export default function SourcePanel({ sources, onClose, onFollowUp, onPreview }: SourcePanelProps) {
+export default function SourcePanel({ sources, onClose, onFollowUp, onPreview, highlightIdx, onHighlightDone }: SourcePanelProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to highlighted source and flash it
+  useEffect(() => {
+    if (highlightIdx == null || !listRef.current) return;
+    const el = listRef.current.children[highlightIdx] as HTMLElement | undefined;
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("source-flash");
+      const t = setTimeout(() => {
+        el.classList.remove("source-flash");
+        onHighlightDone?.();
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [highlightIdx, onHighlightDone]);
+
   const handleSourceClick = (source: Source) => {
     if (onPreview) { onPreview(source); return; }
     if (onFollowUp) {
@@ -36,7 +56,7 @@ export default function SourcePanel({ sources, onClose, onFollowUp, onPreview }:
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div ref={listRef} className="flex-1 overflow-y-auto p-3 space-y-3">
         {sources.map((source, idx) => {
           const meta = scoreMeta(source.score);
           const Icon = meta.icon;
