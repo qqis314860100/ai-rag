@@ -319,11 +319,26 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 )
+              ) : msg.streaming && !msg.content ? (
+                /* Streaming — no content yet, show staged progress */
+                <StreamStages />
               ) : (
                 /* AI message — with subtle card background */
-                <div className="rounded-2xl bg-surface-page border border-border/60 px-5 py-4 shadow-sm-soft">
+                <div className={`rounded-2xl border px-5 py-4 shadow-sm-soft transition-colors duration-normal ${
+                  msg.streaming
+                    ? "bg-accent-soft/20 border-accent/20"
+                    : "bg-surface-page border-border/60"
+                }`}>
+                  {/* Streaming label */}
+                  {msg.streaming && (
+                    <div className="flex items-center gap-2 mb-3 text-xs text-accent font-medium">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      正在生成答案...
+                      <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                    </div>
+                  )}
                   {/* Low confidence warning */}
-                  {msg.confidence !== undefined && msg.confidence > 0 && msg.confidence < 0.6 && (
+                  {!msg.streaming && msg.confidence !== undefined && msg.confidence > 0 && msg.confidence < 0.6 && (
                     <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-warning-soft border border-warning/20 text-[13px] text-warning">
                       <AlertCircle className="h-4 w-4 shrink-0" />
                       <span>本回答置信度较低（{(msg.confidence * 100).toFixed(0)}%），请人工核对原文</span>
@@ -331,13 +346,16 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                   )}
                   <div className="text-[15px] leading-relaxed text-text">
                     <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
+                    {msg.streaming && (
+                      <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
+                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* AI: sources + follow-ups */}
-            {!isUser && (
+            {/* AI: sources + follow-ups (hidden while streaming) */}
+            {!isUser && !msg.streaming && (
               <>
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="mt-3 flex items-center gap-2">
@@ -375,10 +393,10 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               </>
             )}
 
-            {/* Time + actions — time always on left */}
+            {/* Time + actions — hidden while streaming */}
+            {!msg.streaming && (
             <div className="flex items-center gap-2 mt-2">
               <span className="text-[11px] text-text-muted select-none">{formatTime(msg.created_at)}</span>
-              {/* AI: feedback actions on hover. User: actions float on bubble itself */}
               {!isUser && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={() => handleCopy(msg.content)}
@@ -397,6 +415,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                 </div>
               )}
             </div>
+            )}
           </div>
         );
       })}

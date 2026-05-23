@@ -92,27 +92,52 @@ export default function ChatPage() {
       .catch(() => setMessages([]));
   }, [activeSessionId]);
 
-  // When stream completes, add AI message from stream data (no flicker)
+  const placeholderIdRef = useRef<string | null>(null);
+
+  // Update streaming placeholder content
   useEffect(() => {
-    if (!stream.loading && stream.messageId && stream.content && activeSessionId) {
-      const aiMsg: ChatMessage = {
-        id: stream.messageId,
-        session_id: activeSessionId,
-        role: "assistant",
-        content: stream.content,
-        sources: stream.sources,
-        confidence: stream.confidence || undefined,
-        followups: stream.followups || undefined,
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => {
-        // Avoid duplicate
-        if (prev.some((m) => m.id === stream.messageId)) return prev;
-        return [...prev, aiMsg];
-      });
+    if (stream.loading && placeholderIdRef.current && stream.content) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === placeholderIdRef.current
+            ? { ...m, content: stream.content }
+            : m
+        )
+      );
+    }
+  }, [stream.content]);
+
+  // When stream completes, finalize the placeholder with sources/confidence/followups
+  useEffect(() => {
+    if (!stream.loading && placeholderIdRef.current && stream.messageId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === placeholderIdRef.current
+            ? {
+                ...m,
+                id: stream.messageId,
+                content: stream.content || m.content,
+                sources: stream.sources,
+                confidence: stream.confidence || undefined,
+                followups: stream.followups || undefined,
+                streaming: false,
+                created_at: new Date().toISOString(),
+              }
+            : m
+        )
+      );
+      placeholderIdRef.current = null;
       loadSessions();
     }
   }, [stream.loading, stream.messageId]);
+
+  // Clean up orphaned placeholder on error/abort (no messageId)
+  useEffect(() => {
+    if (!stream.loading && !stream.messageId && placeholderIdRef.current) {
+      setMessages((prev) => prev.filter((m) => m.id !== placeholderIdRef.current));
+      placeholderIdRef.current = null;
+    }
+  }, [stream.loading]);
 
   const handleNewSession = useCallback(() => {
     setActiveSessionId(null);
@@ -164,7 +189,13 @@ export default function ChatPage() {
       id: `user-${Date.now()}`, session_id: sid, role: "user",
       content: message, created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMsg]);
+    const placeholderId = `stream-${Date.now()}`;
+    placeholderIdRef.current = placeholderId;
+    const placeholderMsg: ChatMessage = {
+      id: placeholderId, session_id: sid, role: "assistant",
+      content: "", streaming: true, created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg, placeholderMsg]);
     setSelectedSources(null);
     await sendStream(sid, message, 5);
   }, [activeSessionId, sendStream, loadSessions, isSending]);

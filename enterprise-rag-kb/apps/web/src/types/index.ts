@@ -38,6 +38,7 @@ export interface ChatMessage {
   confidence?: number;
   followups?: string[];
   created_at: string;
+  streaming?: boolean;
 }
 
 export interface ChatSession {
