@@ -13,5 +13,6 @@ Hard constraints:
 - `scope` must be one of `web`, `api`, or `rag`.
 - Do not include AI-related footer text in commit messages.
 - Treat single-service commits as the unit for future rollback.
+- New documentation files must use Chinese filenames and Chinese titles; keep existing historical English filenames unchanged unless explicitly requested.
 
 If a change cannot be kept to one service, stop and split it before committing.
