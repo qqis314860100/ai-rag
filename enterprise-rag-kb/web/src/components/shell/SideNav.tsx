@@ -28,11 +28,11 @@ export default function SideNav() {
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white shadow-sm">
           <BatteryFull className="h-4 w-4" />
         </div>
-        {expanded && (
-          <span className="ml-2.5 text-sm font-bold text-text tracking-tight whitespace-nowrap">
-            电池产线知识库
-          </span>
-        )}
+        <span className={`ml-2.5 text-sm font-bold text-text tracking-tight whitespace-nowrap transition-opacity duration-normal ${
+          expanded ? "opacity-100 delay-100" : "opacity-0 w-0 overflow-hidden absolute"
+        }`}>
+          电池产线知识库
+        </span>
       </div>
 
       {/* Primary nav */}
@@ -54,7 +54,7 @@ export default function SideNav() {
             title={label}
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {expanded && <span className="whitespace-nowrap truncate">{label}</span>}
+            <span className={`whitespace-nowrap truncate transition-opacity duration-normal ${expanded ? "opacity-100 delay-100" : "opacity-0 w-0 absolute"}`}>{label}</span>
           </NavLink>
         ))}
 
@@ -78,7 +78,7 @@ export default function SideNav() {
             title={label}
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {expanded && <span className="whitespace-nowrap truncate">{label}</span>}
+            <span className={`whitespace-nowrap truncate transition-opacity duration-normal ${expanded ? "opacity-100 delay-100" : "opacity-0 w-0 absolute"}`}>{label}</span>
           </NavLink>
         ))}
       </div>
@@ -93,7 +93,7 @@ export default function SideNav() {
           title={expanded ? "收起侧栏" : "展开侧栏"}
         >
           <PanelLeftClose className={`h-3.5 w-3.5 shrink-0 transition-transform ${!expanded ? "rotate-180" : ""}`} />
-          {expanded && <span>收起</span>}
+          <span className={`transition-opacity duration-normal ${expanded ? "opacity-100 delay-100" : "opacity-0 w-0 absolute"}`}>收起</span>
         </button>
       </div>
     </nav>

@@ -21,7 +21,24 @@ export default function ChatPage() {
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const draftsRef = useRef<Map<string, string>>(new Map());
+  const draftsRef = useRef<Map<string, string>>(loadDrafts());
+
+  // Load drafts from localStorage on mount
+  function loadDrafts(): Map<string, string> {
+    try {
+      const raw = localStorage.getItem("chat-drafts");
+      return raw ? new Map(JSON.parse(raw)) : new Map();
+    } catch {
+      return new Map();
+    }
+  }
+
+  // Persist drafts to localStorage whenever they change
+  function saveDrafts() {
+    try {
+      localStorage.setItem("chat-drafts", JSON.stringify([...draftsRef.current]));
+    } catch { /* quota exceeded, ignore */ }
+  }
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
@@ -326,7 +343,7 @@ export default function ChatPage() {
         {/* Input: centered, sticky bottom, white bg */}
         <div className="shrink-0 bg-white">
           <div className="max-w-3xl mx-auto px-4 py-3">
-            <ChatInput onSend={handleSend} loading={stream.loading} inputRef={inputRef} draftValue={activeSessionId ? (draftsRef.current.get(activeSessionId) || "") : ""} onDraftChange={(val) => { if (activeSessionId) draftsRef.current.set(activeSessionId, val); }} />
+            <ChatInput onSend={handleSend} loading={stream.loading} inputRef={inputRef} draftValue={activeSessionId ? (draftsRef.current.get(activeSessionId) || "") : ""} onDraftChange={(val) => { if (activeSessionId) { draftsRef.current.set(activeSessionId, val); saveDrafts(); } }} />
           </div>
         </div>
       </div>

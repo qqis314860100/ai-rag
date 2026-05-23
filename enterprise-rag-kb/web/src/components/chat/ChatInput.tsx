@@ -32,12 +32,42 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
     return () => clearInterval(timer);
   }, []);
 
+  // Auto-resize textarea height
+  const resizeTextarea = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  }, []);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setMessage(e.target.value);
+    onDraftChange?.(e.target.value);
+    resizeTextarea();
+  }, [onDraftChange, resizeTextarea]);
+
+  // Intercept paste — detect images for future multimodal support
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          // Future: upload pasted image for multimodal question
+          // e.preventDefault(); handleImagePaste(item.getAsFile());
+        }
+      }
+    }
+  }, []);
+
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
     if (!trimmed || loading || disabled) return;
     onSend(trimmed);
     setMessage("");
     onDraftChange?.("");
+    // Reset height
+    const ta = textareaRef.current;
+    if (ta) ta.style.height = "auto";
     textareaRef.current?.focus();
   }, [message, loading, disabled, onSend, onDraftChange]);
 
@@ -82,10 +112,8 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
           <textarea
             ref={textareaRef}
             value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-              onDraftChange?.(e.target.value);
-            }}
+            onChange={handleChange}
+            onPaste={handlePaste}
             onKeyDown={handleKeyDown}
             placeholder={placeholders[placeholderIdx]}
             rows={1}

@@ -331,10 +331,15 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                 }`}>
                   {/* Streaming label */}
                   {msg.streaming && (
-                    <div className="flex items-center gap-2 mb-3 text-xs text-accent font-medium">
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      正在生成答案...
-                      <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 text-xs text-accent font-medium">
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        正在生成答案...
+                        <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                      </div>
+                      <button onClick={onCancelStream} className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止生成">
+                        <StopCircle size={14} />
+                      </button>
                     </div>
                   )}
                   {/* Low confidence warning */}
@@ -420,25 +425,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         );
       })}
 
-      {/* Streaming message */}
-      {loading && streamingContent && (
-        <div className="flex flex-col items-start">
-          <div className="flex items-center gap-2 mb-2 text-xs text-accent font-medium">
-            <MessageSquare className="h-3.5 w-3.5" />
-            正在生成答案...
-            <span className="inline-block w-[3px] h-3.5 bg-accent animate-pulse rounded-sm" />
-          </div>
-          <div className="max-w-[85%]">
-            <div className="text-[15px] leading-relaxed text-text">
-              <MarkdownContent content={streamingContent} />
-              <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Loading indicator — multi-stage */}
-      {loading && !streamingContent && (
+      {/* Cancel stream button — shown when loading but streaming msg not yet received content */}
+      {loading && !messages.some((m) => m.streaming) && (
         <div className="flex flex-col items-start">
           <StreamStages />
           <button onClick={onCancelStream} className="mt-2 p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止">
