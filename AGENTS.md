@@ -6,9 +6,15 @@ Enterprise battery-line RAG with three services:
 - `api` for auth, documents, chat orchestration, and persistence
 - `rag` for ingest, retrieval, embeddings, and prompt/LLM logic
 
+## Agent Architecture
+- Layer 1: `AGENTS.md` - memory layer, repo rules, naming, structure, engineering red lines
+- Layer 2: `skills/` - knowledge layer, reusable best practices and scenario-specific workflows
+- Layer 3: `hooks/` - guardrail layer, pre/post checks, risky-command interception, audit trails
+- Layer 4: `subagents/` - delegation layer, isolated contexts, parallel execution, result handoff
+- Layer 5: `plugins/` - distribution layer, versioned team sync, installable capability bundles
+
 ## Start Here
 Read these before editing anything:
-- [AGENTS.md](AGENTS.md)
 - [README.md](README.md)
 - [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
