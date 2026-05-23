@@ -14,13 +14,11 @@
 ## 项目结构
 
 ```
-enterprise-rag-kb/
 ├── web/           ← React 前端 (localhost:5174)
 ├── api/           ← Express API (localhost:3001)
 ├── rag/           ← Python RAG 服务 (localhost:8001)
 ├── knowledge/     ← 知识库源文档 (14 篇)
-├── docs/          ← 项目文档
-├── .env           ← 环境配置 (唯一配置源)
+├── docs/          ← 项目文档 (含 CONTRIBUTING.md)
 ├── package.json   ← pnpm workspace 编排
 └── README.md
 ```
