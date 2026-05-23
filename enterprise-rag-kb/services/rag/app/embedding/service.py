@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 _embedding_model = None
 _use_fallback = False
-EMBEDDING_DIM = 512
+EMBEDDING_DIM = 384
 
 
 def _get_model():

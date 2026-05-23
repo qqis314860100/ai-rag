@@ -156,10 +156,13 @@ class RagPipeline:
     ) -> dict:
         total_start = time.time()
 
-        # 1. Search for relevant context
+        # 0. Query rewrite for chapter/number patterns
+        rewritten_query = _rewrite_query(query)
+
+        # 1. Search for relevant context (use rewritten query)
         search_start = time.time()
         search_result = self.search(
-            query=query,
+            query=rewritten_query,
             top_k=top_k,
             allowed_security_levels=allowed_security_levels,
             filters=filters,
@@ -167,6 +170,9 @@ class RagPipeline:
         retrieval_ms = int((time.time() - search_start) * 1000)
 
         hits = search_result["results"]
+
+        # 1.5 Keyword-aware rerank: boost chunks matching query keywords
+        hits = _keyword_rerank(query, hits)
 
         # 2. Build prompt
         messages = build_messages(query, hits, history, self.config.rag_max_context_chars)
@@ -203,6 +209,43 @@ def _estimate_confidence(hits: list[dict]) -> float:
         return 0.3
     avg = sum(top_scores) / len(top_scores)
     return round(min(avg, 1.0), 2)
+
+
+def _rewrite_query(query: str) -> str:
+    """Expand chapter numbers and key terms for better retrieval."""
+    import re
+    parts = [query]
+    # "第5章" → add "5" "5. 安全" variants
+    m = re.search(r"第\s*(\d+)\s*章", query)
+    if m:
+        num = m.group(1)
+        parts.append(f"{num}")
+        parts.append(f"章节 {num}")
+    # "第五章" → same
+    m = re.search(r"第\s*([一二三四五六七八九十]+)\s*章", query)
+    if m:
+        cn_map = {"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8","九":"9","十":"10"}
+        num = cn_map.get(m.group(1), "")
+        if num:
+            parts.append(f"第{num}章")
+    return " ".join(parts)
+
+
+def _keyword_rerank(query: str, hits: list[dict]) -> list[dict]:
+    """Boost chunks that contain exact query keywords (simple BM25-like fusion)."""
+    import re
+    keywords = [w for w in re.split(r"\s+", query) if len(w) >= 1]
+    if not keywords or len(hits) <= 1:
+        return hits
+    for h in hits:
+        content = h.get("content", "")
+        title = h.get("section_path", "") + " " + h.get("document_title", "")
+        keyword_score = sum(1 for kw in keywords if kw.lower() in (content + title).lower())
+        # Fuse: 70% vector + 30% keyword boost
+        vector_score = h.get("score", 0)
+        keyword_boost = min(keyword_score / max(len(keywords), 1), 1.0) * 0.3
+        h["score"] = round(vector_score * 0.7 + keyword_boost, 4)
+    return sorted(hits, key=lambda h: h.get("score", 0), reverse=True)
 
 
 def _suggest_followups(query: str, hits: list[dict]) -> list[str]:

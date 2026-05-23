@@ -127,11 +127,26 @@ def chunk_document(
     return chunks
 
 
+def _extract_chapter_info(section_path: str) -> dict:
+    """Extract chapter number and title from section path for metadata."""
+    info: dict = {}
+    parts = [p.strip() for p in section_path.split("/") if p.strip()]
+    for part in parts:
+        # Match patterns like "5. 安全注意事项", "第5章 安全", "5 安全注意事项"
+        m = re.match(r"^第?(\d+)[章节\.\s、]?\s*(.*)", part)
+        if m:
+            info["chapter_num"] = int(m.group(1))
+            info["chapter_title"] = m.group(2) or part
+            break
+    return info
+
+
 def _make_chunk(
     parts: list[str], total_len: int, parsed: ParsedDocument,
     section: str, section_path: str, idx: int,
 ) -> Chunk:
     content = "\n\n".join(p for p in parts if p.strip())
+    chapter_info = _extract_chapter_info(section_path)
     return Chunk(
         chunk_id=_gen_chunk_id(parsed.document_id, idx),
         document_id=parsed.document_id,
@@ -144,6 +159,9 @@ def _make_chunk(
             **parsed.metadata,
             "title": parsed.title,
             "section": section,
+            "section_path": section_path,
+            "chapter_num": chapter_info.get("chapter_num"),
+            "chapter_title": chapter_info.get("chapter_title"),
         },
     )
 

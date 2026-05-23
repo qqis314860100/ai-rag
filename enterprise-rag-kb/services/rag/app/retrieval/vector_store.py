@@ -67,6 +67,8 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
             "status": c.metadata.get("status", "active"),
             "security_level": c.metadata.get("security_level", "internal"),
             "category": c.metadata.get("category", ""),
+            "chapter_num": c.metadata.get("chapter_num"),
+            "chapter_title": c.metadata.get("chapter_title", ""),
         }
         # ChromaDB doesn't support complex types in metadata
         tags = c.metadata.get("tags", [])
