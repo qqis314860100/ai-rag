@@ -2,6 +2,13 @@
 
 面向电池产线工艺、设备、检测、MES、维护、安全的可追溯智能问答系统。
 
+## 先看这里
+
+- [CLAUDE.md](CLAUDE.md) - 仓库入口、约束和常用命令
+- [项目执行规则清单](docs/EXECUTION_RULES.md) - 任务完成标准与提交门槛
+- [项目架构与边界标准](docs/架构标准.md) - 三个服务的职责边界
+- [贡献指南](docs/CONTRIBUTING.md) - commit 规则
+
 ## 技术栈
 
 | 层 | 技术 |
@@ -69,6 +76,16 @@ pnpm dev:rag      # RAG 服务 (Python)
 - 先看 [CLAUDE.md](CLAUDE.md) 和 [项目执行规则清单](docs/EXECUTION_RULES.md)
 - 先验证功能真的可用，再提交
 - 一个 commit 只改一个服务，不能混 `web` / `api` / `rag`
+- 新增的人类阅读型文档使用中文文件名和中文标题
+
+### 标准检查
+
+```bash
+pnpm run lint
+pnpm run build
+pnpm run verify
+pnpm run audit:harness
+```
 
 ### 聊天体验文档
 
