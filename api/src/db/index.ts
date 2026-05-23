@@ -233,6 +233,14 @@ function createTablesV2(database: Database.Database): void {
       UNIQUE(message_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS favorites (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, message_id)
+    );
+
     CREATE TABLE IF NOT EXISTS browse_history (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -343,6 +351,8 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_message_sources_message_id ON message_sources(message_id);
     CREATE INDEX IF NOT EXISTS idx_feedback_message_id ON feedback(message_id);
     CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON feedback(user_id);
+    CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
+    CREATE INDEX IF NOT EXISTS idx_favorites_message_id ON favorites(message_id);
     CREATE INDEX IF NOT EXISTS idx_browse_history_user_id ON browse_history(user_id);
     CREATE INDEX IF NOT EXISTS idx_browse_history_created_at ON browse_history(created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_operator_id ON audit_logs(operator_id);

@@ -190,6 +190,17 @@
   animation: sourceFlash 0.7s ease-out 2;
 }
 
+/* Table scroll shadow — indicates more content to the right */
+.table-scroll {
+  background:
+    linear-gradient(to right, white 30%, rgba(255,255,255,0)),
+    linear-gradient(to right, rgba(0,0,0,0.05), white 70%) 100% 0,
+    linear-gradient(to right, rgba(0,0,0,0.08), white 30%);
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 20px 100%;
+  background-attachment: local, scroll, scroll;
+}
+
 /* ── Animation Utility Classes ── */
 .animate-fade-in     { animation: fadeIn var(--duration-normal) var(--ease-out) both; }
 .animate-fade-in-up  { animation: fadeInUp var(--duration-normal) var(--ease-out) both; }

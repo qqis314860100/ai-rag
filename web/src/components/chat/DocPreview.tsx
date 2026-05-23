@@ -5,9 +5,13 @@ import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { showToast } from "../ui/Toast";
 
-interface Props { source: Source; onClose: () => void; }
+interface Props {
+  source: Source;
+  onClose: () => void;
+  onAskAbout?: (source: Source) => void;
+}
 
-export default function DocPreview({ source, onClose }: Props) {
+export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   const { user } = useAuth();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,12 +132,25 @@ export default function DocPreview({ source, onClose }: Props) {
       </div>
 
       {/* Meta bar */}
-      <div className="px-4 py-2 border-b border-divider bg-surface-page/50 shrink-0">
+      <div className={`px-4 py-2 border-b border-divider bg-surface-page/50 shrink-0 ${
+        source.category === "安全规范" ? "border-l-[3px] border-l-danger" : ""
+      }`}>
         <p className="text-xs text-text-muted">{source.section_path}</p>
         <div className="flex items-center gap-3 mt-1">
           <span className="text-xs font-semibold text-accent">相关度 {(source.score * 100).toFixed(0)}%</span>
+          {source.version && <span className="text-[10px] text-text-muted font-mono">V{source.version}</span>}
           <span className="text-[10px] text-text-muted font-mono">{source.chunk_id?.substring(0, 16)}</span>
-          <a href={`/documents?doc_id=${source.document_id}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-[10px] text-accent hover:underline ml-auto"><ArrowUpRight className="h-3 w-3" />打开原文</a>
+          <div className="flex items-center gap-2 ml-auto">
+            {onAskAbout && (
+              <button
+                onClick={() => onAskAbout(source)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-accent-soft hover:bg-accent text-accent hover:text-white text-[10px] font-medium transition-all"
+              >
+                <MessageSquare className="h-3 w-3" />基于此段落追问
+              </button>
+            )}
+            <a href={`/documents?doc_id=${source.document_id}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-[10px] text-accent hover:underline"><ArrowUpRight className="h-3 w-3" />打开原文</a>
+          </div>
         </div>
       </div>
 

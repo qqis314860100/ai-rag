@@ -90,6 +90,19 @@ export interface Feedback {
   created_at: string;
 }
 
+export interface FavoriteItem {
+  id: string;
+  message_id: string;
+  session_id: string;
+  session_title: string;
+  question: string;
+  answer: string;
+  sources: Source[];
+  confidence?: number;
+  created_at: string;
+  saved_at: string;
+}
+
 export interface Pagination {
   page: number;
   page_size: number;

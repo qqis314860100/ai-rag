@@ -1,49 +1,74 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import ChatThread from "../components/chat/ChatThread";
 import { SessionList } from "../components/chat/SessionList";
 import ChatInput from "../components/chat/ChatInput";
 import SourcePanel from "../components/chat/SourcePanel";
 import DocPreview from "../components/chat/DocPreview";
 import { useStreamChat } from "../hooks/useStreamChat";
-import { api } from "../services/api";
+import { useChatHistory } from "../hooks/useChatHistory";
+import { useChatDrafts } from "../hooks/useChatDrafts";
 import { showToast } from "../components/ui/Toast";
 import { track } from "../services/tracking";
-import type { ChatMessage, ChatSession, Source } from "../types";
+import type { ChatMessage, Source } from "../types";
 import { Menu, X, Plus, FileSearch } from "lucide-react";
 
+function MessagesSkeleton() {
+  return (
+    <div className="py-6 space-y-10 px-4">
+      {/* User bubble */}
+      <div className="flex flex-col items-end">
+        <div className="skeleton h-12 w-64 rounded-2xl" />
+      </div>
+      {/* AI response */}
+      <div className="flex flex-col items-start space-y-3">
+        <div className="skeleton h-6 w-48 rounded-lg" />
+        <div className="skeleton h-4 w-full rounded-lg" />
+        <div className="skeleton h-4 w-11/12 rounded-lg" />
+        <div className="skeleton h-4 w-3/4 rounded-lg" />
+        <div className="skeleton h-4 w-5/6 rounded-lg" />
+      </div>
+      {/* User bubble */}
+      <div className="flex flex-col items-end">
+        <div className="skeleton h-12 w-48 rounded-2xl" />
+      </div>
+      {/* AI response */}
+      <div className="flex flex-col items-start space-y-3">
+        <div className="skeleton h-4 w-10/12 rounded-lg" />
+        <div className="skeleton h-4 w-full rounded-lg" />
+        <div className="skeleton h-4 w-2/3 rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
 export default function ChatPage() {
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [searchParams] = useSearchParams();
+  const urlSessionId = searchParams.get("session");
+  const {
+    sessions,
+    activeSessionId,
+    messages,
+    messagesLoading,
+    setActiveSessionId,
+    setMessages,
+    loadSessions,
+    createSession,
+    deleteSession,
+  } = useChatHistory(urlSessionId);
+
+  const { saveDraft, getDraft, removeDraft } = useChatDrafts();
   const [selectedSources, setSelectedSources] = useState<Source[] | null>(null);
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roadmapOpen, setRoadmapOpen] = useState(false);
+
   const sidebarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const draftsRef = useRef<Map<string, string>>(loadDrafts());
-
-  // Load drafts from localStorage on mount
-  function loadDrafts(): Map<string, string> {
-    try {
-      const raw = localStorage.getItem("chat-drafts");
-      return raw ? new Map(JSON.parse(raw)) : new Map();
-    } catch {
-      return new Map();
-    }
-  }
-
-  // Persist drafts to localStorage whenever they change
-  function saveDrafts() {
-    try {
-      localStorage.setItem("chat-drafts", JSON.stringify([...draftsRef.current]));
-    } catch { /* quota exceeded, ignore */ }
-  }
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
-  // Close sidebar on outside click (mobile overlay) + lock body scroll
+  // ── Sidebar: close on outside click (mobile overlay) + lock body scroll ──
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (sidebarOpen && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
@@ -62,19 +87,19 @@ export default function ChatPage() {
     };
   }, [sidebarOpen]);
 
-  // Keyboard shortcuts
+  // ── Keyboard shortcuts ──
   useEffect(() => {
     const handler = (e: globalThis.KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
-      // ESC: cancel stream or close panels
+      // ESC: priority — DocPreview → SourcePanel → cancel stream
       if (e.key === "Escape") {
-        if (isSending) cancelStream();
-        else if (previewSource) setPreviewSource(null);
-        else if (selectedSources) setSelectedSources(null);
+        if (previewSource) { setPreviewSource(null); return; }
+        if (selectedSources) { setSelectedSources(null); return; }
+        if (isSending) { cancelStream(); return; }
         return;
       }
-      // / : focus input (only when not already in input)
+      // "/" : focus input (only when not already in input)
       if (e.key === "/" && !isInput) {
         e.preventDefault();
         inputRef.current?.focus();
@@ -84,56 +109,55 @@ export default function ChatPage() {
     return () => document.removeEventListener("keydown", handler);
   }, [isSending, cancelStream, previewSource, selectedSources]);
 
-  // Load sessions on mount
-  const loadSessions = useCallback(async () => {
-    try {
-      const res = await api.get<{ data: { items: ChatSession[] } }>("/chat/sessions");
-      setSessions(res.data.items || []);
-    } catch { /* silently fail */ }
-  }, []);
-
+  // ── Track page view ──
   useEffect(() => {
     track("page_view", "page", "chat");
-    loadSessions().then(() => {
-      api.get<{ data: { items: ChatSession[] } }>("/chat/sessions").then((res) => {
-        const items = res.data.items || [];
-        if (items.length > 0 && !activeSessionId) setActiveSessionId(items[0].id);
-      }).catch(() => {});
-    });
   }, []);
 
-  // Load messages when session changes
   useEffect(() => {
-    if (!activeSessionId) { setMessages([]); return; }
-    api.get<{ data: { messages: ChatMessage[] } }>(`/chat/sessions/${activeSessionId}`)
-      .then((res) => setMessages(res.data.messages || []))
-      .catch(() => setMessages([]));
-  }, [activeSessionId]);
+    if (urlSessionId && urlSessionId !== activeSessionId) {
+      setActiveSessionId(urlSessionId);
+    }
+  }, [activeSessionId, setActiveSessionId, urlSessionId]);
 
+  // ── Streaming placeholders ──
   const placeholderIdRef = useRef<string | null>(null);
+  const wasLoading = useRef(false);
 
-  // Update streaming placeholder content
+  // Update streaming placeholder content during generation
   useEffect(() => {
     if (stream.loading && placeholderIdRef.current && stream.content) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === placeholderIdRef.current
-            ? { ...m, content: stream.content }
-            : m
-        )
-      );
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.id === placeholderIdRef.current) {
+          return [...prev.slice(0, -1), { ...last, content: stream.content }];
+        }
+        return prev;
+      });
     }
-  }, [stream.content]);
+  }, [stream.content]); // Only depend on content changes, not loading
 
-  // When stream completes, finalize the placeholder with sources/confidence/followups
+  // When stream ends (loading → false), finalize or remove placeholder
   useEffect(() => {
-    if (!stream.loading && placeholderIdRef.current && stream.messageId) {
+    if (stream.loading) {
+      wasLoading.current = true;
+      return;
+    }
+    if (!wasLoading.current || !placeholderIdRef.current) return;
+    wasLoading.current = false;
+
+    const pid = placeholderIdRef.current;
+    placeholderIdRef.current = null;
+
+    if (stream.error || stream.stopped) {
+      setMessages((prev) => prev.filter((m) => m.id !== pid));
+    } else {
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === placeholderIdRef.current
+          m.id === pid
             ? {
                 ...m,
-                id: stream.messageId,
+                id: stream.messageId || pid,
                 content: stream.content || m.content,
                 sources: stream.sources,
                 confidence: stream.confidence || undefined,
@@ -144,64 +168,60 @@ export default function ChatPage() {
             : m
         )
       );
-      placeholderIdRef.current = null;
       loadSessions();
-    }
-  }, [stream.loading, stream.messageId]);
-
-  // Clean up orphaned placeholder on error/abort (no messageId)
-  useEffect(() => {
-    if (!stream.loading && !stream.messageId && placeholderIdRef.current) {
-      setMessages((prev) => prev.filter((m) => m.id !== placeholderIdRef.current));
-      placeholderIdRef.current = null;
     }
   }, [stream.loading]);
 
+  // ── Session actions ──
   const handleNewSession = useCallback(() => {
+    if (activeSessionId && inputRef.current?.value) {
+      saveDraft(activeSessionId, inputRef.current.value);
+    }
+    if (isSending) {
+      cancelStream();
+    }
     setActiveSessionId(null);
     setMessages([]);
     setSelectedSources(null);
     setSidebarOpen(false);
-    // Draft will be cleared since input resets when messages change
-  }, []);
+  }, [activeSessionId, cancelStream, isSending, saveDraft, setActiveSessionId, setMessages]);
 
   const handleSelectSession = useCallback((id: string) => {
     // Save current draft before switching
-    const currentInput = inputRef.current?.value;
-    if (activeSessionId && currentInput) {
-      draftsRef.current.set(activeSessionId, currentInput);
+    if (activeSessionId && inputRef.current?.value) {
+      saveDraft(activeSessionId, inputRef.current.value);
     }
+    // Cancel in-flight stream
+    if (isSending) cancelStream();
     setActiveSessionId(id);
     setSelectedSources(null);
     setSidebarOpen(false);
-    // Restore draft for target session
-    const saved = draftsRef.current.get(id);
-    if (saved) {
-      if (inputRef.current) inputRef.current.value = saved;
-    }
-  }, [activeSessionId]);
+  }, [activeSessionId, setActiveSessionId, saveDraft, cancelStream, isSending]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
-    try {
-      await api.delete(`/chat/sessions/${id}`);
+    const ok = await deleteSession(id);
+    if (ok) {
       if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
-      loadSessions();
-    } catch { /* silently fail */ }
-  }, [activeSessionId, loadSessions]);
+      removeDraft(id);
+    }
+  }, [activeSessionId, deleteSession, removeDraft, setActiveSessionId, setMessages]);
 
+  // ── Auto-save draft on input change ──
+  const handleDraftChange = useCallback((val: string) => {
+    if (activeSessionId) {
+      saveDraft(activeSessionId, val);
+    }
+  }, [activeSessionId, saveDraft]);
+
+  // ── Send message ──
   const handleSend = useCallback(async (message: string) => {
     if (!message.trim() || isSending) return;
     let sid = activeSessionId;
     if (!sid) {
-      try {
-        const res = await api.post<{ data: { id: string; title: string } }>("/chat/sessions", { title: message.substring(0, 50) });
-        sid = res.data.id;
-        setActiveSessionId(sid);
-        loadSessions();
-      } catch {
-        showToast("error", "创建会话失败，请检查网络连接");
-        return;
-      }
+      const session = await createSession(message.substring(0, 50));
+      if (!session) return;
+      sid = session.id;
+      setActiveSessionId(sid);
     }
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`, session_id: sid, role: "user",
@@ -215,8 +235,12 @@ export default function ChatPage() {
     };
     setMessages((prev) => [...prev, userMsg, placeholderMsg]);
     setSelectedSources(null);
+
+    // Clear draft for this session since message is sent
+    removeDraft(sid);
+
     await sendStream(sid, message, 5);
-  }, [activeSessionId, sendStream, loadSessions, isSending]);
+  }, [activeSessionId, createSession, sendStream, isSending, removeDraft, setActiveSessionId, setMessages]);
 
   const handleFollowUp = useCallback((query: string) => {
     if (isSending) return;
@@ -245,7 +269,7 @@ export default function ChatPage() {
   const handleDeleteMessage = useCallback((messageId: string) => {
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
     showToast("success", "消息已删除");
-  }, []);
+  }, [setMessages]);
 
   const activeTitle = activeSessionId
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
@@ -256,13 +280,12 @@ export default function ChatPage() {
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Session Sidebar (260px) ── */}
-      {/* Mobile: overlay with backdrop */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/20 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
       <aside
         ref={sidebarRef}
-        className={`shrink-0 border-r border-divider bg-surface-page flex flex-col transition-all duration-slow ease-out z-40
+        className={`shrink-0 border-r border-divider bg-surface-page flex flex-col transition-transform duration-slow ease-out z-40
           max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:shadow-lg
           ${sidebarOpen ? "max-lg:translate-x-0 w-[260px]" : "max-lg:-translate-x-full max-lg:w-[260px] lg:w-[260px]"}`}
       >
@@ -282,13 +305,12 @@ export default function ChatPage() {
             sessions={sessions}
             activeId={activeSessionId}
             onSelect={handleSelectSession}
-            onNew={handleNewSession}
             onDelete={handleDeleteSession}
           />
         </div>
       </aside>
 
-      {/* ── Main Chat Area — Sitor layout: scroll full-width, content centered ── */}
+      {/* ── Main Chat Area ── */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0 bg-white">
         {/* Chat Header */}
         <header className="shrink-0 flex items-center gap-3 h-[57px] px-4 border-b border-divider bg-white">
@@ -311,46 +333,56 @@ export default function ChatPage() {
           )}
 
           <button
-            onClick={() => setRoadmapOpen(!roadmapOpen)}
+            onClick={() => setSelectedSources(null)}
             className={`p-1.5 rounded-lg transition-colors shrink-0 ${showSourcePanel ? "text-accent bg-accent-soft" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}
-            title={showSourcePanel ? "引用来源" : "路线图"}
+            title={showSourcePanel ? "关闭来源面板" : "路线图"}
           >
             <FileSearch className="h-5 w-5" />
           </button>
         </header>
 
-        {/* Scroll area: full-width white bg, scrollbar inside */}
+        {/* Scroll area */}
         <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
           <div className="max-w-3xl mx-auto px-4">
-            <ChatThread
-              messages={messages}
-              loading={stream.loading}
-              streamingContent={stream.content}
-              streamError={stream.error}
-              streamStopped={stream.stopped}
-              selectedSources={selectedSources}
-              onSelectSources={setSelectedSources}
-              onFollowUp={handleFollowUp}
-              onCancelStream={cancelStream}
-              onInitialQuestion={handleInitialQuestion}
-              onRetry={handleRetry}
-              onEditUser={handleEditUser}
-              onDeleteMessage={handleDeleteMessage}
-              onPreviewSource={setPreviewSource}
-              onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
-            />
+            {messagesLoading && messages.length === 0 ? (
+              <MessagesSkeleton />
+            ) : (
+              <ChatThread
+                messages={messages}
+                loading={stream.loading}
+                streamingContent={stream.content}
+                streamError={stream.error}
+                streamStopped={stream.stopped}
+                selectedSources={selectedSources}
+                onSelectSources={setSelectedSources}
+                onFollowUp={handleFollowUp}
+                onCancelStream={cancelStream}
+                onInitialQuestion={handleInitialQuestion}
+                onRetry={handleRetry}
+                onEditUser={handleEditUser}
+                onDeleteMessage={handleDeleteMessage}
+                onPreviewSource={setPreviewSource}
+                onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
+              />
+            )}
           </div>
         </div>
 
-        {/* Input: centered, sticky bottom, white bg */}
+        {/* Input */}
         <div className="shrink-0 bg-white">
           <div className="max-w-3xl mx-auto px-4 py-3">
-            <ChatInput onSend={handleSend} loading={stream.loading} inputRef={inputRef} draftValue={activeSessionId ? (draftsRef.current.get(activeSessionId) || "") : ""} onDraftChange={(val) => { if (activeSessionId) { draftsRef.current.set(activeSessionId, val); saveDrafts(); } }} />
+            <ChatInput
+              onSend={handleSend}
+              loading={stream.loading}
+              inputRef={inputRef}
+              draftValue={activeSessionId ? getDraft(activeSessionId) : ""}
+              onDraftChange={handleDraftChange}
+            />
           </div>
         </div>
       </div>
 
-      {/* ── Source Panel (320px, Sitor roadmap style) ── */}
+      {/* ── Source Panel (320px) ── */}
       <aside
         className="shrink-0 overflow-hidden transition-all duration-slow ease-out border-l border-divider bg-surface"
         style={{
@@ -372,18 +404,22 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* ── Doc Preview Panel (384px) ── */}
-      <aside
-        className="shrink-0 overflow-hidden transition-all duration-slow ease-out border-l border-divider bg-surface"
-        style={{
-          width: previewSource ? 384 : 0,
-          opacity: previewSource ? 1 : 0,
-        }}
-      >
-        <div style={{ width: 384 }}>
-          {previewSource && <DocPreview source={previewSource} onClose={() => setPreviewSource(null)} />}
-        </div>
-      </aside>
+      {/* ── Doc Preview Overlay (384px) ── */}
+      {previewSource && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setPreviewSource(null)} />
+          <aside className="fixed right-0 top-0 bottom-0 w-[384px] max-w-[90vw] bg-surface shadow-xl-soft z-50 animate-fade-in-right border-l border-divider overflow-hidden">
+            <DocPreview
+              source={previewSource}
+              onClose={() => setPreviewSource(null)}
+              onAskAbout={(src) => {
+                setPreviewSource(null);
+                handleFollowUp(`请详细解释《${src.document_title}》中"${src.section_path}"的相关内容`);
+              }}
+            />
+          </aside>
+        </>
+      )}
     </div>
   );
 }

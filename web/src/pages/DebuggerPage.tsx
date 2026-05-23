@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Search, Zap, Clock, Layers, FileText } from "lucide-react";
-import type { SearchParams } from "../components/debugger/SearchForm";
 import DebugResultCard from "../components/debugger/DebugResultCard";
 import DebugTrace from "../components/debugger/DebugTrace";
 import { api } from "../services/api";

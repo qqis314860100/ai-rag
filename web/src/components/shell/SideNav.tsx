@@ -6,12 +6,12 @@ const primaryNav = [
   { to: "/", icon: Home, label: "首页" },
   { to: "/chat", icon: MessageSquare, label: "AI问答" },
   { to: "/documents", icon: BookOpen, label: "知识库" },
-  { to: "/documents", icon: FileText, label: "SOP文档" },
+  { to: "/sop", icon: FileText, label: "SOP文档" },
 ];
 
 const secondaryNav = [
-  { to: "/chat", icon: Star, label: "收藏" },
-  { to: "/", icon: BarChart3, label: "数据统计" },
+  { to: "/favorites", icon: Star, label: "收藏" },
+  { to: "/analytics", icon: BarChart3, label: "数据统计" },
   { to: "/settings", icon: Settings, label: "系统设置" },
 ];
 
@@ -66,15 +66,9 @@ export default function SideNav() {
             key={to + label}
             to={to}
             end={false}
-            className={({ isActive }) =>
-              `flex items-center rounded-lg transition-all duration-fast ${
-                expanded ? "gap-3 px-3" : "justify-center"
-              } py-2.5 text-sm font-medium ${
-                isActive
-                  ? "bg-accent-soft text-accent shadow-sm-soft"
-                  : "text-text-secondary hover:bg-surface-hover hover:text-text"
-              }`
-            }
+            className={`flex items-center rounded-lg transition-all duration-fast ${
+              expanded ? "gap-3 px-3" : "justify-center"
+            } py-2.5 text-sm font-medium text-text-secondary hover:bg-surface-hover hover:text-text`}
             title={label}
           >
             <Icon className="h-4 w-4 shrink-0" />

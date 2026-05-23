@@ -47,7 +47,14 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
   if (header && header.startsWith("Bearer ")) {
     try {
       const payload = verifyToken(header.slice(7));
-      req.user = { id: payload.sub, name: payload.name, role: payload.role };
+      const role = ROLE_SECURITY_LEVELS[payload.role] ? payload.role : "viewer";
+      req.user = {
+        id: payload.sub,
+        name: payload.name,
+        role,
+        permissions: ROLE_PERMISSIONS[role] || [],
+        allowedSecurityLevels: ROLE_SECURITY_LEVELS[role] || ["public"],
+      };
     } catch {
       // ignore invalid tokens in optional auth
     }

@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { ThumbsUp, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown } from "lucide-react";
+import { ThumbsUp, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import { api } from "../../services/api";
@@ -151,6 +151,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [editValue, setEditValue] = useState("");
   const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
   const [voting, setVoting] = useState<Record<string, boolean>>({});
+  const [feedbackReason, setFeedbackReason] = useState<string | null>(null); // message id needing reason
+  const [favoriteStatus, setFavoriteStatus] = useState<Record<string, boolean>>({});
+  const [favoriting, setFavoriting] = useState<Record<string, boolean>>({});
 
   const prevContentLen = useRef(0);
   const scrollRaf = useRef<number>(0);
@@ -229,32 +232,108 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     return () => clearTimeout(timer);
   }, [messages, loading]);
 
+  useEffect(() => {
+    const msgIds = messages
+      .filter((m) => m.role === "assistant" && !m.streaming && !m.id.startsWith("stream-"))
+      .map((m) => m.id);
+
+    if (msgIds.length === 0) {
+      setFavoriteStatus({});
+      return;
+    }
+
+    api.get<{ data: Record<string, boolean> }>(`/favorites/status?message_ids=${msgIds.join(",")}`)
+      .then((res) => setFavoriteStatus(res.data || {}))
+      .catch(() => {});
+  }, [messages]);
+
   const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content);
     showToast("success", "已复制到剪贴板");
   };
 
+  const handleFavorite = async (messageId: string) => {
+    if (favoriting[messageId]) return;
+
+    const isSaved = !!favoriteStatus[messageId];
+    setFavoriting((prev) => ({ ...prev, [messageId]: true }));
+    setFavoriteStatus((prev) => ({ ...prev, [messageId]: !isSaved }));
+
+    try {
+      if (isSaved) {
+        await api.delete(`/favorites/${encodeURIComponent(messageId)}`);
+        showToast("success", "已取消收藏");
+      } else {
+        await api.post("/favorites", { message_id: messageId });
+        showToast("success", "已收藏");
+      }
+    } catch {
+      setFavoriteStatus((prev) => ({ ...prev, [messageId]: isSaved }));
+      showToast("error", "收藏操作失败");
+    } finally {
+      setFavoriting((prev) => ({ ...prev, [messageId]: false }));
+    }
+  };
+
   const handleFeedback = async (messageId: string, rating: "up" | "down") => {
     if (voting[messageId]) return;
+    const current = feedbackCounts[messageId] || { up: 0, down: 0 };
+    const isToggle = current.userVote === rating;
+
+    if (isToggle) {
+      setVoting(v => ({ ...v, [messageId]: true }));
+      try {
+        setFeedbackCounts(f => ({ ...f, [messageId]: { ...current, userVote: undefined, [rating]: Math.max(0, current[rating] - 1) } }));
+        showToast("success", "已取消反馈");
+      } catch {
+        showToast("error", "反馈提交失败");
+      } finally {
+        setVoting(v => ({ ...v, [messageId]: false }));
+      }
+      return;
+    }
+
+    if (rating === "down") {
+      // Ask for reason before submitting
+      setFeedbackReason(messageId);
+      return;
+    }
+
+    // Thumbs-up — submit immediately
+    setVoting(v => ({ ...v, [messageId]: true }));
+    try {
+      await api.post("/feedback", { message_id: messageId, rating });
+      setFeedbackCounts(f => ({
+        ...f,
+        [messageId]: {
+          up: current.up + 1 - (current.userVote === "up" ? 1 : 0),
+          down: current.down - (current.userVote === "down" ? 1 : 0),
+          userVote: rating,
+        },
+      }));
+      showToast("success", "感谢点赞！");
+    } catch {
+      showToast("error", "反馈提交失败");
+    } finally {
+      setVoting(v => ({ ...v, [messageId]: false }));
+    }
+  };
+
+  const submitFeedbackReason = async (messageId: string, reason: string) => {
+    setFeedbackReason(null);
     setVoting(v => ({ ...v, [messageId]: true }));
     try {
       const current = feedbackCounts[messageId] || { up: 0, down: 0 };
-      const isToggle = current.userVote === rating;
-      if (isToggle) {
-        setFeedbackCounts(f => ({ ...f, [messageId]: { ...current, userVote: undefined, [rating]: Math.max(0, current[rating] - 1) } }));
-        showToast("success", "已取消反馈");
-      } else {
-        await api.post("/feedback", { message_id: messageId, rating });
-        setFeedbackCounts(f => ({
-          ...f,
-          [messageId]: {
-            up: current.up + (rating === "up" ? 1 : 0) - (current.userVote === "up" ? 1 : 0),
-            down: current.down + (rating === "down" ? 1 : 0) - (current.userVote === "down" ? 1 : 0),
-            userVote: rating,
-          },
-        }));
-        showToast("success", rating === "up" ? "感谢点赞！" : "反馈已记录");
-      }
+      await api.post("/feedback", { message_id: messageId, rating: "down", reason });
+      setFeedbackCounts(f => ({
+        ...f,
+        [messageId]: {
+          up: current.up - (current.userVote === "up" ? 1 : 0),
+          down: current.down + 1 - (current.userVote === "down" ? 1 : 0),
+          userVote: "down",
+        },
+      }));
+      showToast("success", "感谢反馈，我们会持续改进");
     } catch {
       showToast("error", "反馈提交失败");
     } finally {
@@ -413,6 +492,10 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     className="p-0.5 rounded text-text-muted hover:text-danger transition-colors" title="删除">
                     <Trash2 className="h-3 w-3" />
                   </button>
+                  <button onClick={() => handleFavorite(msg.id)} disabled={favoriting[msg.id]}
+                    className={`p-0.5 rounded transition-colors ${favoriteStatus[msg.id] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[msg.id] ? "取消收藏" : "收藏"}>
+                    <Star className="h-3 w-3" fill={favoriteStatus[msg.id] ? "currentColor" : "none"} />
+                  </button>
                   <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
                     className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
                     <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
@@ -467,6 +550,36 @@ export default function ChatThread({ messages, loading, streamingContent, stream
           <ChevronDown className="h-3.5 w-3.5" />
           滚动到底部
         </button>
+      )}
+
+      {/* Feedback reason popup */}
+      {feedbackReason && (
+        <div className="animate-fade-in-up sticky bottom-16 mx-auto max-w-xs w-full bg-white border border-border rounded-xl shadow-lg-soft p-3 z-20">
+          <p className="text-xs font-medium text-text mb-2">为什么觉得不够好？</p>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { label: "内容过时", reason: "outdated" },
+              { label: "匹配错误", reason: "mismatch" },
+              { label: "逻辑混乱", reason: "confusing" },
+              { label: "信息不全", reason: "incomplete" },
+              { label: "其他", reason: "other" },
+            ].map(({ label, reason }) => (
+              <button
+                key={reason}
+                onClick={() => submitFeedbackReason(feedbackReason, reason)}
+                className="px-2.5 py-1 rounded-lg border border-border text-xs text-text-secondary hover:border-accent hover:text-accent transition-all"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setFeedbackReason(null)}
+            className="mt-2 text-[10px] text-text-muted hover:text-text transition-colors"
+          >
+            取消
+          </button>
+        </div>
       )}
 
       <div ref={bottomRef} />

@@ -80,10 +80,11 @@ router.get(
 // PATCH /api/feedback/:id - update feedback
 router.patch(
   "/feedback/:id",
-  requirePermission("feedback.manage"),
-  async (req: Request, res: Response, next: NextFunction) => {
+    requirePermission("feedback.manage"),
+    async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const feedback = getFeedbackById(req.params.id);
+      const feedbackId = req.params.id as string;
+      const feedback = getFeedbackById(feedbackId);
       if (!feedback) {
         throw new AppError(ErrorCodes.FEEDBACK_NOT_FOUND, "反馈不存在。", 404);
       }

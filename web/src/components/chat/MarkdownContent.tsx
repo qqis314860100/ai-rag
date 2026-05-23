@@ -1,5 +1,5 @@
 // Lightweight markdown renderer — handles common LLM formatting
-// patterns including tables, code blocks, and styled quotes.
+// patterns including tables, code blocks, styled quotes, and safety callouts.
 
 function escapeHtml(text: string): string {
   return text
@@ -27,12 +27,29 @@ function renderInline(text: string): string {
   );
 
   // Highlight engineering parameter values: ≥200MΩ, 500VDC, 3s, ≤0.5mm etc.
+  // Use monospace font + subtle badge background for production readability
   result = result.replace(
     /([≥≤]?\d+(?:\.\d+)?\s*(?:MΩ|kΩ|Ω|kV|VDC|V|mV|A|mA|MPa|kPa|N|mm|cm|μm|℃|°C|s|ms|min|h)\b)/g,
-    '<strong class="font-semibold text-[#b3462a] bg-fresh-soft px-1 rounded tracking-tight">$1</strong>'
+    '<strong class="param-value font-semibold text-[#b3462a] bg-red-50/60 px-1.5 py-px rounded font-mono text-[13px] tracking-tight">$1</strong>'
   );
 
   return result;
+}
+
+// Safety-related keywords → color mapping for callout detection
+const safetyKeywords: [RegExp, string, string][] = [
+  [/禁止|严禁|不得|切勿|致命|高压危险|触电/g, "border-danger bg-red-50/60 text-danger", "🚫"],
+  [/危险|警告|注意安全|必须穿戴|防护|绝缘破损/g, "border-warning bg-amber-50/60 text-[#b45309]", "⚠️"],
+  [/注意|小心|谨慎|建议|应当/g, "border-accent bg-accent-soft/60 text-accent", "💡"],
+];
+
+function detectSafetyCallout(line: string): { content: string; borderClass: string; icon: string } | null {
+  for (const [regex, borderClass, icon] of safetyKeywords) {
+    if (regex.test(line)) {
+      return { content: line, borderClass, icon };
+    }
+  }
+  return null;
 }
 
 function renderMarkdownLine(line: string): string {
@@ -63,17 +80,28 @@ function renderMarkdownLine(line: string): string {
     return '<hr class="my-5 border-border" />';
   }
 
-  // Blockquote — check for special callout syntaxes
+  // Blockquote — with safety callout detection
   if (line.startsWith("> ")) {
-    const content = renderInline(line.slice(2));
-    // Check for callout labels like "⚠️" or "✅" or "🔧" or "📋" at start
-    const calloutMatch = content.match(/^([\u{1F300}-\u{1FAFF}]+)\s*(.*)/u);
+    const quoteContent = line.slice(2);
+    const renderedContent = renderInline(quoteContent);
+
+    // Check for safety callout
+    const safety = detectSafetyCallout(quoteContent);
+    if (safety) {
+      return `<blockquote class="border-l-[3px] ${safety.borderClass} rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-[14px] leading-relaxed">
+        <span class="inline-flex items-center gap-1.5 font-semibold">${safety.icon} ${renderedContent}</span>
+      </blockquote>`;
+    }
+
+    // Check for emoji callout
+    const calloutMatch = renderedContent.match(/^([\u{1F300}-\u{1FAFF}]+)\s*(.*)/u);
     if (calloutMatch) {
       return `<blockquote class="border-l-[3px] border-accent bg-accent-soft/60 rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed">
         <span class="inline-flex items-center gap-1.5 font-medium text-text">${calloutMatch[1]} ${calloutMatch[2]}</span>
       </blockquote>`;
     }
-    return `<blockquote class="border-l-[3px] border-border hover:border-accent/40 bg-surface-page rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed transition-colors">${content}</blockquote>`;
+
+    return `<blockquote class="border-l-[3px] border-border hover:border-accent/40 bg-surface-page rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed transition-colors">${renderedContent}</blockquote>`;
   }
 
   return `<span>${renderInline(line)}</span>`;
@@ -103,39 +131,55 @@ function renderTable(lines: string[]): string {
   }
 
   const thHtml = headers
-    .map((h) => `<th class="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary bg-surface-hover border-b border-border first:rounded-tl-lg last:rounded-tr-lg">${renderInline(h)}</th>`)
+    .map((h) => `<th class="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary bg-surface-hover border-b border-border first:rounded-tl-lg last:rounded-tr-lg whitespace-nowrap">${renderInline(h)}</th>`)
     .join("");
 
   const trHtml = bodyLines
     .map((row) => {
       const cells = parseRow(row);
-      // Pad to header count
       while (cells.length < headers.length) cells.push("");
       const tdHtml = cells
-        .map((c, i) => `<td class="px-3 py-2 text-sm text-text-secondary border-b border-divider ${i === 0 ? "font-medium text-text" : ""}">${renderInline(c)}</td>`)
+        .map((c, i) => `<td class="px-3 py-2 text-sm text-text-secondary border-b border-divider whitespace-nowrap ${i === 0 ? "font-medium text-text" : ""}">${renderInline(c)}</td>`)
         .join("");
-      return `<tr class="hover:bg-surface-hover transition-colors">${tdHtml}</tr>`;
+      return `<tr class="hover:bg-accent/5 transition-colors">${tdHtml}</tr>`;
     })
     .join("");
 
-  return `<div class="my-4 overflow-x-auto rounded-xl border border-border shadow-sm-soft">
-    <table class="w-full text-left">
-      <thead><tr>${thHtml}</tr></thead>
-      <tbody>${trHtml}</tbody>
-    </table>
+  const tableId = `table-${Math.random().toString(36).slice(2, 8)}`;
+
+  return `<div class="my-4 rounded-xl border border-border shadow-sm-soft overflow-hidden">
+    <div class="flex items-center justify-end px-3 py-1.5 bg-surface-page border-b border-divider">
+      <span class="text-[10px] text-text-muted/50">表格</span>
+      <button
+        class="ml-2 text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
+        onclick="const t=document.getElementById('${tableId}'); const r=[]; t.querySelectorAll('tr').forEach(tr=>{const c=[];tr.querySelectorAll('th,td').forEach(td=>c.push(td.textContent?.trim()||''));r.push(c.join('\\t'))}); navigator.clipboard.writeText(r.join('\\n')); this.textContent='已复制'; setTimeout(()=>{this.textContent='复制CSV'},1500)"
+      >复制CSV</button>
+    </div>
+    <div class="overflow-x-auto table-scroll">
+      <table id="${tableId}" class="w-full text-left">
+        <thead><tr>${thHtml}</tr></thead>
+        <tbody>${trHtml}</tbody>
+      </table>
+    </div>
   </div>`;
 }
 
+let codeBlockIdCounter = 0;
+
 function renderCodeBlock(code: string, language?: string): string {
+  const id = `code-${++codeBlockIdCounter}`;
   return (
-    `<div class="my-4 rounded-xl border border-border overflow-hidden shadow-sm-soft">` +
+    `<div class="my-4 rounded-xl border border-border overflow-hidden shadow-sm-soft code-block-wrapper">` +
+    `<div class="flex items-center justify-between px-4 py-2 bg-surface-page border-b border-divider">` +
     (language
-      ? `<div class="flex items-center justify-between px-4 py-2 bg-surface-page border-b border-divider">
-          <span class="text-xs text-text-muted font-mono">${escapeHtml(language)}</span>
-          <span class="text-[10px] text-text-muted/50">code</span>
-        </div>`
-      : "") +
-    `<pre class="p-4 overflow-x-auto text-[13px] font-mono text-text leading-relaxed bg-[#fafaf8]"><code>${escapeHtml(code)}</code></pre>` +
+      ? `<span class="text-xs text-text-muted font-mono">${escapeHtml(language)}</span>`
+      : `<span class="text-xs text-text-muted/50">code</span>`) +
+    `<button
+      class="text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
+      onclick="var el=document.getElementById('${id}'); navigator.clipboard.writeText(el.textContent||''); this.textContent='已复制'; setTimeout(function(){this.textContent='复制'}.bind(this),1500)"
+    >复制</button>` +
+    `</div>` +
+    `<pre id="${id}" class="p-4 overflow-x-auto text-[13px] font-mono text-text leading-relaxed bg-[#fafaf8]"><code>${escapeHtml(code)}</code></pre>` +
     `</div>`
   );
 }
@@ -175,7 +219,6 @@ export function renderMarkdown(md: string): string {
         result.push(renderTable(tableLines));
         continue;
       }
-      // Fall through: single | line (not really a table)
       i -= tableLines.length;
     }
 
@@ -199,6 +242,9 @@ interface MarkdownContentProps {
 }
 
 export function MarkdownContent({ content, sources, onSourceClick }: MarkdownContentProps) {
+  // Reset code block counter for each render to avoid duplicate IDs
+  codeBlockIdCounter = 0;
+
   let html = renderMarkdown(content);
 
   // Replace [来源 N] with styled citation badges

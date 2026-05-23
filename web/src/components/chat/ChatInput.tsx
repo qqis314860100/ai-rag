@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
 import { ArrowUp, Paperclip, Image, Mic, Keyboard } from "lucide-react";
+import { showToast } from "../ui/Toast";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -32,6 +33,19 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const nextValue = draftValue || "";
+    setMessage(nextValue);
+
+    const ta = textareaRef.current;
+    if (!ta) return;
+
+    requestAnimationFrame(() => {
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+    });
+  }, [draftValue, textareaRef]);
+
   // Auto-resize textarea height
   const resizeTextarea = useCallback(() => {
     const ta = textareaRef.current;
@@ -52,8 +66,9 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
     if (items) {
       for (const item of items) {
         if (item.type.startsWith("image/")) {
-          // Future: upload pasted image for multimodal question
-          // e.preventDefault(); handleImagePaste(item.getAsFile());
+          e.preventDefault();
+          showToast("warning", "图片上传功能即将上线，当前仅支持文字分析");
+          return;
         }
       }
     }

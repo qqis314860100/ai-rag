@@ -242,12 +242,13 @@ router.get("/chat/sessions", async (req: Request, res: Response, next: NextFunct
 // GET /api/chat/sessions/:id - session with messages
 router.get("/chat/sessions/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const session = getSessionById(req.params.id);
+    const sessionId = req.params.id as string;
+    const session = getSessionById(sessionId);
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
 
-    const messages = listMessagesBySession(req.params.id).map(formatMessage);
+    const messages = listMessagesBySession(sessionId).map(formatMessage);
 
     sendSuccess(
       res,
@@ -269,12 +270,13 @@ router.get("/chat/sessions/:id", async (req: Request, res: Response, next: NextF
 // GET /api/chat/sessions/:id/messages - messages for a session
 router.get("/chat/sessions/:id/messages", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const session = getSessionById(req.params.id);
+    const sessionId = req.params.id as string;
+    const session = getSessionById(sessionId);
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
 
-    const messages = listMessagesBySession(req.params.id).map(formatMessage);
+    const messages = listMessagesBySession(sessionId).map(formatMessage);
 
     sendSuccess(res, { items: messages }, req.requestId);
   } catch (err) {
@@ -285,7 +287,8 @@ router.get("/chat/sessions/:id/messages", async (req: Request, res: Response, ne
 // PATCH /api/chat/sessions/:id - update session (title, pinned)
 router.patch("/chat/sessions/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const session = getSessionById(req.params.id);
+    const sessionId = req.params.id as string;
+    const session = getSessionById(sessionId);
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
@@ -295,7 +298,7 @@ router.patch("/chat/sessions/:id", async (req: Request, res: Response, next: Nex
     if (title !== undefined) updates.title = title;
     if (pinned !== undefined) updates.pinned = pinned ? 1 : 0;
 
-    const updated = updateSession(req.params.id, updates);
+    const updated = updateSession(sessionId, updates);
     sendSuccess(res, updated, req.requestId);
   } catch (err) {
     next(err);
@@ -305,14 +308,15 @@ router.patch("/chat/sessions/:id", async (req: Request, res: Response, next: Nex
 // DELETE /api/chat/sessions/:id - delete session
 router.delete("/chat/sessions/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const session = getSessionById(req.params.id);
+    const sessionId = req.params.id as string;
+    const session = getSessionById(sessionId);
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
 
     const db = getDb();
-    db.prepare("DELETE FROM chat_messages WHERE session_id = ?").run(req.params.id);
-    db.prepare("DELETE FROM chat_sessions WHERE id = ?").run(req.params.id);
+    db.prepare("DELETE FROM chat_messages WHERE session_id = ?").run(sessionId);
+    db.prepare("DELETE FROM chat_sessions WHERE id = ?").run(sessionId);
 
     sendSuccess(res, { deleted: true }, req.requestId);
   } catch (err) {

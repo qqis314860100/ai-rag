@@ -7,11 +7,10 @@ interface Props {
   sessions: ChatSession[];
   activeId: string | null;
   onSelect: (id: string) => void;
-  onNew: () => void;
   onDelete: (id: string) => void;
 }
 
-export function SessionList({ sessions, activeId, onSelect, onNew, onDelete }: Props) {
+export function SessionList({ sessions, activeId, onSelect, onDelete }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const activeSessions = sessions.filter((s) => s.id === activeId);

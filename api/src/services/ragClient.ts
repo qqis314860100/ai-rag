@@ -61,10 +61,6 @@ interface RagSearchResponse {
   latency_ms: number;
 }
 
-interface RagDebugSearchRequest extends RagSearchRequest {
-  include_prompt?: boolean;
-}
-
 interface RagDebugSearchResponse {
   query: string;
   normalized_query: string;

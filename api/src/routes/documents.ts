@@ -104,11 +104,12 @@ router.get("/documents", async (req: Request, res: Response, next: NextFunction)
 // GET /api/documents/:id - document detail
 router.get("/documents/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const doc = getDocumentById(req.params.id);
+    const documentId = req.params.id as string;
+    const doc = getDocumentById(documentId);
     if (!doc) {
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
     }
-    const formatted = formatDocument(doc);
+    const formatted = formatDocument(doc) as ReturnType<typeof formatDocument> & { content?: string };
 
     // Include file content for text-based files
     try {
@@ -221,7 +222,8 @@ router.patch(
   requirePermission("document.update"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const existing = getDocumentById(req.params.id);
+      const documentId = req.params.id as string;
+      const existing = getDocumentById(documentId);
       if (!existing) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
       }
@@ -256,12 +258,13 @@ router.delete(
   requirePermission("document.delete"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const doc = getDocumentById(req.params.id);
+      const documentId = req.params.id as string;
+      const doc = getDocumentById(documentId);
       if (!doc) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
       }
 
-      const deleted = softDeleteDocument(req.params.id);
+      const deleted = softDeleteDocument(documentId);
       if (!deleted) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在或已删除。", 404);
       }
@@ -280,10 +283,11 @@ router.delete(
 // GET /api/documents/chunks/:chunk_id - get chunk content
 router.get("/documents/chunks/:chunk_id", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const chunkId = req.params.chunk_id as string;
     const db = getDb();
     const row = db.prepare(
       "SELECT snippet FROM message_sources WHERE chunk_id = ? ORDER BY created_at DESC LIMIT 1"
-    ).get(req.params.chunk_id) as { snippet: string } | undefined;
+    ).get(chunkId) as { snippet: string } | undefined;
 
     if (!row?.snippet) {
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "Chunk 内容不存在。", 404);
@@ -301,7 +305,8 @@ router.post(
   requirePermission("document.reindex"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const doc = getDocumentById(req.params.id);
+      const documentId = req.params.id as string;
+      const doc = getDocumentById(documentId);
       if (!doc) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
       }
@@ -564,7 +569,6 @@ router.post("/documents/sync-from-rag", async (req: Request, res: Response, next
         });
         // Override the generated ID with the RAG document_id
         const db = getDb();
-        const now = new Date().toISOString();
         // Update the most recently created document to have the RAG document_id
         const latest = db.prepare("SELECT id FROM documents ORDER BY created_at DESC LIMIT 1").get() as { id: string } | undefined;
         if (latest) {

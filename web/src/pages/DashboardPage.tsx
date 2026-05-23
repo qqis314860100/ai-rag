@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileText, MessageSquare, CheckCircle, TrendingUp, Activity, ThumbsUp, Search, Users, Eye } from "lucide-react";
+import { FileText, MessageSquare, TrendingUp, Activity, ThumbsUp, Search, Users, Eye } from "lucide-react";
 import { api } from "../services/api";
 
 interface DashData { documents: { total: number; indexed: number; processing: number; failed: number }; sessions: { total: number; today: number }; messages: { total: number }; feedback: { up: number; down: number; open: number }; categories: Array<{ category: string; count: number }>; recentSessions: Array<{ id: string; title: string; user_name: string; updated_at: string }>; popularQueries: Array<{ query: string; time: string }>; }
@@ -13,7 +13,7 @@ export default function DashboardPage() {
   if (loading) return <div className="p-6 space-y-6"><div className="skeleton h-8 w-48 rounded-lg" /><div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">{[1,2,3,4,5,6].map(i=><div key={i} className="skeleton h-24 rounded-xl" />)}</div><div className="grid grid-cols-1 lg:grid-cols-3 gap-5">{[1,2,3].map(i=><div key={i} className="skeleton h-48 rounded-xl" />)}</div></div>;
   if (!data) return <div className="flex items-center justify-center h-full text-text-muted text-sm">加载失败</div>;
   const { documents, sessions, messages, feedback, categories, recentSessions, popularQueries } = data;
-  const maxCat = Math.max(1, ...categories.map(e => e[1]||0));
+  const maxCat = Math.max(1, ...categories.map((entry) => entry.count || 0));
 
   return (
     <div className="p-6 space-y-6 h-full overflow-y-auto">
