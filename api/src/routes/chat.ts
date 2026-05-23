@@ -5,7 +5,7 @@ import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
 import { auditFromRequest } from "../services/auditService";
 import { listSessions, getSessionById, createSession, updateSession } from "../db/chatSessions";
-import { listMessagesBySession, createMessage, formatMessage } from "../db/chatMessages";
+import { listMessagesBySession, createMessage, formatMessage, deleteMessageAndTruncateSession, getMessageById, updateMessageAndTruncateSession } from "../db/chatMessages";
 import { getDb } from "../db/index";
 
 const router = Router();
@@ -287,6 +287,77 @@ router.get("/chat/sessions/:id/messages", async (req: Request, res: Response, ne
     const messages = listMessagesBySession(sessionId).map(formatMessage);
 
     sendSuccess(res, { items: messages }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/chat/messages/:id - update a message and truncate later messages
+router.patch("/chat/messages/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const { content } = req.body;
+
+    if (!content || typeof content !== "string" || content.trim().length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "消息内容不能为空。", 400);
+    }
+
+    const existing = getMessageById(messageId);
+    if (!existing) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    const session = getSessionById(existing.session_id);
+    if (!session) {
+      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+    }
+
+    const userId = req.user?.id || "anonymous";
+    const isOwner = session.user_id === userId;
+    const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
+    if (!isOwner && !isAdmin) {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限修改该消息。", 403);
+    }
+
+    const updated = updateMessageAndTruncateSession(messageId, content.trim());
+    if (!updated) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    sendSuccess(res, { message: formatMessage(updated) }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/chat/messages/:id - delete a message and truncate later messages
+router.delete("/chat/messages/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+
+    const existing = getMessageById(messageId);
+    if (!existing) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    const session = getSessionById(existing.session_id);
+    if (!session) {
+      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+    }
+
+    const userId = req.user?.id || "anonymous";
+    const isOwner = session.user_id === userId;
+    const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
+    if (!isOwner && !isAdmin) {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限删除该消息。", 403);
+    }
+
+    const deleted = deleteMessageAndTruncateSession(messageId);
+    if (!deleted) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    sendSuccess(res, { deleted: true }, req.requestId);
   } catch (err) {
     next(err);
   }

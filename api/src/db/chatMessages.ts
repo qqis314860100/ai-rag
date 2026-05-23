@@ -22,6 +22,11 @@ export interface CreateMessageInput {
   latencyMs?: number;
 }
 
+interface OrderedMessageRow {
+  id: string;
+  _rowid: number;
+}
+
 export function listMessagesBySession(sessionId: string): ChatMessageRow[] {
   const db = getDb();
   return db
@@ -33,6 +38,22 @@ export function getMessageById(id: string): ChatMessageRow | null {
   const db = getDb();
   const row = db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(id) as ChatMessageRow | undefined;
   return row ?? null;
+}
+
+function listOrderedMessageIds(sessionId: string): OrderedMessageRow[] {
+  const db = getDb();
+  return db
+    .prepare("SELECT id, rowid AS _rowid FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC")
+    .all(sessionId) as OrderedMessageRow[];
+}
+
+function deleteMessageIds(ids: string[]): void {
+  if (ids.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare("DELETE FROM chat_messages WHERE id = ?");
+  for (const id of ids) {
+    stmt.run(id);
+  }
 }
 
 export function createMessage(input: CreateMessageInput): ChatMessageRow {
@@ -71,6 +92,34 @@ export function createMessage(input: CreateMessageInput): ChatMessageRow {
 
   touchSession(input.sessionId);
   return getMessageById(id)!;
+}
+
+export function updateMessageAndTruncateSession(messageId: string, content: string): ChatMessageRow | null {
+  const db = getDb();
+  const existing = getMessageById(messageId);
+  if (!existing) return null;
+
+  const ordered = listOrderedMessageIds(existing.session_id);
+  const index = ordered.findIndex((row) => row.id === messageId);
+  if (index === -1) return existing;
+
+  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
+  deleteMessageIds(ordered.slice(index + 1).map((row) => row.id));
+  touchSession(existing.session_id);
+  return getMessageById(messageId);
+}
+
+export function deleteMessageAndTruncateSession(messageId: string): boolean {
+  const existing = getMessageById(messageId);
+  if (!existing) return false;
+
+  const ordered = listOrderedMessageIds(existing.session_id);
+  const index = ordered.findIndex((row) => row.id === messageId);
+  if (index === -1) return false;
+
+  deleteMessageIds(ordered.slice(index).map((row) => row.id));
+  touchSession(existing.session_id);
+  return true;
 }
 
 export function formatMessage(row: ChatMessageRow) {
