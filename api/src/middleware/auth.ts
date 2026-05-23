@@ -124,7 +124,9 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
         };
         return next();
       }
-    } catch {}
+    } catch (error) {
+      console.warn("Failed to resolve default user from database", error);
+    }
 
     req.user = { id: "anonymous", name: "访客", role: "viewer", permissions: ROLE_PERMISSIONS["viewer"] || [], allowedSecurityLevels: ["public"] };
   }

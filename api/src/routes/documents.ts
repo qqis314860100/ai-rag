@@ -117,7 +117,9 @@ router.get("/documents/:id", async (req: Request, res: Response, next: NextFunct
       if (["md", "txt", "markdown"].includes(ext) && doc.file_path && fs.existsSync(doc.file_path)) {
         formatted.content = fs.readFileSync(doc.file_path, "utf-8");
       }
-    } catch {}
+    } catch (error) {
+      console.warn("Failed to attach document content preview", { documentId, error });
+    }
 
     sendSuccess(res, formatted, req.requestId);
   } catch (err) {
