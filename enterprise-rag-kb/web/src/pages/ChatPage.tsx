@@ -17,6 +17,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [selectedSources, setSelectedSources] = useState<Source[] | null>(null);
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
+  const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -336,6 +337,7 @@ export default function ChatPage() {
               onEditUser={handleEditUser}
               onDeleteMessage={handleDeleteMessage}
               onPreviewSource={setPreviewSource}
+              onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
             />
           </div>
         </div>
@@ -360,9 +362,11 @@ export default function ChatPage() {
           {showSourcePanel && (
             <SourcePanel
               sources={selectedSources!}
-              onClose={() => setSelectedSources(null)}
+              onClose={() => { setSelectedSources(null); setHighlightSourceIdx(null); }}
               onFollowUp={handleFollowUp}
               onPreview={setPreviewSource}
+              highlightIdx={highlightSourceIdx}
+              onHighlightDone={() => setHighlightSourceIdx(null)}
             />
           )}
         </div>

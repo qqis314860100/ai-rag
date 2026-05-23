@@ -4,7 +4,49 @@ dist/
 __pycache__/
 *.pyc
 data/
+services/rag/data/
 .env
 .DS_Store
+test_screenshots/
+screenshots/
+.vite/
+.clawhub/
+skills/
+evals/
+tests/
+package-lock.json
+*.egg-info/
+
+
+
+
+# Build artifacts
 *.egg-info/
 package-lock.json
+
+# Cache
+.clawhub/
+.claude/skills/
+apps/web/.claude/
+apps/web/.clawhub/
+
+# Test artifacts
+test_screenshots/
+
+# Environment (contains secrets)
+.env
+
+# macOS
+.DS_Store
+
+# Repo root docs (moved to enterprise-rag-kb/docs/)
+ONBOARDING.md
+enterprise-rag-kb-*.md
+agent-harness/
+data/
+
+# macOS
+.DS_Store
+
+# Data
+data/

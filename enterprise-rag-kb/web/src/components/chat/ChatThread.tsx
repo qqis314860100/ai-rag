@@ -21,6 +21,7 @@ interface ChatThreadProps {
   onEditUser: (messageId: string, content: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onPreviewSource: (source: Source) => void;
+  onSourceAnchor?: (sources: Source[], index: number) => void;
 }
 
 function formatTime(iso: string) {
@@ -144,7 +145,7 @@ function StreamStages() {
   );
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource, onSourceAnchor }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -350,7 +351,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   )}
                   <div className="text-[15px] leading-relaxed text-text">
-                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
+                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) { onSourceAnchor?.(msg.sources!, idx); onPreviewSource(s as Source); } }} />
                     {msg.streaming && (
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}
