@@ -145,12 +145,15 @@ export default function ChatInput({ onSend, onCancel, loading, disabled, inputRe
 
         {/* Send button */}
         <button
+          type="button"
           onClick={handleSend}
           disabled={loading ? false : (!message.trim() || disabled)}
           className={`shrink-0 h-[48px] w-[48px] rounded-full text-white flex items-center justify-center disabled:opacity-25 transition-all active:scale-95 shadow-sm-soft ${
             loading ? "bg-danger hover:bg-danger/90" : "bg-primary hover:bg-primary-hover"
           }`}
           title={loading ? "中断生成" : "发送"}
+          aria-label={loading ? "中断生成" : "发送消息"}
+          data-state={loading ? "interrupt" : "send"}
         >
           {loading ? (
             <StopCircle className="h-5 w-5" />

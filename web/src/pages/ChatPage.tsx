@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "../components/chat/ChatThread";
 import { SessionList } from "../components/chat/SessionList";
@@ -43,6 +43,25 @@ function MessagesSkeleton() {
   );
 }
 
+const CHAT_SCROLL_STORAGE_KEY = "chat-scroll-positions:v1";
+const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;
+
+type ChatScrollSnapshot = {
+  top: number;
+  distanceFromBottom: number;
+  atBottom: boolean;
+};
+
+function readChatScrollPositions(): Record<string, ChatScrollSnapshot> {
+  try {
+    const raw = sessionStorage.getItem(CHAT_SCROLL_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, ChatScrollSnapshot>;
+  } catch {
+    return {};
+  }
+}
+
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const urlSessionId = searchParams.get("session");
@@ -68,10 +87,13 @@ export default function ChatPage() {
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastSourcesRef = useRef<Source[] | null>(null);
   const pendingScrollSessionRef = useRef<string | null>(null);
   const sawLoadingForPendingSessionRef = useRef(false);
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  const scrollPositionsRef = useRef<Record<string, ChatScrollSnapshot>>(readChatScrollPositions());
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
@@ -122,6 +144,78 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  const persistScrollPositions = useCallback(() => {
+    try {
+      sessionStorage.setItem(CHAT_SCROLL_STORAGE_KEY, JSON.stringify(scrollPositionsRef.current));
+    } catch {
+      // Ignore storage quota/private mode failures; in-memory restoration still works while mounted.
+    }
+  }, []);
+
+  const saveScrollPosition = useCallback((sessionId = activeSessionIdRef.current) => {
+    const el = scrollContainerRef.current;
+    if (!sessionId || !el) return;
+
+    const distanceFromBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+    scrollPositionsRef.current[sessionId] = {
+      top: el.scrollTop,
+      distanceFromBottom,
+      atBottom: distanceFromBottom <= CHAT_SCROLL_BOTTOM_THRESHOLD,
+    };
+    persistScrollPositions();
+  }, [persistScrollPositions]);
+
+  const restoreScrollPosition = useCallback((sessionId: string) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const snapshot = scrollPositionsRef.current[sessionId];
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+
+    if (!snapshot || snapshot.atBottom) {
+      el.scrollTop = maxTop;
+      return;
+    }
+
+    el.scrollTop = Math.min(snapshot.top, maxTop);
+  }, []);
+
+  const removeScrollPosition = useCallback((sessionId: string) => {
+    delete scrollPositionsRef.current[sessionId];
+    persistScrollPositions();
+  }, [persistScrollPositions]);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    let raf = 0;
+    const handleScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        saveScrollPosition();
+        raf = 0;
+      });
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      saveScrollPosition();
+      el.removeEventListener("scroll", handleScroll);
+    };
+  }, [saveScrollPosition]);
+
+  useEffect(() => {
+    return () => {
+      saveScrollPosition();
+    };
+  }, [saveScrollPosition]);
+
+  useEffect(() => {
     if (selectedSources && selectedSources.length > 0) {
       lastSourcesRef.current = selectedSources;
     }
@@ -131,6 +225,7 @@ export default function ChatPage() {
     if (!activeSessionId) {
       pendingScrollSessionRef.current = null;
       sawLoadingForPendingSessionRef.current = false;
+      scrollContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
       return;
     }
 
@@ -138,7 +233,7 @@ export default function ChatPage() {
     sawLoadingForPendingSessionRef.current = false;
   }, [activeSessionId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const pendingSession = pendingScrollSessionRef.current;
     if (!pendingSession || activeSessionId !== pendingSession) return;
 
@@ -147,12 +242,25 @@ export default function ChatPage() {
       return;
     }
 
-    if (!sawLoadingForPendingSessionRef.current || messages.length === 0) return;
+    if (!sawLoadingForPendingSessionRef.current) return;
 
-    setScrollToBottomSignal((n) => n + 1);
+    let raf1 = 0;
+    let raf2 = 0;
+    const timer = window.setTimeout(() => restoreScrollPosition(pendingSession), 120);
+    raf1 = requestAnimationFrame(() => {
+      restoreScrollPosition(pendingSession);
+      raf2 = requestAnimationFrame(() => restoreScrollPosition(pendingSession));
+    });
+
     pendingScrollSessionRef.current = null;
     sawLoadingForPendingSessionRef.current = false;
-  }, [activeSessionId, messages.length, messagesLoading]);
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(timer);
+    };
+  }, [activeSessionId, messages.length, messagesLoading, restoreScrollPosition]);
 
   // ── Streaming placeholders ──
   const placeholderIdRef = useRef<string | null>(null);
@@ -169,7 +277,7 @@ export default function ChatPage() {
         return prev;
       });
     }
-  }, [stream.content]); // Only depend on content changes, not loading
+  }, [setMessages, stream.content, stream.loading]);
 
   // When stream ends (loading → false), finalize or remove placeholder
   useEffect(() => {
@@ -183,7 +291,32 @@ export default function ChatPage() {
     const pid = placeholderIdRef.current;
     placeholderIdRef.current = null;
 
-    if (stream.error || stream.stopped) {
+    if (stream.stopped) {
+      if (!stream.content.trim()) {
+        setMessages((prev) => prev.filter((m) => m.id !== pid));
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === pid
+            ? {
+                ...m,
+                id: `interrupted-${pid}`,
+                content: stream.content,
+                sources: [],
+                confidence: undefined,
+                followups: undefined,
+                streaming: false,
+                created_at: new Date().toISOString(),
+              }
+            : m
+        )
+      );
+      return;
+    }
+
+    if (stream.error) {
       setMessages((prev) => prev.filter((m) => m.id !== pid));
     } else {
       setMessages((prev) =>
@@ -204,10 +337,22 @@ export default function ChatPage() {
       );
       loadSessions();
     }
-  }, [stream.loading]);
+  }, [
+    loadSessions,
+    setMessages,
+    stream.confidence,
+    stream.content,
+    stream.error,
+    stream.followups,
+    stream.loading,
+    stream.messageId,
+    stream.sources,
+    stream.stopped,
+  ]);
 
   // ── Session actions ──
   const handleNewSession = useCallback(() => {
+    saveScrollPosition();
     if (activeSessionId && inputRef.current?.value) {
       saveDraft(activeSessionId, inputRef.current.value);
     }
@@ -219,7 +364,7 @@ export default function ChatPage() {
     setSelectedSources(null);
     setSidebarOpen(false);
     navigate("/chat", { replace: true });
-  }, [activeSessionId, cancelStream, isSending, navigate, saveDraft, setActiveSessionId, setMessages]);
+  }, [activeSessionId, cancelStream, isSending, navigate, saveDraft, saveScrollPosition, setActiveSessionId, setMessages]);
 
   const handleToggleSources = useCallback(() => {
     if (selectedSources && selectedSources.length > 0) {
@@ -252,6 +397,11 @@ export default function ChatPage() {
   }, []);
 
   const handleSelectSession = useCallback((id: string) => {
+    if (id === activeSessionId) {
+      setSidebarOpen(false);
+      return;
+    }
+    saveScrollPosition();
     // Save current draft before switching
     if (activeSessionId && inputRef.current?.value) {
       saveDraft(activeSessionId, inputRef.current.value);
@@ -262,15 +412,16 @@ export default function ChatPage() {
     setSelectedSources(null);
     setSidebarOpen(false);
     navigate(`/chat?session=${encodeURIComponent(id)}`, { replace: true });
-  }, [activeSessionId, setActiveSessionId, saveDraft, cancelStream, isSending, navigate]);
+  }, [activeSessionId, setActiveSessionId, saveDraft, saveScrollPosition, cancelStream, isSending, navigate]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
     const ok = await deleteSession(id);
     if (ok) {
       if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
       removeDraft(id);
+      removeScrollPosition(id);
     }
-  }, [activeSessionId, deleteSession, removeDraft, setActiveSessionId, setMessages]);
+  }, [activeSessionId, deleteSession, removeDraft, removeScrollPosition, setActiveSessionId, setMessages]);
 
   // ── Auto-save draft on input change ──
   const handleDraftChange = useCallback((val: string) => {
@@ -331,7 +482,7 @@ export default function ChatPage() {
     if (idx === -1) return;
     setMessages((prev) => prev.slice(0, idx));
     handleSend(newContent.trim());
-  }, [messages, handleSend, isSending]);
+  }, [messages, handleSend, isSending, setMessages]);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);
@@ -436,7 +587,7 @@ export default function ChatPage() {
         </header>
 
         {/* Scroll area */}
-        <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-white chat-scroll-area">
           <div className={chatContentClass}>
             {messagesLoading && messages.length === 0 ? (
               <MessagesSkeleton />

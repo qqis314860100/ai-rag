@@ -30,6 +30,10 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function canUsePersistedAssistantActions(messageId: string) {
+  return !messageId.startsWith("stream-") && !messageId.startsWith("interrupted-");
+}
+
 // Empty welcome state with categorized prompt suggestions
 function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
   const categories = [
@@ -240,7 +244,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     if (loading) { streamJustEnded.current = true; return; }
     // Delay feedback fetch slightly after stream ends to avoid flicker
     const timer = setTimeout(() => {
-      const msgIds = messages.filter(m => m.role === "assistant" && !m.id.startsWith("user-")).map(m => m.id);
+      const msgIds = messages
+        .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(m.id))
+        .map((m) => m.id);
       if (msgIds.length === 0) return;
       api.get<{ data: Record<string, { up: number; down: number; userVote?: string }> }>(`/stats/feedback-counts?message_ids=${msgIds.join(",")}`)
         .then(res => setFeedbackCounts(res.data || {}))
@@ -252,7 +258,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
   useEffect(() => {
     const msgIds = messages
-      .filter((m) => m.role === "assistant" && !m.streaming && !m.id.startsWith("stream-"))
+      .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(m.id))
       .map((m) => m.id);
 
     if (msgIds.length === 0) {
@@ -378,6 +384,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     <div className="py-6 space-y-10">
       {messages.map((msg, i) => {
         const isUser = msg.role === "user";
+        const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(msg.id);
         const fb = feedbackCounts[msg.id] || { up: 0, down: 0 };
 
         return (
@@ -520,20 +527,24 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
                     <Copy className="h-3 w-3" />
                   </button>
-                  <button onClick={() => handleFavorite(msg.id)} disabled={favoriting[msg.id]}
-                    className={`p-0.5 rounded transition-colors ${favoriteStatus[msg.id] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[msg.id] ? "取消收藏" : "收藏"}>
-                    <Star className="h-3 w-3" fill={favoriteStatus[msg.id] ? "currentColor" : "none"} />
-                  </button>
-                  <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
-                    className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
-                    <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
-                  </button>
-                  {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
-                  <button onClick={() => handleFeedback(msg.id, "down")} disabled={voting[msg.id]}
-                    className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="点踩">
-                    <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
-                  </button>
-                  {fb.down > 0 && <span className="text-[11px] text-text-muted">{fb.down}</span>}
+                  {canPersistAssistantActions && (
+                    <>
+                      <button onClick={() => handleFavorite(msg.id)} disabled={favoriting[msg.id]}
+                        className={`p-0.5 rounded transition-colors ${favoriteStatus[msg.id] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[msg.id] ? "取消收藏" : "收藏"}>
+                        <Star className="h-3 w-3" fill={favoriteStatus[msg.id] ? "currentColor" : "none"} />
+                      </button>
+                      <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
+                        className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
+                        <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
+                      </button>
+                      {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
+                      <button onClick={() => handleFeedback(msg.id, "down")} disabled={voting[msg.id]}
+                        className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="点踩">
+                        <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
+                      </button>
+                      {fb.down > 0 && <span className="text-[11px] text-text-muted">{fb.down}</span>}
+                    </>
+                  )}
                   <button onClick={onRetry}
                     className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成最近回答">
                     <RefreshCw className="h-3 w-3" />
