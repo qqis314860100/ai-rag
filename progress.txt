@@ -1,0 +1,19 @@
+# Progress
+
+## Completed Before Ralph Setup
+
+- `af4b255 fix(web): improve chat interruption state`
+  - Added safer interruption state handling in the chat UI.
+  - Prevented temporary `stream-*` and `interrupted-*` assistant messages from using persisted favorite/feedback actions.
+  - Verified `pnpm run lint:web`, `pnpm run build:web`, and browser login/send/interrupt smoke flow.
+
+## Current State
+
+- Ralph control files were initialized in local Claude mode.
+- No Ralph task iteration has been run yet.
+- Next iteration should pick exactly one incomplete task from `PRD.md`.
+
+## Notes
+
+- Do not edit root lockfiles or package metadata unless the selected task explicitly targets tooling.
+- Keep every commit single-service and verified before commit.
