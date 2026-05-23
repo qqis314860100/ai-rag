@@ -1,5 +1,7 @@
 # 贡献指南
 
+这份文档只保留提交相关的硬规则。完整的执行流程见 [项目执行规则清单](./EXECUTION_RULES.md)。
+
 ## Commit 规范
 
 采用 Conventional Commits，强制 scope 前缀。
@@ -7,9 +9,10 @@
 ### 核心规则
 
 1. **一个 commit 只改一个服务** — 不允许一个 commit 同时修改 `api/`、`web/`、`rag/` 中的多个
-2. **commit 信息不含 AI 相关内容** — 禁止 `Co-Authored-By`、`Claude`、`AI generated` 等
+2. **功能真的验证通过后才能提交** — 先修复/实现，再跑对应构建、测试和真实流程验证，确认可用后才 commit
+3. **commit 信息不含 AI 相关内容** — 禁止 `Co-Authored-By`、`Claude`、`AI generated` 等
 
-> 原因：`git revert` 回滚整个 commit，如果混合修改多个服务，回滚前端会连带回滚后端。
+> 原因：`git revert` 回滚整个 commit，如果混合修改多个服务，回滚前端会连带回滚后端；如果没先验证就提交，后面很难区分是代码问题还是流程问题。
 
 ### 格式
 
@@ -37,6 +40,8 @@
 | `rag` | `rag/` — Python RAG 服务 |
 
 `chore` 类型可省略 scope。
+
+> 如果一个任务跨多个服务，请拆成多个 commit，每个 commit 自己完成验证闭环。
 
 ### 示例
 
