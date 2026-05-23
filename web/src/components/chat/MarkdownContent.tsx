@@ -64,13 +64,13 @@ function renderMarkdownLine(line: string): string {
   }
 
   // Unordered list
-  const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
+  const ulMatch = line.match(/^[-*]\s+(.+)$/);
   if (ulMatch) {
     return `<li class="ml-4 list-disc marker:text-accent">${renderInline(ulMatch[1])}</li>`;
   }
 
   // Ordered list
-  const olMatch = line.match(/^\d+[\.\)]\s+(.+)$/);
+  const olMatch = line.match(/^\d+[.)]\s+(.+)$/);
   if (olMatch) {
     return `<li class="ml-4 list-decimal marker:text-accent marker:font-medium">${renderInline(olMatch[1])}</li>`;
   }

@@ -468,6 +468,7 @@ export default function ChatPage() {
           <div className={`${chatContentClass} py-3`}>
             <ChatInput
               onSend={handleSend}
+              onCancel={cancelStream}
               loading={stream.loading}
               inputRef={inputRef}
               draftValue={activeSessionId ? getDraft(activeSessionId) : ""}

@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
-import { ArrowUp, Paperclip, Image, Mic, Keyboard } from "lucide-react";
+import { ArrowUp, Paperclip, Image, Mic, Keyboard, StopCircle } from "lucide-react";
 import { showToast } from "../ui/Toast";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
+  onCancel?: () => void;
   loading: boolean;
   disabled?: boolean;
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
@@ -19,7 +20,7 @@ const placeholders = [
   "试试问：EOL 测试规范要求是什么？",
 ];
 
-export default function ChatInput({ onSend, loading, disabled, inputRef, draftValue, onDraftChange }: ChatInputProps) {
+export default function ChatInput({ onSend, onCancel, loading, disabled, inputRef, draftValue, onDraftChange }: ChatInputProps) {
   const [message, setMessage] = useState(draftValue || "");
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const internalRef = useRef<HTMLTextAreaElement>(null);
@@ -52,7 +53,7 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
-  }, []);
+  }, [textareaRef]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setMessage(e.target.value);
@@ -75,6 +76,10 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
   }, []);
 
   const handleSend = useCallback(() => {
+    if (loading) {
+      onCancel?.();
+      return;
+    }
     const trimmed = message.trim();
     if (!trimmed || loading || disabled) return;
     onSend(trimmed);
@@ -84,7 +89,7 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
     const ta = textareaRef.current;
     if (ta) ta.style.height = "auto";
     textareaRef.current?.focus();
-  }, [message, loading, disabled, onSend, onDraftChange]);
+  }, [message, loading, disabled, onSend, onCancel, onDraftChange, textareaRef]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -141,11 +146,14 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
         {/* Send button */}
         <button
           onClick={handleSend}
-          disabled={!message.trim() || loading || disabled}
-          className="shrink-0 h-[48px] w-[48px] rounded-full bg-primary text-white flex items-center justify-center hover:bg-primary-hover disabled:opacity-25 transition-all active:scale-95 shadow-sm-soft"
+          disabled={loading ? false : (!message.trim() || disabled)}
+          className={`shrink-0 h-[48px] w-[48px] rounded-full text-white flex items-center justify-center disabled:opacity-25 transition-all active:scale-95 shadow-sm-soft ${
+            loading ? "bg-danger hover:bg-danger/90" : "bg-primary hover:bg-primary-hover"
+          }`}
+          title={loading ? "中断生成" : "发送"}
         >
           {loading ? (
-            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            <StopCircle className="h-5 w-5" />
           ) : (
             <ArrowUp className="h-5 w-5" />
           )}

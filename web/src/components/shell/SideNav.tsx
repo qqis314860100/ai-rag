@@ -41,7 +41,7 @@ export default function SideNav() {
             key={to + label}
             to={to}
             end
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               `flex items-center rounded-lg transition-all duration-fast ${
                 expanded ? "gap-3 px-3" : "justify-center"
               } py-2.5 text-sm font-medium ${

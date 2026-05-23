@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { ThumbsUp, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import { api } from "../../services/api";
@@ -270,6 +270,17 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     showToast("success", "已复制到剪贴板");
   };
 
+  const handleStartEdit = (msg: ChatMessage) => {
+    setEditingMsgId(msg.id);
+    setEditValue(msg.content);
+  };
+
+  const handleDeleteUserMessage = (msg: ChatMessage) => {
+    const ok = window.confirm("确认删除这一轮问答及其后续分支吗？此操作会连带删除对应回答。");
+    if (!ok) return;
+    onDeleteMessage(msg.id);
+  };
+
   const handleFavorite = async (messageId: string) => {
     if (favoriting[messageId]) return;
 
@@ -396,22 +407,25 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 ) : (
-                  /* User bubble — click to edit, hover shows copy+delete on the left */
+                  /* User bubble — hover shows copy/edit/delete on the left */
                   <div className="relative group/bubble inline-flex items-center gap-1">
-                    {/* Copy + delete on hover — appear to the LEFT of the bubble */}
+                    {/* Copy + edit + delete on hover — appear to the LEFT of the bubble */}
                     <div className="flex items-center gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity order-first">
                       <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.content); }}
                         className="p-1 rounded text-text-muted hover:text-text transition-colors" title="复制">
                         <Copy className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); onDeleteMessage(msg.id); }}
-                        className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="删除">
+                      <button onClick={(e) => { e.stopPropagation(); handleStartEdit(msg); }}
+                        className="p-1 rounded text-text-muted hover:text-accent transition-colors" title="编辑并重新提问">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteUserMessage(msg); }}
+                        className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="删除本轮问答">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                     <div
-                      onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
-                      className="rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap cursor-pointer hover:bg-[#EDEAE6] transition-colors"
+                      className="rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap hover:bg-[#EDEAE6] transition-colors"
                     >
                       {msg.content}
                     </div>
@@ -506,10 +520,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
                     <Copy className="h-3 w-3" />
                   </button>
-                  <button onClick={() => onDeleteMessage(msg.id)}
-                    className="p-0.5 rounded text-text-muted hover:text-danger transition-colors" title="删除">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
                   <button onClick={() => handleFavorite(msg.id)} disabled={favoriting[msg.id]}
                     className={`p-0.5 rounded transition-colors ${favoriteStatus[msg.id] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[msg.id] ? "取消收藏" : "收藏"}>
                     <Star className="h-3 w-3" fill={favoriteStatus[msg.id] ? "currentColor" : "none"} />
@@ -519,6 +529,24 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
                   </button>
                   {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
+                  <button onClick={() => handleFeedback(msg.id, "down")} disabled={voting[msg.id]}
+                    className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="点踩">
+                    <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
+                  </button>
+                  {fb.down > 0 && <span className="text-[11px] text-text-muted">{fb.down}</span>}
+                  <button onClick={onRetry}
+                    className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成最近回答">
+                    <RefreshCw className="h-3 w-3" />
+                  </button>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <button
+                      onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
+                      className="p-0.5 rounded text-text-muted hover:text-accent transition-colors"
+                      title="查看引用"
+                    >
+                      <FileSearch className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
               )}
             </div>
