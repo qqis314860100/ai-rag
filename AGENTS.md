@@ -30,6 +30,8 @@ Read these before editing anything:
 - `scope` must be one of `web`, `api`, or `rag`.
 - Do not include AI-related footer text in commit messages.
 - Treat single-service commits as the unit for future rollback.
+- If you run a Ralph loop or any other autonomous coding loop, it still must obey the same single-service, single-task, verify-before-commit rules.
+- Do not start an autonomous loop on a dirty worktree unless the user explicitly accepts the risk.
 - New human-readable documentation files created from project discussion must use Chinese filenames and Chinese titles, such as requirements, design, architecture, technical notes, and plans. Do not force rename historical English docs, and do not apply this rule to code, config, scripts, tests, assets, or identifiers.
 
 ## Architecture Boundaries
