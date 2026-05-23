@@ -37,21 +37,37 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [voting, setVoting] = useState<Record<string, boolean>>({});
 
   const prevContentLen = useRef(0);
-  useEffect(() => {
-    // Only scroll during active streaming (content growing). Never on completion.
-    if (loading && streamingContent.length > prevContentLen.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "instant" });
-    }
-    prevContentLen.current = streamingContent.length;
-  }, [streamingContent, loading]);
+  const scrollRaf = useRef<number>(0);
 
   useEffect(() => {
-    const msgIds = messages.filter(m => m.role === "assistant" && !m.id.startsWith("user-")).map(m => m.id);
-    if (msgIds.length === 0) return;
-    api.get<{ data: Record<string, { up: number; down: number; userVote?: string }> }>(`/stats/feedback-counts?message_ids=${msgIds.join(",")}`)
-      .then(res => setFeedbackCounts(res.data || {}))
-      .catch(() => {});
-  }, [messages]);
+    // Smooth scroll during streaming — throttled via rAF for 60fps
+    if (loading && streamingContent.length > prevContentLen.current) {
+      if (!scrollRaf.current) {
+        scrollRaf.current = requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ block: "end" });
+          scrollRaf.current = 0;
+        });
+      }
+    }
+    prevContentLen.current = streamingContent.length;
+    return () => { if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current); };
+  }, [streamingContent, loading]);
+
+  // Fetch feedback counts — skip during streaming to avoid flicker
+  const streamJustEnded = useRef(false);
+  useEffect(() => {
+    if (loading) { streamJustEnded.current = true; return; }
+    // Delay feedback fetch slightly after stream ends to avoid flicker
+    const timer = setTimeout(() => {
+      const msgIds = messages.filter(m => m.role === "assistant" && !m.id.startsWith("user-")).map(m => m.id);
+      if (msgIds.length === 0) return;
+      api.get<{ data: Record<string, { up: number; down: number; userVote?: string }> }>(`/stats/feedback-counts?message_ids=${msgIds.join(",")}`)
+        .then(res => setFeedbackCounts(res.data || {}))
+        .catch(() => {});
+    }, streamJustEnded.current ? 300 : 0);
+    streamJustEnded.current = false;
+    return () => clearTimeout(timer);
+  }, [messages, loading]);
 
   const handleCopy = (id: string, content: string) => {
     navigator.clipboard.writeText(content);
