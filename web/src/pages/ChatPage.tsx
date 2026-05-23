@@ -606,7 +606,6 @@ export default function ChatPage() {
                 onRetry={handleRetry}
                 onEditUser={handleEditUser}
                 onDeleteMessage={handleDeleteMessage}
-                onPreviewSource={setPreviewSource}
                 onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
                 scrollToBottomSignal={scrollToBottomSignal}
               />

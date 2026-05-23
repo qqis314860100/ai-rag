@@ -1,5 +1,5 @@
-import { useRef, useEffect } from "react";
-import { X, FileText, ArrowRight, ShieldCheck, Copy } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { X, FileText, ArrowRight, ShieldCheck, Copy, MessageSquare, Layers } from "lucide-react";
 import type { Source } from "../../types";
 
 interface SourcePanelProps {
@@ -19,138 +19,184 @@ function scoreMeta(score: number) {
 }
 
 export default function SourcePanel({ sources, onClose, onFollowUp, onPreview, highlightIdx, onHighlightDone }: SourcePanelProps) {
-  const listRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(() => {
+    if (highlightIdx != null && sources[highlightIdx]) return highlightIdx;
+    return 0;
+  });
 
-  // Scroll to highlighted source and flash it
   useEffect(() => {
-    if (highlightIdx == null || !listRef.current) return;
-    const el = listRef.current.children[highlightIdx] as HTMLElement | undefined;
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("source-flash");
-      const t = setTimeout(() => {
-        el.classList.remove("source-flash");
-        onHighlightDone?.();
-      }, 1500);
-      return () => clearTimeout(t);
-    }
-  }, [highlightIdx, onHighlightDone]);
+    if (highlightIdx == null || !sources[highlightIdx]) return;
+    setActiveIndex(highlightIdx);
+    const t = setTimeout(() => onHighlightDone?.(), 300);
+    return () => clearTimeout(t);
+  }, [highlightIdx, onHighlightDone, sources]);
 
-  const handleSourceClick = (source: Source) => {
-    if (onPreview) { onPreview(source); return; }
-    if (onFollowUp) {
-      const title = source.document_title || "该文档";
-      onFollowUp(`请详细介绍《${title}》中"${source.section_path}"的相关内容`);
-    }
+  useEffect(() => {
+    if (sources[activeIndex]) return;
+    setActiveIndex(0);
+  }, [activeIndex, sources]);
+
+  const activeSource = sources[activeIndex] || sources[0];
+  const activeMeta = useMemo(
+    () => scoreMeta(activeSource?.score || 0),
+    [activeSource?.score]
+  );
+
+  const handleFollowUpClick = (source: Source) => {
+    if (!onFollowUp) return;
+    const title = source.document_title || "该文档";
+    onFollowUp(`请详细介绍《${title}》中"${source.section_path}"的相关内容`);
   };
+
+  if (!activeSource) return null;
+
+  const ActiveIcon = activeMeta.icon;
+  const detailText = activeSource.content || activeSource.snippet || "暂无可展示的引用内容";
 
   return (
     <div className="flex w-80 shrink-0 flex-col border-l border-divider bg-surface overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3.5 border-b border-divider">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-accent" />
-          <h3 className="text-sm font-semibold text-text">引用来源 · {sources.length} 条</h3>
+          <h3 className="text-sm font-semibold text-text">证据详情</h3>
         </div>
         <button onClick={onClose} className="rounded-lg p-1.5 text-text-muted hover:bg-surface-hover hover:text-text transition-colors">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div ref={listRef} className="flex-1 overflow-y-auto p-3 space-y-3">
-        {sources.map((source, idx) => {
-          const meta = scoreMeta(source.score);
-          const Icon = meta.icon;
-
-          return (
-            <div
-              key={source.chunk_id}
-              onClick={() => handleSourceClick(source)}
-              className={`group rounded-xl border bg-surface-page p-4 cursor-pointer hover:border-accent/40 hover:shadow-md-soft transition-all duration-normal ${meta.border}`}
-            >
-              {/* Header: rank + document title */}
-              <div className="flex items-start gap-2.5">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${meta.bg} ${meta.color}`}>
-                  {idx + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-text group-hover:text-accent transition-colors leading-snug">
-                    {source.document_title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    {source.version && (
-                      <span className="text-[10px] text-text-muted bg-surface-hover rounded px-1.5 py-0.5 font-mono">
-                        V{source.version}
-                      </span>
-                    )}
-                    {source.document_type && (
-                      <span className="text-[10px] text-text-muted bg-surface-hover rounded px-1.5 py-0.5">
-                        {source.document_type}
-                      </span>
-                    )}
-                    {source.category && (
-                      <span className="text-[10px] text-text-muted bg-surface-hover rounded px-1.5 py-0.5">
-                        {source.category}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Section path */}
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-text-muted">
-                <span className="text-text-muted/50">章节</span>
-                <span className="text-text-secondary font-medium">{source.section_path}</span>
-              </div>
-
-              {/* Score bar */}
-              <div className="mt-3 flex items-center gap-2">
-                <div className="flex-1 h-1.5 rounded-full bg-border overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ease-out ${meta.color.replace("text-", "bg-")}`}
-                    style={{ width: `${Math.round(source.score * 100)}%` }}
-                  />
-                </div>
-                <span className={`text-[11px] font-semibold ${meta.color}`}>
-                  {Math.round(source.score * 100)}%
-                </span>
-              </div>
-
-              {/* Snippet */}
-              <p className="mt-3 text-xs leading-relaxed text-text-secondary line-clamp-3 pl-3 border-l-2 border-border/50">
-                {source.snippet}
-              </p>
-
-              {/* Actions */}
-              <div className="mt-3 flex items-center gap-2 pt-2.5 border-t border-divider">
-                <span className="flex items-center gap-1 text-[10px] text-text-muted" title={meta.label}>
-                  <Icon className="h-3 w-3" />
-                  {meta.label}
-                </span>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(source.snippet);
-                  }}
-                  className="ml-auto rounded-md p-1 text-text-muted hover:bg-surface-hover hover:text-text transition-colors"
-                  title="复制引用内容"
-                >
-                  <Copy className="h-3 w-3" />
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleSourceClick(source);
-                  }}
-                  className="rounded-md px-2 py-1 text-[11px] text-accent hover:bg-accent-soft transition-colors font-medium inline-flex items-center gap-1"
-                >
-                  查看原文 <ArrowRight size={10} />
-                </button>
-              </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="border-b border-divider bg-surface-page/60 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${activeMeta.bg} ${activeMeta.color}`}>
+              {activeIndex + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-snug text-text">{activeSource.document_title}</p>
+              <p className="mt-1 text-xs leading-relaxed text-text-muted">{activeSource.section_path}</p>
             </div>
-          );
-        })}
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${activeMeta.bg} ${activeMeta.color}`}>
+              <ActiveIcon className="h-3 w-3" />
+              {activeMeta.label}
+            </span>
+            <span className="text-[11px] font-semibold text-text-secondary">
+              相关度 {Math.round(activeSource.score * 100)}%
+            </span>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ease-out ${activeMeta.color.replace("text-", "bg-")}`}
+                style={{ width: `${Math.round(activeSource.score * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="space-y-2 rounded-xl border border-border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-text">
+              <FileText className="h-3.5 w-3.5 text-accent" />
+              引用片段
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
+              {detailText}
+            </p>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-text-muted">
+            {activeSource.version && (
+              <div className="rounded-lg bg-surface-page px-2 py-1.5">
+                版本 <span className="font-mono text-text-secondary">V{activeSource.version}</span>
+              </div>
+            )}
+            {activeSource.document_type && (
+              <div className="rounded-lg bg-surface-page px-2 py-1.5">
+                类型 <span className="text-text-secondary">{activeSource.document_type}</span>
+              </div>
+            )}
+            {activeSource.category && (
+              <div className="rounded-lg bg-surface-page px-2 py-1.5">
+                分类 <span className="text-text-secondary">{activeSource.category}</span>
+              </div>
+            )}
+            {activeSource.page_number !== undefined && activeSource.page_number > 0 && (
+              <div className="rounded-lg bg-surface-page px-2 py-1.5">
+                页码 <span className="text-text-secondary">{activeSource.page_number}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={() => navigator.clipboard.writeText(detailText)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:border-accent/40 hover:text-text transition-colors"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              复制片段
+            </button>
+            {onFollowUp && (
+              <button
+                onClick={() => handleFollowUpClick(activeSource)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:border-accent/40 hover:text-accent transition-colors"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                基于证据追问
+              </button>
+            )}
+            {onPreview && (
+              <button
+                onClick={() => onPreview(activeSource)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent-soft px-3 py-2 text-xs font-medium text-accent hover:bg-accent hover:text-white transition-colors"
+              >
+                查看原文 <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {sources.length > 1 && (
+          <div className="border-t border-divider p-3">
+            <div className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-text-muted">
+              <Layers className="h-3.5 w-3.5" />
+              同一回答的其他证据
+            </div>
+            <div className="space-y-2">
+              {sources.map((source, idx) => {
+                const meta = scoreMeta(source.score);
+                const selected = idx === activeIndex;
+                return (
+                  <button
+                    key={source.chunk_id}
+                    onClick={() => setActiveIndex(idx)}
+                    className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                      selected
+                        ? "border-accent/50 bg-accent-soft/60"
+                        : "border-border bg-surface-page hover:border-accent/30 hover:bg-white"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-[10px] font-bold ${meta.bg} ${meta.color}`}>
+                        {idx + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-text-secondary">
+                        {source.document_title}
+                      </span>
+                      <span className={`text-[10px] font-semibold ${meta.color}`}>
+                        {Math.round(source.score * 100)}%
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate pl-7 text-[11px] text-text-muted">{source.section_path}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -21,7 +21,6 @@ interface ChatThreadProps {
   onRetry: () => void;
   onEditUser: (messageId: string, content: string) => void;
   onDeleteMessage: (messageId: string) => void;
-  onPreviewSource: (source: Source) => void;
   onSourceAnchor?: (sources: Source[], index: number) => void;
 }
 
@@ -150,7 +149,7 @@ function StreamStages() {
   );
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource, onSourceAnchor }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onSourceAnchor }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -469,7 +468,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   )}
                   <div className="text-[15px] leading-relaxed text-text">
-                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) { onSourceAnchor?.(msg.sources!, idx); onPreviewSource(s as Source); } }} />
+                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }} />
                     {msg.streaming && (
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}
@@ -489,7 +488,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     >
                       <FileSearch className="h-3.5 w-3.5 text-accent" />
                       <span className="text-xs text-text-secondary">
-                        引用来源
+                        查看证据
                         <span className="font-semibold text-accent ml-1">{msg.sources.length}</span> 条
                       </span>
                       {msg.confidence !== undefined && msg.confidence > 0 && (
@@ -553,7 +552,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     <button
                       onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
                       className="p-0.5 rounded text-text-muted hover:text-accent transition-colors"
-                      title="查看引用"
+                      title="查看证据详情"
                     >
                       <FileSearch className="h-3 w-3" />
                     </button>
