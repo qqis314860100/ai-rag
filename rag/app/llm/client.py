@@ -2,6 +2,7 @@ import time
 import logging
 from openai import OpenAI
 from ..core.config import config
+from .usage_guard import LlmBudgetExceeded, check_budget, estimate_input_chars, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,10 @@ def chat(
 
     client = _get_client()
     start = time.time()
+    input_chars = estimate_input_chars(messages)
 
     try:
+        check_budget(input_chars)
         response = client.chat.completions.create(
             model=config.deepseek_model,
             messages=messages,
@@ -51,14 +54,42 @@ def chat(
             return {"stream": response, "model": config.deepseek_model, "latency_ms": 0}
         elapsed_ms = int((time.time() - start) * 1000)
         content = response.choices[0].message.content or ""
+        record_usage(
+            mode="chat",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            output_chars=len(content),
+            latency_ms=elapsed_ms,
+        )
 
         return {
             "content": content,
             "model": config.deepseek_model,
             "latency_ms": elapsed_ms,
         }
+    except LlmBudgetExceeded as e:
+        logger.warning("DeepSeek call blocked by local budget guard: %s", e)
+        record_usage(
+            mode="chat",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            status="blocked",
+            error=str(e),
+        )
+        return {
+            "content": f"本次请求已被本地预算保护拦截：{e}",
+            "model": config.deepseek_model + " (blocked)",
+            "latency_ms": 0,
+        }
     except Exception as e:
         logger.error(f"DeepSeek API error: {e}")
+        record_usage(
+            mode="chat",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            status="error",
+            error=str(e),
+        )
         # Fallback to mock on error
         return _mock_chat(messages, error=str(e))
 
@@ -69,7 +100,6 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
 
     if not _has_api_key():
         # Mock streaming
-        import re
         mock = _mock_chat(messages)
         content = mock["content"]
         for i in range(0, len(content), 3):
@@ -77,7 +107,12 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
         yield f"data: {_sse_json({'type': 'done', 'model': mock['model'], 'latency_ms': mock['latency_ms']})}\n\n"
         return
 
+    start = time.time()
+    input_chars = estimate_input_chars(messages)
+    output_chars = 0
+
     try:
+        check_budget(input_chars)
         response = client.chat.completions.create(
             model=config.deepseek_model,
             messages=messages,
@@ -88,10 +123,37 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
         for chunk in response:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
+                output_chars += len(delta.content)
                 yield f"data: {_sse_json({'type': 'token', 'content': delta.content})}\n\n"
+        elapsed_ms = int((time.time() - start) * 1000)
+        record_usage(
+            mode="stream",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            output_chars=output_chars,
+            latency_ms=elapsed_ms,
+        )
         yield f"data: {_sse_json({'type': 'done', 'model': config.deepseek_model, 'latency_ms': 0})}\n\n"
+    except LlmBudgetExceeded as e:
+        logger.warning("DeepSeek streaming call blocked by local budget guard: %s", e)
+        record_usage(
+            mode="stream",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            status="blocked",
+            error=str(e),
+        )
+        yield f"data: {_sse_json({'type': 'error', 'message': f'本次请求已被本地预算保护拦截：{e}'})}\n\n"
     except Exception as e:
         logger.error(f"DeepSeek streaming error: {e}")
+        record_usage(
+            mode="stream",
+            model=config.deepseek_model,
+            input_chars=input_chars,
+            output_chars=output_chars,
+            status="error",
+            error=str(e),
+        )
         yield f"data: {_sse_json({'type': 'error', 'message': str(e)})}\n\n"
 
 def _sse_json(obj: dict) -> str:

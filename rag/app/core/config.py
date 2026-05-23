@@ -49,7 +49,16 @@ def _read_db_setting_float(key: str, default: float) -> float:
         return default
 
 
+def _read_env_int(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 class Config:
+    project_root: str = str(_root)
+
     chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma")
     chroma_collection: str = os.getenv("CHROMA_COLLECTION", "battery_line_knowledge_v1")
 
@@ -63,6 +72,11 @@ class Config:
     rag_top_k: int = _read_db_setting_int("rag_top_k", int(os.getenv("RAG_TOP_K", "5")))
     rag_temperature: float = _read_db_setting_float("rag_temperature", float(os.getenv("RAG_TEMPERATURE", "0.2")))
     rag_max_context_chars: int = _read_db_setting_int("rag_max_context_chars", int(os.getenv("RAG_MAX_CONTEXT_CHARS", "12000")))
+
+    llm_usage_log_path: str = os.getenv("LLM_USAGE_LOG_PATH", "./data/llm_usage.jsonl")
+    llm_max_input_chars_per_request: int = _read_env_int("LLM_MAX_INPUT_CHARS_PER_REQUEST", 25000)
+    llm_daily_request_limit: int = _read_env_int("LLM_DAILY_REQUEST_LIMIT", 50)
+    llm_daily_input_char_limit: int = _read_env_int("LLM_DAILY_INPUT_CHAR_LIMIT", 300000)
 
 
 config = Config()

@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from ..core.pipeline import RagPipeline, _estimate_confidence, _suggest_followups
+from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
     SearchRequest, SearchResult,
@@ -27,6 +28,11 @@ def health():
         "embedding_model": pipeline.config.embedding_model,
         "llm_provider": pipeline.config.deepseek_model,
     }
+
+
+@router.get("/usage")
+def usage():
+    return usage_summary()
 
 
 @router.get("/documents")
