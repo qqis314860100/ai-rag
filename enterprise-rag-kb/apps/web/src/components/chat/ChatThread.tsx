@@ -38,16 +38,12 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
   const prevContentLen = useRef(0);
   useEffect(() => {
+    // Only scroll during active streaming (content growing). Never on completion.
     if (loading && streamingContent.length > prevContentLen.current) {
       bottomRef.current?.scrollIntoView({ behavior: "instant" });
     }
     prevContentLen.current = streamingContent.length;
-    if (!loading && messages.length > 0) {
-      const lastMsg = messages[messages.length - 1];
-      const justAdded = lastMsg && Date.now() - new Date(lastMsg.created_at).getTime() < 500;
-      if (justAdded) bottomRef.current?.scrollIntoView({ behavior: "instant" });
-    }
-  }, [messages, streamingContent, loading]);
+  }, [streamingContent, loading]);
 
   useEffect(() => {
     const msgIds = messages.filter(m => m.role === "assistant" && !m.id.startsWith("user-")).map(m => m.id);
@@ -147,24 +143,24 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 ) : (
-                  /* User bubble — click to edit, hover shows copy+delete */
-                  <div className="relative group/bubble inline-block">
-                    <div
-                      onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
-                      className="inline-block rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap cursor-pointer hover:bg-[#EDEAE6] transition-colors"
-                    >
-                      {msg.content}
-                    </div>
-                    {/* Floating copy + delete on hover */}
-                    <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity">
+                  /* User bubble — click to edit, hover shows copy+delete on the left */
+                  <div className="relative group/bubble inline-flex items-center gap-1">
+                    {/* Copy + delete on hover — appear to the LEFT of the bubble */}
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity order-first">
                       <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.id, msg.content); }}
-                        className="p-1 rounded-lg bg-white border border-border shadow-sm text-text-muted hover:text-text transition-colors" title="复制">
-                        <Copy className="h-3 w-3" />
+                        className="p-1 rounded text-text-muted hover:text-text transition-colors" title="复制">
+                        <Copy className="h-3.5 w-3.5" />
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); onDeleteMessage(msg.id); }}
-                        className="p-1 rounded-lg bg-white border border-border shadow-sm text-text-muted hover:text-danger transition-colors" title="删除">
-                        <Trash2 className="h-3 w-3" />
+                        className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="删除">
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
+                    </div>
+                    <div
+                      onClick={() => { setEditingMsgId(msg.id); setEditValue(msg.content); }}
+                      className="rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap cursor-pointer hover:bg-[#EDEAE6] transition-colors"
+                    >
+                      {msg.content}
                     </div>
                   </div>
                 )
