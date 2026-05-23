@@ -10,10 +10,25 @@
 ## Current State
 
 - Ralph control files were initialized in local Claude mode.
-- No Ralph task iteration has been run yet.
+- `./ralph-once.sh` was attempted, but local Claude Code failed with a 403 permission error for `/v1/messages`.
+- The first iteration was completed by Codex as a manual Ralph fallback.
 - Next iteration should pick exactly one incomplete task from `PRD.md`.
+
+## Completed Ralph Iterations
+
+- `49d1a39 feat(web): focus chat source details`
+  - Task: `web` source side panel replacement.
+  - Changed the chat source panel from an all-source list into an answer-scoped evidence detail drawer.
+  - Inline citation clicks now open the evidence detail drawer rather than jumping straight to the original document preview.
+  - The drawer keeps same-answer evidence switching as a secondary control and exposes separate actions for copying, follow-up, and original preview.
+  - Verification:
+    - `pnpm run lint:web` passed with existing warnings in unrelated files.
+    - `pnpm run build:web` passed.
+    - Browser smoke verified admin login and chat page render with no console errors.
+  - Browser sample boundary: the current seeded/active chat data did not expose a message with sources, so the evidence drawer was not fully opened against real source data in-browser.
 
 ## Notes
 
 - Do not edit root lockfiles or package metadata unless the selected task explicitly targets tooling.
 - Keep every commit single-service and verified before commit.
+- Ralph scripts now need a non-Claude runner fallback because local Claude Code is not authorized in this environment.

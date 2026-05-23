@@ -21,7 +21,7 @@ This Ralph loop must follow the repository rules in `AGENTS.md`, `CLAUDE.md`, `d
 
 ## Tasks
 
-- [ ] `web`: Replace the current source side panel behavior with an answer-scoped source detail drawer or modal so source clicks open focused evidence details instead of treating the right side as a full source warehouse.
+- [x] `web`: Replace the current source side panel behavior with an answer-scoped source detail drawer or modal so source clicks open focused evidence details instead of treating the right side as a full source warehouse.
 - [ ] `web`: Add a right-side session navigator shell for current conversation context, including sections for current thread, recent evidence, and notes placeholders without requiring new backend APIs.
 - [ ] `web`: Add a unified preview shell that can render the existing source detail fields and expose format tabs for text/markdown/raw content, leaving PDF/HTML/code expansion behind clear disabled states if backend data is not ready.
 - [ ] `web`: Add a graph generation entry point in the chat UI with a disabled or local placeholder state that does not call missing backend APIs.
