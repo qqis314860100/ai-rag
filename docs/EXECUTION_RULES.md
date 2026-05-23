@@ -59,10 +59,18 @@
 ## 6. Commit 规则
 
 - 一个 commit 只改一个服务：`api/`、`web/`、`rag/` 三者不能混在一起
-- 使用 Conventional Commits
+- 如果一个任务横跨多个服务，必须拆成多个 commit，分别完成各自验证后再提交
+- 如果当前 diff 已经混入多个服务，先拆分再提交，禁止先混合提交后补救
+- 使用 Conventional Commits：`type(scope): description`
 - `scope` 只允许 `api`、`web`、`rag`
 - commit 信息里不要带 AI 相关内容，例如 `Co-Authored-By`、`Claude`、`AI generated`
-- 如果一个任务横跨多个服务，拆成多个 commit，分别验证
+
+### 6.1 回滚约束
+
+- 只允许直接回滚单服务 commit
+- 混合多个服务的 commit 视为违规提交，不作为长期回滚单位
+- 如果历史上出现了混合 commit，优先拆分或重写历史，再做回滚
+- 需要回滚时，优先按单个 service commit 处理，避免把无关改动一起撤掉
 
 ## 7. 推荐的验收顺序
 
@@ -78,4 +86,3 @@ pnpm build:web
 pnpm build:api
 cd api && ./tests/run-tests.sh
 ```
-

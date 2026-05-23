@@ -66,7 +66,7 @@ pnpm dev:rag      # RAG 服务 (Python)
 
 ### 开发与提交规则
 
-- 先看 [项目执行规则清单](docs/EXECUTION_RULES.md)
+- 先看 [CLAUDE.md](CLAUDE.md) 和 [项目执行规则清单](docs/EXECUTION_RULES.md)
 - 先验证功能真的可用，再提交
 - 一个 commit 只改一个服务，不能混 `web` / `api` / `rag`
 
