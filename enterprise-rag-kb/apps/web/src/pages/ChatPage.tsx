@@ -60,12 +60,24 @@ export default function ChatPage() {
       .catch(() => setMessages([]));
   }, [activeSessionId]);
 
-  // When stream completes, reload messages and sessions
+  // When stream completes, add AI message from stream data (no flicker)
   useEffect(() => {
-    if (!stream.loading && stream.messageId && activeSessionId) {
-      api.get<{ data: { messages: ChatMessage[] } }>(`/chat/sessions/${activeSessionId}`)
-        .then((res) => setMessages(res.data.messages || []))
-        .catch(() => {});
+    if (!stream.loading && stream.messageId && stream.content && activeSessionId) {
+      const aiMsg: ChatMessage = {
+        id: stream.messageId,
+        session_id: activeSessionId,
+        role: "assistant",
+        content: stream.content,
+        sources: stream.sources,
+        confidence: stream.confidence || undefined,
+        followups: stream.followups || undefined,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => {
+        // Avoid duplicate
+        if (prev.some((m) => m.id === stream.messageId)) return prev;
+        return [...prev, aiMsg];
+      });
       loadSessions();
     }
   }, [stream.loading, stream.messageId]);
