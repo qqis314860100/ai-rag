@@ -1,5 +1,25 @@
-.DS_Store
+# Dependencies
+node_modules/
+.venv/
+
+# Build
+dist/
+.vite/
+*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+
+# Runtime data
 data/
-.claude/settings.local.json
-.playwright-mcp
-screenshots/
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+
+# Lock files (package-lock.json for npm users; pnpm uses pnpm-lock.yaml)
+package-lock.json
+.playwright-mcp/
