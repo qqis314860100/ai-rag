@@ -1,52 +1,24 @@
+# Dependencies
 node_modules/
-dist/
 .venv/
+
+# Build
+dist/
+.vite/
+*.egg-info/
+
+# Python
 __pycache__/
 *.pyc
+
+# Runtime data
 data/
-services/rag/data/
-.env
-.DS_Store
-test_screenshots/
-screenshots/
-.vite/
-.clawhub/
-skills/
-evals/
-tests/
-package-lock.json
-*.egg-info/
 
-
-
-
-# Build artifacts
-*.egg-info/
-package-lock.json
-
-# Cache
-.clawhub/
-.claude/skills/
-apps/web/.claude/
-apps/web/.clawhub/
-
-# Test artifacts
-test_screenshots/
-
-# Environment (contains secrets)
+# Secrets
 .env
 
-# macOS
+# OS
 .DS_Store
 
-# Repo root docs (moved to enterprise-rag-kb/docs/)
-ONBOARDING.md
-enterprise-rag-kb-*.md
-agent-harness/
-data/
-
-# macOS
-.DS_Store
-
-# Data
-data/
+# Lock files (package-lock.json for npm users; pnpm uses pnpm-lock.yaml)
+package-lock.json
