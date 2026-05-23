@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, FileText, ArrowRight, ShieldCheck, Copy, MessageSquare, Layers } from "lucide-react";
 import type { Source } from "../../types";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface SourcePanelProps {
   sources: Source[];
@@ -54,8 +55,8 @@ export default function SourcePanel({ sources, onClose, onFollowUp, onPreview, h
   const detailText = activeSource.content || activeSource.snippet || "暂无可展示的引用内容";
 
   return (
-    <div className="flex w-80 shrink-0 flex-col border-l border-divider bg-surface overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-divider">
+    <div className="flex h-full min-h-0 w-80 shrink-0 flex-col bg-surface overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between px-4 py-3.5 border-b border-divider">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-accent" />
           <h3 className="text-sm font-semibold text-text">证据详情</h3>
@@ -65,7 +66,7 @@ export default function SourcePanel({ sources, onClose, onFollowUp, onPreview, h
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto chat-scroll-area overscroll-contain">
         <div className="border-b border-divider bg-surface-page/60 px-4 py-3">
           <div className="flex items-start gap-2.5">
             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${activeMeta.bg} ${activeMeta.color}`}>
@@ -103,9 +104,9 @@ export default function SourcePanel({ sources, onClose, onFollowUp, onPreview, h
               <FileText className="h-3.5 w-3.5 text-accent" />
               引用片段
             </div>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">
-              {detailText}
-            </p>
+            <div className="text-sm leading-relaxed text-text-secondary">
+              <MarkdownContent content={detailText} />
+            </div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-text-muted">

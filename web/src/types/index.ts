@@ -31,6 +31,7 @@ export interface Source {
 
 export interface ChatMessage {
   id: string;
+  persistedId?: string;
   session_id: string;
   role: "user" | "assistant";
   content: string;

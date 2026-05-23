@@ -324,7 +324,7 @@ export default function ChatPage() {
           m.id === pid
             ? {
                 ...m,
-                id: stream.messageId || pid,
+                persistedId: stream.messageId || pid,
                 content: stream.content || m.content,
                 sources: stream.sources,
                 confidence: stream.confidence || undefined,
@@ -636,7 +636,7 @@ export default function ChatPage() {
           opacity: showSourcePanel ? 1 : 0,
         }}
       >
-        <div style={{ width: 320 }}>
+        <div className="h-full min-h-0" style={{ width: 320 }}>
           {showSourcePanel && (
             <SourcePanel
               sources={selectedSources!}

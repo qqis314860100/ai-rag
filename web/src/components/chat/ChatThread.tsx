@@ -33,6 +33,10 @@ function canUsePersistedAssistantActions(messageId: string) {
   return !messageId.startsWith("stream-") && !messageId.startsWith("interrupted-");
 }
 
+function getPersistedMessageId(message: ChatMessage) {
+  return message.persistedId || message.id;
+}
+
 // Empty welcome state with categorized prompt suggestions
 function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
   const categories = [
@@ -165,6 +169,13 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const containerRef = useRef<HTMLElement | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const nearBottom = useRef(true);
+  const lastFeedbackFetchKey = useRef("");
+  const lastFavoriteFetchKey = useRef("");
+
+  const persistedAssistantMessageIds = messages
+    .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(getPersistedMessageId(m)))
+    .map((m) => getPersistedMessageId(m));
+  const persistedAssistantMessageKey = persistedAssistantMessageIds.join(",");
 
   // Find and observe the scroll container
   useEffect(() => {
@@ -241,34 +252,38 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const streamJustEnded = useRef(false);
   useEffect(() => {
     if (loading) { streamJustEnded.current = true; return; }
+    if (!persistedAssistantMessageKey) {
+      lastFeedbackFetchKey.current = "";
+      setFeedbackCounts({});
+      return;
+    }
+    if (lastFeedbackFetchKey.current === persistedAssistantMessageKey) return;
+
     // Delay feedback fetch slightly after stream ends to avoid flicker
     const timer = setTimeout(() => {
-      const msgIds = messages
-        .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(m.id))
-        .map((m) => m.id);
-      if (msgIds.length === 0) return;
+      const msgIds = persistedAssistantMessageKey.split(",");
+      lastFeedbackFetchKey.current = persistedAssistantMessageKey;
       api.get<{ data: Record<string, { up: number; down: number; userVote?: string }> }>(`/stats/feedback-counts?message_ids=${msgIds.join(",")}`)
         .then(res => setFeedbackCounts(res.data || {}))
         .catch(() => {});
     }, streamJustEnded.current ? 300 : 0);
     streamJustEnded.current = false;
     return () => clearTimeout(timer);
-  }, [messages, loading]);
+  }, [loading, persistedAssistantMessageKey]);
 
   useEffect(() => {
-    const msgIds = messages
-      .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(m.id))
-      .map((m) => m.id);
-
-    if (msgIds.length === 0) {
+    if (!persistedAssistantMessageKey) {
+      lastFavoriteFetchKey.current = "";
       setFavoriteStatus({});
       return;
     }
+    if (lastFavoriteFetchKey.current === persistedAssistantMessageKey) return;
 
-    api.get<{ data: Record<string, boolean> }>(`/favorites/status?message_ids=${msgIds.join(",")}`)
+    lastFavoriteFetchKey.current = persistedAssistantMessageKey;
+    api.get<{ data: Record<string, boolean> }>(`/favorites/status?message_ids=${persistedAssistantMessageKey}`)
       .then((res) => setFavoriteStatus(res.data || {}))
       .catch(() => {});
-  }, [messages]);
+  }, [persistedAssistantMessageKey]);
 
   const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content);
@@ -383,8 +398,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     <div className="py-6 space-y-10">
       {messages.map((msg, i) => {
         const isUser = msg.role === "user";
-        const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(msg.id);
-        const fb = feedbackCounts[msg.id] || { up: 0, down: 0 };
+        const persistedMessageId = getPersistedMessageId(msg);
+        const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
+        const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
 
         return (
           <div key={msg.id}
@@ -528,16 +544,16 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                   </button>
                   {canPersistAssistantActions && (
                     <>
-                      <button onClick={() => handleFavorite(msg.id)} disabled={favoriting[msg.id]}
-                        className={`p-0.5 rounded transition-colors ${favoriteStatus[msg.id] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[msg.id] ? "取消收藏" : "收藏"}>
-                        <Star className="h-3 w-3" fill={favoriteStatus[msg.id] ? "currentColor" : "none"} />
+                      <button onClick={() => handleFavorite(persistedMessageId)} disabled={favoriting[persistedMessageId]}
+                        className={`p-0.5 rounded transition-colors ${favoriteStatus[persistedMessageId] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[persistedMessageId] ? "取消收藏" : "收藏"}>
+                        <Star className="h-3 w-3" fill={favoriteStatus[persistedMessageId] ? "currentColor" : "none"} />
                       </button>
-                      <button onClick={() => handleFeedback(msg.id, "up")} disabled={voting[msg.id]}
+                      <button onClick={() => handleFeedback(persistedMessageId, "up")} disabled={voting[persistedMessageId]}
                         className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
                         <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
                       </button>
                       {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
-                      <button onClick={() => handleFeedback(msg.id, "down")} disabled={voting[msg.id]}
+                      <button onClick={() => handleFeedback(persistedMessageId, "down")} disabled={voting[persistedMessageId]}
                         className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="点踩">
                         <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
                       </button>
