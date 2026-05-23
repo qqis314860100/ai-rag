@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, FileText, ExternalLink, Loader2, MessageSquare, Send, Trash2, Pencil, CornerDownRight, ArrowUpRight } from "lucide-react";
+import { X, FileText, ExternalLink, Loader2, MessageSquare, Send, Trash2, Pencil, CornerDownRight, ArrowUpRight, Eye, FileCode } from "lucide-react";
 import type { Source, DocComment } from "../../types";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
@@ -18,6 +18,9 @@ export default function DocPreview({ source, onClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState<"chunk" | "original">("chunk");
+  const [originalContent, setOriginalContent] = useState<string | null>(null);
+  const [originalLoading, setOriginalLoading] = useState(false);
 
   const loadComments = useCallback(() => {
     api.get<{ data: { items: DocComment[] } }>(`/documents/${source.document_id}/comments?chunk_id=${source.chunk_id}`)
@@ -44,6 +47,16 @@ export default function DocPreview({ source, onClose }: Props) {
 
     loadComments();
   }, [source.chunk_id]);
+
+  const loadOriginalFile = useCallback(() => {
+    if (originalContent !== null) return;
+    setOriginalLoading(true);
+    const sectionPath = encodeURIComponent(source.section_path || "");
+    api.get<{ data: { content: string } }>(`/documents/${source.document_id}/raw?section_path=${sectionPath}`)
+      .then((res) => setOriginalContent(res.data?.content || ""))
+      .catch(() => setOriginalContent(""))
+      .finally(() => setOriginalLoading(false));
+  }, [source.document_id, originalContent]);
 
   const handleSubmit = async (parentId?: string) => {
     const text = parentId ? commentText : commentText;
@@ -126,7 +139,26 @@ export default function DocPreview({ source, onClose }: Props) {
 
       {/* Content + Comments scrollable area */}
       <div className="flex-1 overflow-y-auto">
-        {/* Document content */}
+        {/* Tab switcher */}
+        <div className="flex border-b border-divider bg-surface-page/30">
+          <button
+            onClick={() => setActiveTab("chunk")}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px
+              ${activeTab === "chunk" ? "text-accent border-accent" : "text-text-muted border-transparent hover:text-text"}`}
+          >
+            <Eye className="h-3.5 w-3.5" />引用片段
+          </button>
+          <button
+            onClick={() => { setActiveTab("original"); loadOriginalFile(); }}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px
+              ${activeTab === "original" ? "text-accent border-accent" : "text-text-muted border-transparent hover:text-text"}`}
+          >
+            <FileCode className="h-3.5 w-3.5" />查看原文
+          </button>
+        </div>
+
+        {activeTab === "chunk" ? (
+        /* Chunk content */
         <div className="p-4 border-b border-divider">
           {loading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 text-text-muted animate-spin" /></div>
@@ -140,6 +172,24 @@ export default function DocPreview({ source, onClose }: Props) {
             </div>
           )}
         </div>
+        ) : (
+        /* Original document view */
+        <div className="p-4">
+          {originalLoading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 text-text-muted animate-spin" /></div>
+          ) : originalContent ? (
+            <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
+              {originalContent}
+            </div>
+          ) : originalContent === "" ? (
+            <div className="text-center py-12">
+              <FileText className="h-8 w-8 text-text-muted/30 mx-auto mb-2" />
+              <p className="text-sm text-text-muted">无法加载原文</p>
+              <p className="text-xs text-text-muted mt-1">文档文件可能已被移动或删除</p>
+            </div>
+          ) : null}
+        </div>
+        )}
 
         {/* Comments section */}
         <div className="p-4">

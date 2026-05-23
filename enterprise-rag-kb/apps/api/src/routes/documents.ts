@@ -414,6 +414,100 @@ router.delete("/documents/:id/comments/:commentId", async (req: Request, res: Re
   }
 });
 
+// GET /api/documents/:id/raw - return original file content for inline preview
+router.get("/documents/:id/raw", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const doc = getDocumentById(req.params.id as string);
+    if (!doc) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
+    }
+
+    let content: string | null = null;
+    const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
+
+    // Strategy 1: direct file_path
+    if (doc.file_path && fs.existsSync(doc.file_path)) {
+      content = fs.readFileSync(doc.file_path, "utf-8");
+    }
+
+    // Strategy 2: use section_path to find the document file
+    // e.g. "极柱Busbar激光焊接 / 5. 安全注意事项" → look for "极柱Busbar激光焊接.md"
+    const sectionPath = req.query.section_path as string | undefined;
+    if (!content && sectionPath && fs.existsSync(knowledgeDir)) {
+      const docName = sectionPath.split(" / ")[0]?.trim();
+      if (docName) {
+        for (const ext of [".md", ".txt", ".markdown"]) {
+          const p = path.join(knowledgeDir, `${docName}${ext}`);
+          if (fs.existsSync(p)) { content = fs.readFileSync(p, "utf-8"); break; }
+        }
+      }
+    }
+
+    // Strategy 3: search by title in knowledge dir
+    if (!content) {
+      for (const ext of [".md", ".txt", ".markdown"]) {
+        const p = path.join(knowledgeDir, `${doc.title}${ext}`);
+        if (fs.existsSync(p)) { content = fs.readFileSync(p, "utf-8"); break; }
+      }
+    }
+
+    // Strategy 3: fuzzy match — find file whose name contains doc title or vice versa
+    if (!content && fs.existsSync(knowledgeDir)) {
+      const files = fs.readdirSync(knowledgeDir);
+      for (const f of files) {
+        const name = f.replace(/\.(md|txt|markdown)$/, "");
+        if (doc.title.includes(name) || name.includes(doc.title)) {
+          content = fs.readFileSync(path.join(knowledgeDir, f), "utf-8");
+          break;
+        }
+      }
+    }
+
+    if (content === null) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在，请确认知识库文件已上传。", 404);
+    }
+
+    sendSuccess(res, { content }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/documents/:id/file - serve original document file for preview
+router.get("/documents/:id/file", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const doc = getDocumentById(req.params.id as string);
+    if (!doc || !doc.file_path) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在。", 404);
+    }
+
+    const filePath = doc.file_path;
+    if (!fs.existsSync(filePath)) {
+      // Try to find by title in knowledge directory
+      const knowledgeDir = path.resolve(loadConfig().uploadDir, "../../knowledge");
+      const altPath = path.join(knowledgeDir, `${doc.title}.md`);
+      if (fs.existsSync(altPath)) {
+        const content = fs.readFileSync(altPath, "utf-8");
+        res.type("text/markdown").send(content);
+        return;
+      }
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在。", 404);
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".md": "text/markdown",
+      ".txt": "text/plain",
+      ".markdown": "text/markdown",
+    };
+    res.type(mimeTypes[ext] || "application/octet-stream");
+    res.sendFile(path.resolve(filePath));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/documents/sync-from-rag - sync documents from RAG/Chroma into SQLite
 router.post("/documents/sync-from-rag", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -441,14 +535,31 @@ router.post("/documents/sync-from-rag", async (req: Request, res: Response, next
         });
         updated++;
       } else {
+        // Try to find the source file on disk by title
+        const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
+        let filePath = "";
+        let fileName = "";
+        let fileType = "unknown";
+        let fileSize = 0;
+        for (const ext of [".md", ".txt", ".markdown"]) {
+          const candidate = path.join(knowledgeDir, `${rd.title}${ext}`);
+          if (fs.existsSync(candidate)) {
+            filePath = candidate;
+            fileName = `${rd.title}${ext}`;
+            fileType = ext.replace(".", "");
+            fileSize = fs.statSync(candidate).size;
+            break;
+          }
+        }
+
         createDocument({
           title: rd.title,
           category: rd.category || "未分类",
           securityLevel: "internal",
-          filePath: "",
-          fileName: "",
-          fileType: "unknown",
-          fileSize: 0,
+          filePath,
+          fileName,
+          fileType,
+          fileSize,
           createdBy: req.user?.id,
         });
         // Override the generated ID with the RAG document_id
