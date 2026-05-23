@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "../components/chat/ChatThread";
 import { SessionList } from "../components/chat/SessionList";
 import ChatInput from "../components/chat/ChatInput";
@@ -42,9 +42,12 @@ function MessagesSkeleton() {
   );
 }
 
+const CHAT_SCROLL_STORAGE_PREFIX = "chat-scroll";
+
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const urlSessionId = searchParams.get("session");
+  const navigate = useNavigate();
   const {
     sessions,
     activeSessionId,
@@ -65,8 +68,13 @@ export default function ChatPage() {
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const restoredScrollKeyRef = useRef<string | null>(null);
+  const lastChatScrollTopRef = useRef(0);
+  const [scrollReadyKey, setScrollReadyKey] = useState<string | null>(null);
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
+  const scrollStorageKey = `${CHAT_SCROLL_STORAGE_PREFIX}:${activeSessionId || urlSessionId || "new"}`;
 
   // ── Sidebar: close on outside click (mobile overlay) + lock body scroll ──
   useEffect(() => {
@@ -114,11 +122,72 @@ export default function ChatPage() {
     track("page_view", "page", "chat");
   }, []);
 
-  useEffect(() => {
-    if (urlSessionId && urlSessionId !== activeSessionId) {
-      setActiveSessionId(urlSessionId);
+  // Restore the chat reading position for the current session after it loads.
+  useLayoutEffect(() => {
+    if (messagesLoading || messages.length === 0) return;
+
+    const el = chatScrollRef.current;
+    if (!el) return;
+
+    if (restoredScrollKeyRef.current === scrollStorageKey) return;
+
+    const raw = sessionStorage.getItem(scrollStorageKey);
+    if (raw == null) {
+      lastChatScrollTopRef.current = el.scrollTop;
+      restoredScrollKeyRef.current = scrollStorageKey;
+      setScrollReadyKey(scrollStorageKey);
+      return;
     }
-  }, [activeSessionId, setActiveSessionId, urlSessionId]);
+
+    const top = Number(raw);
+    if (!Number.isFinite(top)) {
+      lastChatScrollTopRef.current = el.scrollTop;
+      restoredScrollKeyRef.current = scrollStorageKey;
+      setScrollReadyKey(scrollStorageKey);
+      return;
+    }
+
+    let cancelled = false;
+    const restore = () => {
+      if (cancelled) return;
+      el.scrollTop = top;
+      lastChatScrollTopRef.current = top;
+      restoredScrollKeyRef.current = scrollStorageKey;
+      setScrollReadyKey(scrollStorageKey);
+    };
+
+    let nextFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      restore();
+      nextFrame = requestAnimationFrame(restore);
+    });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(nextFrame);
+    };
+  }, [messages.length, messagesLoading, scrollStorageKey]);
+
+  // Persist the current chat scroll position while the user reads history.
+  useEffect(() => {
+    if (scrollReadyKey !== scrollStorageKey) return;
+
+    const el = chatScrollRef.current;
+    if (!el) return;
+
+    const saveScroll = () => {
+      lastChatScrollTopRef.current = el.scrollTop;
+      sessionStorage.setItem(scrollStorageKey, String(lastChatScrollTopRef.current));
+    };
+
+    el.addEventListener("scroll", saveScroll, { passive: true });
+
+    return () => {
+      sessionStorage.setItem(scrollStorageKey, String(lastChatScrollTopRef.current));
+      el.removeEventListener("scroll", saveScroll);
+    };
+  }, [scrollReadyKey, scrollStorageKey]);
 
   // ── Streaming placeholders ──
   const placeholderIdRef = useRef<string | null>(null);
@@ -184,7 +253,8 @@ export default function ChatPage() {
     setMessages([]);
     setSelectedSources(null);
     setSidebarOpen(false);
-  }, [activeSessionId, cancelStream, isSending, saveDraft, setActiveSessionId, setMessages]);
+    navigate("/chat", { replace: true });
+  }, [activeSessionId, cancelStream, isSending, navigate, saveDraft, setActiveSessionId, setMessages]);
 
   const handleSelectSession = useCallback((id: string) => {
     // Save current draft before switching
@@ -196,7 +266,8 @@ export default function ChatPage() {
     setActiveSessionId(id);
     setSelectedSources(null);
     setSidebarOpen(false);
-  }, [activeSessionId, setActiveSessionId, saveDraft, cancelStream, isSending]);
+    navigate(`/chat?session=${encodeURIComponent(id)}`, { replace: true });
+  }, [activeSessionId, setActiveSessionId, saveDraft, cancelStream, isSending, navigate]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
     const ok = await deleteSession(id);
@@ -342,7 +413,7 @@ export default function ChatPage() {
         </header>
 
         {/* Scroll area */}
-        <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto bg-white chat-scroll-area">
           <div className="max-w-3xl mx-auto px-4">
             {messagesLoading && messages.length === 0 ? (
               <MessagesSkeleton />
