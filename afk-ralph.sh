@@ -6,7 +6,6 @@ if [ -z "${1:-}" ]; then
   exit 1
 fi
 
-RUNNER="${RALPH_RUNNER:-codex}"
 LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.ralph-loop.last.md}"
 
 build_prompt() {
@@ -22,38 +21,12 @@ If the PRD is complete, output <promise>COMPLETE</promise>.
 EOF
 }
 
-run_codex() {
+run_iteration() {
   codex exec \
     --cd "$(pwd)" \
     --sandbox danger-full-access \
     --output-last-message "${LAST_MESSAGE_FILE}" \
     "$(build_prompt)"
-}
-
-run_claude() {
-  claude --permission-mode acceptEdits -p "$(build_prompt)"
-}
-
-run_iteration() {
-  if [[ "${RUNNER}" == "claude" ]]; then
-    if run_claude; then
-      return 0
-    fi
-    echo "Claude runner failed, falling back to Codex runner. Set RALPH_RUNNER=codex to skip Claude." >&2
-    run_codex
-    return $?
-  fi
-
-  if [[ "${RUNNER}" == "auto" ]]; then
-    if command -v codex >/dev/null 2>&1; then
-      run_codex
-      return $?
-    fi
-    run_claude
-    return $?
-  fi
-
-  run_codex
 }
 
 for ((i=1; i<=$1; i++)); do
