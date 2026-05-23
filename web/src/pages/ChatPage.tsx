@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "../components/chat/ChatThread";
 import { SessionList } from "../components/chat/SessionList";
@@ -43,8 +43,6 @@ function MessagesSkeleton() {
   );
 }
 
-const CHAT_SCROLL_STORAGE_PREFIX = "chat-scroll";
-
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const urlSessionId = searchParams.get("session");
@@ -70,14 +68,11 @@ export default function ChatPage() {
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const restoredScrollKeyRef = useRef<string | null>(null);
-  const lastChatScrollTopRef = useRef(0);
-  const [scrollReadyKey, setScrollReadyKey] = useState<string | null>(null);
   const lastSourcesRef = useRef<Source[] | null>(null);
+  const pendingScrollSessionRef = useRef<string | null>(null);
+  const sawLoadingForPendingSessionRef = useRef(false);
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
-  const scrollStorageKey = `${CHAT_SCROLL_STORAGE_PREFIX}:${activeSessionId || urlSessionId || "new"}`;
 
   // ── Sidebar: close on outside click (mobile overlay) + lock body scroll ──
   useEffect(() => {
@@ -131,72 +126,32 @@ export default function ChatPage() {
     }
   }, [selectedSources]);
 
-  // Restore the chat reading position for the current session after it loads.
-  useLayoutEffect(() => {
-    if (messagesLoading || messages.length === 0) return;
-
-    const el = chatScrollRef.current;
-    if (!el) return;
-
-    if (restoredScrollKeyRef.current === scrollStorageKey) return;
-
-    const raw = sessionStorage.getItem(scrollStorageKey);
-    if (raw == null) {
-      lastChatScrollTopRef.current = el.scrollTop;
-      restoredScrollKeyRef.current = scrollStorageKey;
-      setScrollReadyKey(scrollStorageKey);
-      return;
-    }
-
-    const top = Number(raw);
-    if (!Number.isFinite(top)) {
-      lastChatScrollTopRef.current = el.scrollTop;
-      restoredScrollKeyRef.current = scrollStorageKey;
-      setScrollReadyKey(scrollStorageKey);
-      return;
-    }
-
-    let cancelled = false;
-    const restore = () => {
-      if (cancelled) return;
-      el.scrollTop = top;
-      lastChatScrollTopRef.current = top;
-      restoredScrollKeyRef.current = scrollStorageKey;
-      setScrollReadyKey(scrollStorageKey);
-    };
-
-    let nextFrame = 0;
-    const frame = requestAnimationFrame(() => {
-      restore();
-      nextFrame = requestAnimationFrame(restore);
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame);
-      cancelAnimationFrame(nextFrame);
-    };
-  }, [messages.length, messagesLoading, scrollStorageKey]);
-
-  // Persist the current chat scroll position while the user reads history.
   useEffect(() => {
-    if (scrollReadyKey !== scrollStorageKey) return;
+    if (!activeSessionId) {
+      pendingScrollSessionRef.current = null;
+      sawLoadingForPendingSessionRef.current = false;
+      return;
+    }
 
-    const el = chatScrollRef.current;
-    if (!el) return;
+    pendingScrollSessionRef.current = activeSessionId;
+    sawLoadingForPendingSessionRef.current = false;
+  }, [activeSessionId]);
 
-    const saveScroll = () => {
-      lastChatScrollTopRef.current = el.scrollTop;
-      sessionStorage.setItem(scrollStorageKey, String(lastChatScrollTopRef.current));
-    };
+  useEffect(() => {
+    const pendingSession = pendingScrollSessionRef.current;
+    if (!pendingSession || activeSessionId !== pendingSession) return;
 
-    el.addEventListener("scroll", saveScroll, { passive: true });
+    if (messagesLoading) {
+      sawLoadingForPendingSessionRef.current = true;
+      return;
+    }
 
-    return () => {
-      sessionStorage.setItem(scrollStorageKey, String(lastChatScrollTopRef.current));
-      el.removeEventListener("scroll", saveScroll);
-    };
-  }, [scrollReadyKey, scrollStorageKey]);
+    if (!sawLoadingForPendingSessionRef.current || messages.length === 0) return;
+
+    setScrollToBottomSignal((n) => n + 1);
+    pendingScrollSessionRef.current = null;
+    sawLoadingForPendingSessionRef.current = false;
+  }, [activeSessionId, messages.length, messagesLoading]);
 
   // ── Streaming placeholders ──
   const placeholderIdRef = useRef<string | null>(null);
@@ -442,7 +397,7 @@ export default function ChatPage() {
         </header>
 
         {/* Scroll area */}
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto bg-white chat-scroll-area">
+        <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
           <div className="max-w-3xl mx-auto px-4">
             {messagesLoading && messages.length === 0 ? (
               <MessagesSkeleton />
