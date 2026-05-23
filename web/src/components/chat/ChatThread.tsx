@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { ThumbsUp, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
@@ -11,6 +11,7 @@ interface ChatThreadProps {
   streamingContent: string;
   streamError: string | null;
   streamStopped: boolean;
+  scrollToBottomSignal: number;
   selectedSources: Source[] | null;
   onSelectSources: (sources: Source[] | null) => void;
   onCopy?: (content: string) => void;
@@ -145,7 +146,7 @@ function StreamStages() {
   );
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource, onSourceAnchor }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource, onSourceAnchor }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -179,6 +180,36 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    const c = containerRef.current;
+    if (c) {
+      c.scrollTop = c.scrollHeight;
+      nearBottom.current = true;
+      setShowScrollBtn(false);
+      return;
+    }
+
+    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+  }, []);
+
+  useEffect(() => {
+    if (!scrollToBottomSignal) return;
+
+    let raf1 = 0;
+    let raf2 = 0;
+    const timer = window.setTimeout(() => scrollToBottom(), 120);
+    raf1 = requestAnimationFrame(() => {
+      scrollToBottom();
+      raf2 = requestAnimationFrame(scrollToBottom);
+    });
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.clearTimeout(timer);
+    };
+  }, [scrollToBottom, scrollToBottomSignal]);
+
   // Smart scroll: only auto-scroll when user is near bottom
   useEffect(() => {
     if (loading) {
@@ -186,7 +217,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       if (streamingContent.length > prevContentLen.current && !scrollRaf.current) {
         scrollRaf.current = requestAnimationFrame(() => {
           if (nearBottom.current) {
-            bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+            scrollToBottom();
           }
           scrollRaf.current = 0;
         });
@@ -194,27 +225,14 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     } else if (wasLoading.current) {
       wasLoading.current = false;
       if (nearBottom.current) {
-        const scrollToEnd = () => {
-          const c = containerRef.current;
-          if (c) c.scrollTop = c.scrollHeight;
-        };
-        requestAnimationFrame(scrollToEnd);
-        setTimeout(scrollToEnd, 100);
-        setTimeout(scrollToEnd, 350);
+        requestAnimationFrame(scrollToBottom);
+        setTimeout(scrollToBottom, 100);
+        setTimeout(scrollToBottom, 350);
       }
     }
     prevContentLen.current = streamingContent.length;
     return () => { if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current); };
-  }, [streamingContent, loading]);
-
-  const handleScrollToBottom = () => {
-    const c = containerRef.current;
-    if (c) {
-      c.scrollTop = c.scrollHeight;
-      nearBottom.current = true;
-      setShowScrollBtn(false);
-    }
-  };
+  }, [streamingContent, loading, scrollToBottom]);
 
   // Fetch feedback counts — skip during streaming to avoid flicker
   const streamJustEnded = useRef(false);
@@ -544,7 +562,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       {/* Scroll-to-bottom floating button */}
       {showScrollBtn && (
         <button
-          onClick={handleScrollToBottom}
+          onClick={scrollToBottom}
           className="sticky bottom-4 mx-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-white border border-border shadow-md-soft text-xs text-text-secondary hover:text-accent hover:border-accent/50 transition-all animate-fade-in-up z-10"
         >
           <ChevronDown className="h-3.5 w-3.5" />

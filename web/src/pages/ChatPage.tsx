@@ -5,6 +5,7 @@ import { SessionList } from "../components/chat/SessionList";
 import ChatInput from "../components/chat/ChatInput";
 import SourcePanel from "../components/chat/SourcePanel";
 import DocPreview from "../components/chat/DocPreview";
+import { api } from "../services/api";
 import { useStreamChat } from "../hooks/useStreamChat";
 import { useChatHistory } from "../hooks/useChatHistory";
 import { useChatDrafts } from "../hooks/useChatDrafts";
@@ -65,6 +66,7 @@ export default function ChatPage() {
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -72,6 +74,7 @@ export default function ChatPage() {
   const restoredScrollKeyRef = useRef<string | null>(null);
   const lastChatScrollTopRef = useRef(0);
   const [scrollReadyKey, setScrollReadyKey] = useState<string | null>(null);
+  const lastSourcesRef = useRef<Source[] | null>(null);
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
   const scrollStorageKey = `${CHAT_SCROLL_STORAGE_PREFIX}:${activeSessionId || urlSessionId || "new"}`;
@@ -121,6 +124,12 @@ export default function ChatPage() {
   useEffect(() => {
     track("page_view", "page", "chat");
   }, []);
+
+  useEffect(() => {
+    if (selectedSources && selectedSources.length > 0) {
+      lastSourcesRef.current = selectedSources;
+    }
+  }, [selectedSources]);
 
   // Restore the chat reading position for the current session after it loads.
   useLayoutEffect(() => {
@@ -256,6 +265,16 @@ export default function ChatPage() {
     navigate("/chat", { replace: true });
   }, [activeSessionId, cancelStream, isSending, navigate, saveDraft, setActiveSessionId, setMessages]);
 
+  const handleToggleSources = useCallback(() => {
+    if (selectedSources && selectedSources.length > 0) {
+      setSelectedSources(null);
+      return;
+    }
+    if (lastSourcesRef.current && lastSourcesRef.current.length > 0) {
+      setSelectedSources(lastSourcesRef.current);
+    }
+  }, [selectedSources]);
+
   const handleSelectSession = useCallback((id: string) => {
     // Save current draft before switching
     if (activeSessionId && inputRef.current?.value) {
@@ -305,6 +324,7 @@ export default function ChatPage() {
       content: "", streaming: true, created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg, placeholderMsg]);
+    setScrollToBottomSignal((n) => n + 1);
     setSelectedSources(null);
 
     // Clear draft for this session since message is sent
@@ -338,9 +358,18 @@ export default function ChatPage() {
   }, [messages, handleSend, isSending]);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== messageId));
-    showToast("success", "消息已删除");
-  }, [setMessages]);
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    api.delete(`/chat/messages/${encodeURIComponent(messageId)}`)
+      .then(() => {
+        setMessages((prev) => prev.slice(0, idx));
+        showToast("success", "消息已删除");
+      })
+      .catch(() => {
+        showToast("error", "删除消息失败");
+      });
+  }, [messages, setMessages]);
 
   const activeTitle = activeSessionId
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
@@ -404,9 +433,9 @@ export default function ChatPage() {
           )}
 
           <button
-            onClick={() => setSelectedSources(null)}
+            onClick={handleToggleSources}
             className={`p-1.5 rounded-lg transition-colors shrink-0 ${showSourcePanel ? "text-accent bg-accent-soft" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}
-            title={showSourcePanel ? "关闭来源面板" : "路线图"}
+            title={showSourcePanel ? "关闭来源面板" : lastSourcesRef.current ? "打开最近来源" : "路线图"}
           >
             <FileSearch className="h-5 w-5" />
           </button>
@@ -434,6 +463,7 @@ export default function ChatPage() {
                 onDeleteMessage={handleDeleteMessage}
                 onPreviewSource={setPreviewSource}
                 onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
+                scrollToBottomSignal={scrollToBottomSignal}
               />
             )}
           </div>
