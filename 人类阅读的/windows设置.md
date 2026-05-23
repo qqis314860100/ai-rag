@@ -124,12 +124,12 @@ pnpm dev:api
 ### 终端 2 — RAG 服务
 
 ```powershell
-cd ai-rag\enterprise-rag-kb\services\rag
+cd ai-rag\enterprise-rag-kb\rag
 .venv\Scripts\activate
 python -m uvicorn app.main:app --reload --port 8001
 ```
 
-> 根目录的 `pnpm dev:rag` 使用 `cd services/rag && python ...`，在 Windows 下可能失败，建议手动激活 venv 后直接运行 uvicorn。
+> 根目录的 `pnpm dev:rag` 使用 `cd rag && python ...`，在 Windows 下可能失败，建议手动激活 venv 后直接运行 uvicorn。
 
 ### 终端 3 — 前端
 
@@ -192,12 +192,12 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ### `pnpm dev:rag` 在 Windows 下不工作
 
-根 `package.json` 中的脚本 `cd services/rag && python -m uvicorn ...` 依赖 Unix shell 语义。
+根 `package.json` 中的脚本 `cd rag && python -m uvicorn ...` 依赖 Unix shell 语义。
 
 **解决**：直接手动启动：
 
 ```powershell
-cd services\rag
+cd rag
 .venv\Scripts\activate
 python -m uvicorn app.main:app --reload --port 8001
 ```

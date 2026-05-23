@@ -7,8 +7,8 @@
 #   API_BASE_URL=http://host:3001 ./tests/run-tests.sh  # 指定 API 地址
 #
 # 前置条件:
-#   1. API 服务已启动 (apps/api)
-#   2. RAG 服务已启动 (services/rag)
+#   1. API 服务已启动 (api)
+#   2. RAG 服务已启动 (rag)
 #   3. 知识库已索引 (至少有种子文档)
 # ============================================================
 set -euo pipefail
@@ -32,7 +32,7 @@ if ! curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${BASE_URL}/api/admin/
   echo ""
   echo "ERROR: API at ${BASE_URL} is not reachable."
   echo "Please start the API server before running tests:"
-  echo "  cd apps/api && pnpm dev"
+  echo "  cd api && pnpm dev"
   echo ""
   exit 1
 fi
