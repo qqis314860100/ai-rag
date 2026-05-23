@@ -68,6 +68,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
 
       let fullAnswer = "";
       let meta: { sources?: unknown[]; confidence?: number; followups?: string[]; trace?: unknown } = {};
+      let streamFailed = false;
 
       const reader = ragStream.body?.getReader();
       if (!reader) {
@@ -100,6 +101,8 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                     confidence: parsed.confidence,
                     followups: parsed.followups,
                   };
+                } else if (parsed.type === "error") {
+                  streamFailed = true;
                 }
               } catch {
                 // ignore parse errors
@@ -113,6 +116,11 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       }
 
       // Save assistant message after stream completes
+      if (streamFailed) {
+        res.end();
+        return;
+      }
+
       const assistantMessage = createMessage({
         sessionId,
         role: "assistant",
