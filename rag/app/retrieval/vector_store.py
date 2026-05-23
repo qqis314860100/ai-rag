@@ -60,7 +60,8 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
         documents.append(c.content)
         md = {
             "document_id": c.document_id,
-            "title": c.title,
+            "title": c.metadata.get("title") or c.title,
+            "chunk_title": c.title,
             "section_path": c.section_path,
             "page_number": c.page_number,
             "chunk_index": i,
