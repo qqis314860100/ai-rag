@@ -38,16 +38,37 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
   const prevContentLen = useRef(0);
   const scrollRaf = useRef<number>(0);
+  const wasLoading = useRef(false);
 
   useEffect(() => {
-    // Smooth scroll during streaming — throttled via rAF for 60fps
-    if (loading && streamingContent.length > prevContentLen.current) {
-      if (!scrollRaf.current) {
+    if (loading) {
+      wasLoading.current = true;
+      // Smooth scroll during streaming — throttled via rAF
+      if (streamingContent.length > prevContentLen.current && !scrollRaf.current) {
         scrollRaf.current = requestAnimationFrame(() => {
           bottomRef.current?.scrollIntoView({ block: "end" });
           scrollRaf.current = 0;
         });
       }
+    } else if (wasLoading.current) {
+      // Stream just ended — force scroll to absolute bottom after DOM settles
+      wasLoading.current = false;
+      const scrollToEnd = () => {
+        const el = bottomRef.current?.parentElement;
+        if (el) {
+          // Find the nearest scrollable ancestor
+          let p = el.parentElement;
+          while (p) {
+            if (p.scrollHeight > p.clientHeight) break;
+            p = p.parentElement;
+          }
+          if (p) p.scrollTop = p.scrollHeight;
+        }
+      };
+      // Chain: immediate + 100ms + 300ms to catch async markdown renders
+      requestAnimationFrame(scrollToEnd);
+      setTimeout(scrollToEnd, 100);
+      setTimeout(scrollToEnd, 350);
     }
     prevContentLen.current = streamingContent.length;
     return () => { if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current); };
