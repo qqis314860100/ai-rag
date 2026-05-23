@@ -23,3 +23,8 @@ data/
 # Lock files (package-lock.json for npm users; pnpm uses pnpm-lock.yaml)
 package-lock.json
 .playwright-mcp/
+output/
+.claude/skills/
+.codex/
+web/src/**/*.js
+web/src/**/*.js.map
