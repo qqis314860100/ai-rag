@@ -357,6 +357,9 @@ export default function ChatPage() {
     lastSourcesRef.current?.length ||
     messages.some((message) => message.role === "assistant" && message.sources && message.sources.length > 0)
   );
+  const chatContentClass = `w-full mx-auto px-4 transition-[max-width] duration-slow ease-out ${
+    historyCollapsed ? "max-w-5xl xl:max-w-6xl" : "max-w-3xl"
+  }`;
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -434,7 +437,7 @@ export default function ChatPage() {
 
         {/* Scroll area */}
         <div className="flex-1 overflow-y-auto bg-white chat-scroll-area">
-          <div className="max-w-3xl mx-auto px-4">
+          <div className={chatContentClass}>
             {messagesLoading && messages.length === 0 ? (
               <MessagesSkeleton />
             ) : (
@@ -462,7 +465,7 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="shrink-0 bg-white">
-          <div className="max-w-3xl mx-auto px-4 py-3">
+          <div className={`${chatContentClass} py-3`}>
             <ChatInput
               onSend={handleSend}
               loading={stream.loading}

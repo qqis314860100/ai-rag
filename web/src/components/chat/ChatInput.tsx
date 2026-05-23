@@ -94,7 +94,7 @@ export default function ChatInput({ onSend, loading, disabled, inputRef, draftVa
   };
 
   return (
-    <div className="max-w-3xl mx-auto w-full space-y-2">
+    <div className="w-full space-y-2">
       {/* Input row */}
       <div className="flex items-end gap-2">
         {/* Action buttons — decorative, future file/photo/voice upload */}
