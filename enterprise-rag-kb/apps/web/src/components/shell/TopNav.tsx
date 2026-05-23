@@ -9,7 +9,7 @@ export default function TopNav() {
   const initials = (user?.name || "?").slice(0, 2).toUpperCase();
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-divider bg-surface px-5 shrink-0 flex-nowrap">
+    <header className="flex h-[57px] items-center justify-between border-b border-divider bg-white px-5 shrink-0 flex-nowrap">
       <Link to="/" className="flex items-center gap-2.5 text-primary hover:text-primary-hover transition-colors">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-white">
           <Battery className="h-3.5 w-3.5" />

@@ -15,7 +15,7 @@ export default function SideNav() {
 
   return (
     <nav
-      className="relative flex flex-col border-r border-divider bg-surface-page/60 shrink-0 transition-all duration-slow ease-out z-20"
+      className="relative flex flex-col border-r border-divider bg-white shrink-0 transition-all duration-slow ease-out z-20"
       style={{ width: expanded ? 224 : 56 }}
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}

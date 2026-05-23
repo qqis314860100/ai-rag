@@ -5,7 +5,7 @@ import ServiceBanner from "./ServiceBanner";
 
 export default function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-screen flex-col bg-surface-page">
+    <div className="flex h-screen flex-col bg-white">
       <TopNav />
       <ServiceBanner />
       <div className="flex flex-1 overflow-hidden">
