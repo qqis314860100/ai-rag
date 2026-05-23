@@ -64,6 +64,7 @@ export default function ChatPage() {
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -225,10 +226,30 @@ export default function ChatPage() {
       setSelectedSources(null);
       return;
     }
+
+    const latestSources = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.sources && message.sources.length > 0)
+      ?.sources;
+
+    if (latestSources && latestSources.length > 0) {
+      setSelectedSources(latestSources);
+      return;
+    }
+
     if (lastSourcesRef.current && lastSourcesRef.current.length > 0) {
       setSelectedSources(lastSourcesRef.current);
     }
-  }, [selectedSources]);
+  }, [messages, selectedSources]);
+
+  const handleToggleHistory = useCallback(() => {
+    if (window.matchMedia("(min-width: 1024px)").matches) {
+      setHistoryCollapsed((collapsed) => !collapsed);
+      return;
+    }
+
+    setSidebarOpen((open) => !open);
+  }, []);
 
   const handleSelectSession = useCallback((id: string) => {
     // Save current draft before switching
@@ -331,6 +352,11 @@ export default function ChatPage() {
     : "";
 
   const showSourcePanel = selectedSources && selectedSources.length > 0;
+  const hasAvailableSources = !!(
+    showSourcePanel ||
+    lastSourcesRef.current?.length ||
+    messages.some((message) => message.role === "assistant" && message.sources && message.sources.length > 0)
+  );
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -340,28 +366,31 @@ export default function ChatPage() {
       )}
       <aside
         ref={sidebarRef}
-        className={`shrink-0 border-r border-divider bg-surface-page flex flex-col transition-transform duration-slow ease-out z-40
+        className={`shrink-0 overflow-hidden border-r border-divider bg-surface-page flex flex-col transition-[width,transform] duration-slow ease-out z-40
           max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:shadow-lg
-          ${sidebarOpen ? "max-lg:translate-x-0 w-[260px]" : "max-lg:-translate-x-full max-lg:w-[260px] lg:w-[260px]"}`}
+          ${historyCollapsed ? "lg:w-0 lg:border-r-0" : "lg:w-[260px]"}
+          ${sidebarOpen ? "max-lg:translate-x-0 max-lg:w-[260px]" : "max-lg:-translate-x-full max-lg:w-[260px]"}`}
       >
-        <div className="flex items-center justify-between px-4 h-[57px] shrink-0">
-          <span className="text-sm font-semibold text-text">会话历史</span>
-          <div className="flex items-center gap-1">
-            <button onClick={handleNewSession} className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors" title="新建会话">
-              <Plus className="h-4 w-4" />
-            </button>
-            <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors lg:hidden">
-              <X className="h-4 w-4" />
-            </button>
+        <div className="w-[260px] flex h-full flex-col">
+          <div className="flex items-center justify-between px-4 h-[57px] shrink-0">
+            <span className="text-sm font-semibold text-text">会话历史</span>
+            <div className="flex items-center gap-1">
+              <button onClick={handleNewSession} className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors" title="新建会话">
+                <Plus className="h-4 w-4" />
+              </button>
+              <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors lg:hidden">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          <SessionList
-            sessions={sessions}
-            activeId={activeSessionId}
-            onSelect={handleSelectSession}
-            onDelete={handleDeleteSession}
-          />
+          <div className="flex-1 overflow-y-auto">
+            <SessionList
+              sessions={sessions}
+              activeId={activeSessionId}
+              onSelect={handleSelectSession}
+              onDelete={handleDeleteSession}
+            />
+          </div>
         </div>
       </aside>
 
@@ -370,9 +399,9 @@ export default function ChatPage() {
         {/* Chat Header */}
         <header className="shrink-0 flex items-center gap-3 h-[57px] px-4 border-b border-divider bg-white">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={handleToggleHistory}
             className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
-            title="会话列表"
+            title={historyCollapsed ? "展开会话历史" : "收起会话历史"}
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -389,8 +418,15 @@ export default function ChatPage() {
 
           <button
             onClick={handleToggleSources}
-            className={`p-1.5 rounded-lg transition-colors shrink-0 ${showSourcePanel ? "text-accent bg-accent-soft" : "text-text-muted hover:text-text hover:bg-surface-hover"}`}
-            title={showSourcePanel ? "关闭来源面板" : lastSourcesRef.current ? "打开最近来源" : "路线图"}
+            disabled={!hasAvailableSources}
+            className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+              showSourcePanel
+                ? "text-accent bg-accent-soft"
+                : hasAvailableSources
+                  ? "text-text-muted hover:text-text hover:bg-surface-hover"
+                  : "text-text-muted/35 cursor-not-allowed"
+            }`}
+            title={showSourcePanel ? "关闭来源面板" : hasAvailableSources ? "打开最近引用来源" : "当前会话暂无引用来源"}
           >
             <FileSearch className="h-5 w-5" />
           </button>
