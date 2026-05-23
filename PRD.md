@@ -1,41 +1,112 @@
-# PRD
+# 聊天体验改造 PRD
 
-## Goal
+## 背景
 
-Continue the chat experience rebuild in small, verified, single-service commits.
-The desired end state is a chat UI that keeps the main question-and-answer flow clear while supporting interruption, message actions, source inspection, session context navigation, preview, notes, and later structured graph output.
+当前项目是企业级电池产线 RAG 系统，核心价值在聊天问答、知识引用、文档预览和后续知识沉淀。前端已经具备会话、流式响应、引用展示、收藏、反馈、草稿和基础布局，但体验仍有几个明显问题：
 
-This Ralph loop must follow the repository rules in `AGENTS.md`, `CLAUDE.md`, `docs/EXECUTION_RULES.md`, and `docs/CONTRIBUTING.md`.
+- 引用文章不适合长期固定堆在右侧；一个会话如果有大量引用，右侧栏会失控。
+- 用户回顾长对话时，切换页面或会话后容易丢失当前位置。
+- 问答卡片动作不够符合语义：用户问题可以编辑/删除，回答应保留复制、反馈、收藏、重试等动作，但不应随便删除。
+- 发送按钮在生成中应变成中断按钮，而不是普通 loading。
+- 右侧区域更适合作为当前会话导航、章节、证据、笔记和后续结构化输出入口，而不是全量引用仓库。
+- 文档预览需要逐步支持 Markdown、PDF、HTML、代码块等标准格式，并为后续 AI 生成思维导图、流程图预留入口。
 
-## Hard Constraints
+## 目标
 
-- Work on exactly one incomplete task per iteration.
-- Touch only one service per commit: `web`, `api`, or `rag`.
-- Do not commit mixed-service diffs.
-- Run the relevant verification before committing.
-- Verify the user-visible flow when changing UI or API behavior.
-- Use Conventional Commits with scope `web`, `api`, or `rag`.
-- Do not include AI-related footer text in commit messages.
-- If a task needs more than one service, implement only the current service slice and leave a clear progress note.
-- Do not edit generated lockfiles or root package metadata unless the selected task is explicitly about tooling.
+用 Ralph loop 方式把聊天体验改造拆成小任务执行。每一轮只做一个可验收任务，只改一个服务，只提交一个验证通过的 commit。
 
-## Tasks
+最终状态：
 
-- [x] `web`: Replace the current source side panel behavior with an answer-scoped source detail drawer or modal so source clicks open focused evidence details instead of treating the right side as a full source warehouse.
-- [ ] `web`: Add a right-side session navigator shell for current conversation context, including sections for current thread, recent evidence, and notes placeholders without requiring new backend APIs.
-- [ ] `web`: Add a unified preview shell that can render the existing source detail fields and expose format tabs for text/markdown/raw content, leaving PDF/HTML/code expansion behind clear disabled states if backend data is not ready.
-- [ ] `web`: Add a graph generation entry point in the chat UI with a disabled or local placeholder state that does not call missing backend APIs.
-- [ ] `api`: Review and harden message delete/update semantics for branch truncation, including tests or API smoke verification for deleting a user message and preserving authorization behavior.
-- [ ] `api`: Add a source detail API contract if existing stored message sources contain enough data; otherwise document the missing RAG fields in progress without fabricating data.
-- [ ] `rag`: Extend source metadata shape to include enough context for source detail views when available, keeping response compatibility with current API consumers.
-- [ ] `web`: Run an end-to-end chat regression covering login, sending, interrupting, switching sessions, source detail opening, and existing copy/retry actions.
+- 聊天主区域专注问答阅读和操作。
+- 引用从“全局右侧固定列表”调整为“回答作用域内的证据查看”。
+- 右侧栏承担当前会话导航、章节定位、近期证据、笔记和结构化输出入口。
+- 长对话滚动位置在页面切换、会话切换、发送消息等关键路径下稳定可控。
+- 问答卡片动作符合用户心智，并且有必要的二次确认。
+- 前端、后端、RAG 的源数据能力按服务边界逐步扩展，不伪造尚不存在的数据。
 
-## Acceptance Criteria
+## 非目标
 
-- Each completed task has one commit.
-- Each commit touches exactly one service.
-- `progress.txt` records what changed, verification run, commit hash, and any blocked follow-up.
-- `web` tasks pass at least `pnpm run lint:web` and `pnpm run build:web`; UI tasks also include a browser smoke test when feasible.
-- `api` tasks pass at least `pnpm run build:api`; endpoint behavior changes include API smoke tests or existing integration tests.
-- `rag` tasks pass at least `rag/.venv/bin/python -m compileall rag/app` or `python3 -m compileall rag/app` depending on the available interpreter, plus a health or endpoint smoke test when feasible.
-- The loop emits `<promise>COMPLETE</promise>` only when every task is complete or explicitly marked out of scope with a reason.
+- 不在同一轮同时修改 `web`、`api`、`rag`。
+- 不把缺失后端能力伪装成前端已完成能力。
+- 不为了 UI 占位新增无真实数据来源的 API。
+- 不在普通功能任务里修改根 lockfile、包管理器配置或项目元数据。
+- 不把 Ralph 循环跑在脏工作区上，除非用户明确授权。
+
+## 硬约束
+
+- 每轮只选择一个未完成任务。
+- 每轮只覆盖一个服务：`web`、`api` 或 `rag`。
+- 每轮完成后必须先验证，再提交。
+- Commit 使用 Conventional Commits，scope 只能是 `web`、`api`、`rag`；纯仓库工具任务可用 `chore:`。
+- Commit message 不包含 AI footer。
+- 修改 UI 必须至少执行 `pnpm run lint:web` 和 `pnpm run build:web`，并尽量浏览器烟雾验证。
+- 修改 API 必须至少执行 `pnpm run build:api`，涉及接口行为时补 API 烟雾或集成测试。
+- 修改 RAG 必须至少执行 `python3 -m compileall rag/app` 或等价检查，涉及检索/生成时补服务烟雾。
+- `progress.txt` 必须记录本轮任务、验证命令、commit hash、阻塞项和下一步建议。
+
+## 任务队列
+
+### Web
+
+- [x] `web`: 改造引用查看方式，将回答内引用点击打开回答作用域的证据详情，而不是把右侧作为全量引用仓库。
+- [ ] `web`: 修复聊天滚动体验，确保页面切换返回保留当前浏览位置、切换会话按会话恢复位置、发送新消息后回到底部。
+- [ ] `web`: 完善问答卡片动作语义。用户问题 hover 显示复制、编辑、删除；删除必须二次确认，并连带删除对应回答或后续分支。回答不提供删除，提供复制、点赞、点踩、收藏、重试。
+- [ ] `web`: 将输入框发送按钮在生成中切换为中断按钮，并验证中断后不会生成可收藏/可反馈的临时消息。
+- [ ] `web`: 将右侧栏改造成当前会话导航壳，包括当前线程目录、近期证据、笔记占位、结构化输出入口，不依赖新增后端 API。
+- [ ] `web`: 建立统一文档预览壳，先支持现有文本/Markdown/原始字段展示，并为 PDF、HTML、代码块预览留清晰禁用状态。
+- [ ] `web`: 增加 AI 整理入口占位，可触发“思维导图/流程图待接入”的本地提示，不调用不存在的后端 API。
+- [ ] `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
+
+### API
+
+- [ ] `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- [ ] `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- [ ] `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API；如果足够，定义只读详情接口；如果不足，在 `progress.txt` 记录缺失字段。
+- [ ] `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
+- [ ] `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；本轮只产出 API 契约或最小后端切片。
+
+### RAG
+
+- [ ] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
+- [ ] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
+- [ ] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
+- [ ] `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+
+### 仓库与 Ralph
+
+- [x] `chore`: 初始化 Ralph 控制文件和一次一任务的执行规则。
+- [x] `chore`: 将 Ralph runner 固定为 Codex，避免本地 Claude Code `/v1/messages` 403 阻塞任务。
+- [ ] `chore`: 将当前 PRD/progress 按 Ralph 要求重整为可执行任务源。
+
+## 推荐执行顺序
+
+1. 先完成 `web` 滚动与问答卡片动作，因为这是当前用户可见 bug。
+2. 再完成 `web` 右侧会话导航壳，把引用、章节、笔记和结构化输出入口放到正确位置。
+3. 再做 `api` 消息删除/编辑语义加固，保证前端动作背后行为可靠。
+4. 然后补 `web` 统一预览壳。
+5. 最后做 `api` source detail 契约和 `rag` metadata 扩展，让引用详情和多格式预览有真实数据支撑。
+
+## 每轮验收模板
+
+每次 Ralph 迭代完成后，必须在 `progress.txt` 追加：
+
+```text
+## YYYY-MM-DD - <任务名>
+
+- Service: web/api/rag/chore
+- Task: <PRD 中的任务原文>
+- Changed: <本轮实际改了什么>
+- Verification:
+  - <命令或浏览器路径>
+- Commit: <hash 或未提交原因>
+- Blockers: <无 / 阻塞项>
+- Next: <建议下一轮任务>
+```
+
+## 完成标准
+
+- 所有任务完成，或明确标记为暂不做并写明原因。
+- 每个完成任务都有可追溯 commit。
+- `progress.txt` 能让新上下文的 Codex 直接接着执行。
+- 主聊天流程在浏览器中验证可用：登录、提问、流式生成、中断、滚动、切换会话、引用查看、消息动作。
+- 不存在混合服务 commit。

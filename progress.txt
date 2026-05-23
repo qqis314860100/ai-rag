@@ -1,34 +1,86 @@
-# Progress
+# Ralph 进度记录
 
-## Completed Before Ralph Setup
+## 当前状态
 
-- `af4b255 fix(web): improve chat interruption state`
-  - Added safer interruption state handling in the chat UI.
-  - Prevented temporary `stream-*` and `interrupted-*` assistant messages from using persisted favorite/feedback actions.
-  - Verified `pnpm run lint:web`, `pnpm run build:web`, and browser login/send/interrupt smoke flow.
+- Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
+- 当前 PRD 已按 Ralph 要求重整为单任务、单服务、可验证、可提交的任务队列。
+- 下一轮应优先处理 `web`: 修复聊天滚动体验，确保页面切换返回保留当前位置、切换会话按会话恢复位置、发送新消息后回到底部。
 
-## Current State
+## 已完成
 
-- Ralph control files were initialized in local Claude mode.
-- `./ralph-once.sh` was attempted, but local Claude Code failed with a 403 permission error for `/v1/messages`.
-- The first iteration was completed by Codex as a manual Ralph fallback.
-- Next iteration should pick exactly one incomplete task from `PRD.md`.
+### 2026-05-24 - 初始化 Ralph loop
 
-## Completed Ralph Iterations
+- Service: chore
+- Task: 初始化 Ralph 控制文件和一次一任务的执行规则。
+- Changed: 添加 `PRD.md`、`progress.txt`、`ralph-once.sh`、`afk-ralph.sh`。
+- Verification:
+  - 脚本可读，任务规则与仓库执行规则一致。
+- Commit: `cef298d`
+- Blockers: 无。
+- Next: 执行第一个 web 任务。
 
-- `49d1a39 feat(web): focus chat source details`
-  - Task: `web` source side panel replacement.
-  - Changed the chat source panel from an all-source list into an answer-scoped evidence detail drawer.
-  - Inline citation clicks now open the evidence detail drawer rather than jumping straight to the original document preview.
-  - The drawer keeps same-answer evidence switching as a secondary control and exposes separate actions for copying, follow-up, and original preview.
-  - Verification:
-    - `pnpm run lint:web` passed with existing warnings in unrelated files.
-    - `pnpm run build:web` passed.
-    - Browser smoke verified admin login and chat page render with no console errors.
-  - Browser sample boundary: the current seeded/active chat data did not expose a message with sources, so the evidence drawer was not fully opened against real source data in-browser.
+### 2026-05-24 - 改造回答引用详情
 
-## Notes
+- Service: web
+- Task: `web`: 改造引用查看方式，将回答内引用点击打开回答作用域的证据详情，而不是把右侧作为全量引用仓库。
+- Changed: 将聊天引用面板从全量来源列表调整为回答作用域证据详情；引用点击打开证据详情，可复制、追问、打开原文预览。
+- Verification:
+  - `pnpm run lint:web` 通过，但存在既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - 浏览器烟雾验证登录和聊天页渲染。
+- Commit: `49d1a39`
+- Blockers: 当前种子/活跃会话没有真实 sources，未能在浏览器中完整打开真实证据详情。
+- Next: 做滚动体验修复。
 
-- Do not edit root lockfiles or package metadata unless the selected task explicitly targets tooling.
-- Keep every commit single-service and verified before commit.
-- Ralph scripts now need a non-Claude runner fallback because local Claude Code is not authorized in this environment.
+### 2026-05-24 - 记录引用详情迭代
+
+- Service: chore
+- Task: 记录 Ralph 迭代结果。
+- Changed: 更新 Ralph 进度记录。
+- Verification:
+  - `git show --stat 49d1a39`
+- Commit: `ba87c41`
+- Blockers: 无。
+- Next: 修复 Ralph runner。
+
+### 2026-05-24 - 固定 Codex Ralph runner
+
+- Service: chore
+- Task: 将 Ralph runner 固定为 Codex，避免本地 Claude Code `/v1/messages` 403 阻塞任务。
+- Changed: `ralph-once.sh` 和 `afk-ralph.sh` 改为只调用 `codex exec`；本地 `ralph-loop` 插件只保留 Codex marketplace 和 `.codex-plugin`，删除 Claude 插件入口。
+- Verification:
+  - `bash -n ralph-once.sh afk-ralph.sh`
+  - `python3 -m py_compile /Users/tomtong/.codex/plugins/marketplaces/ralph-loop/plugins/ralph-loop/scripts/init_ralph_loop.py`
+  - `validate_plugin.py /Users/tomtong/.codex/plugins/cache/ralph-loop/ralph-loop/0.1.0`
+  - `codex plugin list --marketplace ralph-loop`
+- Commit: `e380352`
+- Blockers: 无。
+- Next: 重整 PRD，使后续 Codex Ralph 可以稳定选择任务。
+
+## 当前待提交
+
+- Service: chore
+- Task: `chore`: 将当前 PRD/progress 按 Ralph 要求重整为可执行任务源。
+- Changed: 重写 `PRD.md` 和 `progress.txt`，把聊天体验改造拆成 `web`、`api`、`rag`、`chore` 的单服务任务。
+- Verification:
+  - `git diff --check -- PRD.md progress.txt`
+  - `pnpm run audit:harness`
+- Commit: 待提交。
+- Blockers: 无。
+- Next: 提交后运行 `./ralph-once.sh` 执行下一个 `web` 滚动任务。
+
+## 下一轮建议
+
+- Service: web
+- Task: `web`: 修复聊天滚动体验，确保页面切换返回保留当前浏览位置、切换会话按会话恢复位置、发送新消息后回到底部。
+- Required verification:
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - 浏览器验证：长对话滚动到中间，切换页面再回来位置不丢；切换会话按会话恢复；发送新消息后滚动到底部。
+
+## 执行提醒
+
+- 每轮只做一个任务。
+- 每轮只改一个服务。
+- 验证通过后再提交。
+- 如果工作区不干净，先停下来说明，不要让 Ralph 自动吞掉无关改动。
