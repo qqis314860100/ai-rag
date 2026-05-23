@@ -24,6 +24,9 @@ export interface Source {
   page_number?: number;
   score: number;
   snippet: string; content?: string;
+  version?: string;
+  document_type?: string;
+  category?: string;
 }
 
 export interface ChatMessage {

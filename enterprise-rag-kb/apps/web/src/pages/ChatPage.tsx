@@ -20,19 +20,51 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const draftsRef = useRef<Map<string, string>>(new Map());
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
-  // Close sidebar on outside click (mobile overlay)
+  // Close sidebar on outside click (mobile overlay) + lock body scroll
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (sidebarOpen && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
         setSidebarOpen(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    if (sidebarOpen) {
+      document.addEventListener("mousedown", handler);
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.body.style.overflow = "";
+    };
   }, [sidebarOpen]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
+      // ESC: cancel stream or close panels
+      if (e.key === "Escape") {
+        if (isSending) cancelStream();
+        else if (previewSource) setPreviewSource(null);
+        else if (selectedSources) setSelectedSources(null);
+        return;
+      }
+      // / : focus input (only when not already in input)
+      if (e.key === "/" && !isInput) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [isSending, cancelStream, previewSource, selectedSources]);
 
   // Load sessions on mount
   const loadSessions = useCallback(async () => {
@@ -87,13 +119,24 @@ export default function ChatPage() {
     setMessages([]);
     setSelectedSources(null);
     setSidebarOpen(false);
+    // Draft will be cleared since input resets when messages change
   }, []);
 
   const handleSelectSession = useCallback((id: string) => {
+    // Save current draft before switching
+    const currentInput = inputRef.current?.value;
+    if (activeSessionId && currentInput) {
+      draftsRef.current.set(activeSessionId, currentInput);
+    }
     setActiveSessionId(id);
     setSelectedSources(null);
     setSidebarOpen(false);
-  }, []);
+    // Restore draft for target session
+    const saved = draftsRef.current.get(id);
+    if (saved) {
+      if (inputRef.current) inputRef.current.value = saved;
+    }
+  }, [activeSessionId]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
     try {
@@ -252,7 +295,7 @@ export default function ChatPage() {
         {/* Input: centered, sticky bottom, white bg */}
         <div className="shrink-0 bg-white">
           <div className="max-w-3xl mx-auto px-4 py-3">
-            <ChatInput onSend={handleSend} loading={stream.loading} />
+            <ChatInput onSend={handleSend} loading={stream.loading} inputRef={inputRef} draftValue={activeSessionId ? (draftsRef.current.get(activeSessionId) || "") : ""} onDraftChange={(val) => { if (activeSessionId) draftsRef.current.set(activeSessionId, val); }} />
           </div>
         </div>
       </div>

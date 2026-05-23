@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, Pencil, AlertCircle } from "lucide-react";
+import { ThumbsUp, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown } from "lucide-react";
 import type { ChatMessage, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import { api } from "../../services/api";
@@ -28,9 +28,124 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
+// Empty welcome state with categorized prompt suggestions
+function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
+  const categories = [
+    {
+      icon: FlaskConical, label: "测试标准",
+      prompts: ["绝缘电阻测试的标准是什么？", "OCV 测试包含哪些流程？", "气密测试参数如何设定？"],
+    },
+    {
+      icon: Wrench, label: "异常排查",
+      prompts: ["焊接飞溅的常见原因有哪些？", "CCD 检测误判怎么分析？", "绝缘不良如何快速定位？"],
+    },
+    {
+      icon: Zap, label: "设备操作",
+      prompts: ["Busbar 激光焊接关键参数", "电芯分选的标准是什么？", "模组堆叠精度要求是多少？"],
+    },
+    {
+      icon: ShieldCheck, label: "安全规范",
+      prompts: ["EOL 测试安全注意事项", "高压测试防护要求", "化学品存储规范"],
+    },
+  ];
+
+  return (
+    <div className="flex flex-col items-center py-12 px-4 text-center animate-fade-in-up">
+      <div className="w-16 h-16 rounded-2xl bg-accent-soft flex items-center justify-center mb-6 shadow-sm-soft">
+        <Sparkles className="h-7 w-7 text-accent" />
+      </div>
+      <h2 className="text-lg font-semibold text-text tracking-tight">电池产线知识库</h2>
+      <p className="mt-2 max-w-lg text-[15px] text-text-secondary leading-relaxed">
+        基于产线技术文档，为你提供即时、可追溯的工艺问答。
+        <br />
+        选择一个下方问题开始，或直接输入你的疑问。
+      </p>
+
+      {/* Categorized prompts */}
+      <div className="mt-8 w-full max-w-2xl grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {categories.map(({ icon: Icon, label, prompts }) => (
+          <div key={label} className="rounded-xl border border-border bg-surface-page p-4 text-left hover:border-accent/25 hover:shadow-sm-soft transition-all duration-normal">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-accent-soft text-accent">
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-sm font-semibold text-text">{label}</span>
+            </div>
+            <div className="space-y-1.5">
+              {prompts.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => onQuestion(q)}
+                  className="w-full text-left px-3 py-1.5 rounded-lg text-[13px] text-text-secondary hover:bg-accent-soft/50 hover:text-accent transition-all duration-fast"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-8 text-[11px] text-text-muted">
+        AI 生成内容仅供参考，请以正式文档为准
+      </p>
+    </div>
+  );
+}
+
+// Animated multi-stage loading indicator
+function StreamStages() {
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setStage(1), 600);
+    const t2 = setTimeout(() => setStage(2), 1600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
+  const stages = [
+    { icon: Search, label: "检索知识库...", color: "text-accent" },
+    { icon: FileCheck, label: "匹配相关文档...", color: "text-accent" },
+    { icon: MessageSquare, label: "生成答案中...", color: "text-accent" },
+  ];
+
+  return (
+    <div className="flex flex-col gap-2">
+      {stages.map((s, i) => {
+        const isActive = i <= stage;
+        const isCurrent = i === stage;
+        const StepIcon = s.icon;
+        return (
+          <div
+            key={i}
+            className={`flex items-center gap-2.5 text-sm transition-all duration-normal ${
+              isActive ? "text-text-secondary" : "text-text-muted/30"
+            } ${isCurrent ? "font-medium" : ""}`}
+          >
+            <span className={`flex items-center justify-center w-5 h-5 rounded-full transition-all duration-normal ${
+              isCurrent ? "bg-accent-soft text-accent animate-pulseGlow" :
+              i < stage ? "bg-success-soft text-success" :
+              "bg-surface-hover text-text-muted/30"
+            }`}>
+              {i < stage ? <Check className="h-3 w-3" /> : <StepIcon className="h-3 w-3" />}
+            </span>
+            <span>{s.label}</span>
+            {isCurrent && (
+              <span className="flex gap-1 ml-1">
+                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:0ms]" />
+                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:150ms]" />
+                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:300ms]" />
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onPreviewSource }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
@@ -39,40 +154,63 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const prevContentLen = useRef(0);
   const scrollRaf = useRef<number>(0);
   const wasLoading = useRef(false);
+  const containerRef = useRef<HTMLElement | null>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const nearBottom = useRef(true);
 
+  // Find and observe the scroll container
+  useEffect(() => {
+    const el = bottomRef.current?.closest(".chat-scroll-area") as HTMLElement | null;
+    if (!el) return;
+    containerRef.current = el;
+
+    const handleScroll = () => {
+      const threshold = 80;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      nearBottom.current = distFromBottom <= threshold;
+      setShowScrollBtn(!nearBottom.current);
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Smart scroll: only auto-scroll when user is near bottom
   useEffect(() => {
     if (loading) {
       wasLoading.current = true;
-      // Smooth scroll during streaming — throttled via rAF
       if (streamingContent.length > prevContentLen.current && !scrollRaf.current) {
         scrollRaf.current = requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ block: "end" });
+          if (nearBottom.current) {
+            bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+          }
           scrollRaf.current = 0;
         });
       }
     } else if (wasLoading.current) {
-      // Stream just ended — force scroll to absolute bottom after DOM settles
       wasLoading.current = false;
-      const scrollToEnd = () => {
-        const el = bottomRef.current?.parentElement;
-        if (el) {
-          // Find the nearest scrollable ancestor
-          let p = el.parentElement;
-          while (p) {
-            if (p.scrollHeight > p.clientHeight) break;
-            p = p.parentElement;
-          }
-          if (p) p.scrollTop = p.scrollHeight;
-        }
-      };
-      // Chain: immediate + 100ms + 300ms to catch async markdown renders
-      requestAnimationFrame(scrollToEnd);
-      setTimeout(scrollToEnd, 100);
-      setTimeout(scrollToEnd, 350);
+      if (nearBottom.current) {
+        const scrollToEnd = () => {
+          const c = containerRef.current;
+          if (c) c.scrollTop = c.scrollHeight;
+        };
+        requestAnimationFrame(scrollToEnd);
+        setTimeout(scrollToEnd, 100);
+        setTimeout(scrollToEnd, 350);
+      }
     }
     prevContentLen.current = streamingContent.length;
     return () => { if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current); };
   }, [streamingContent, loading]);
+
+  const handleScrollToBottom = () => {
+    const c = containerRef.current;
+    if (c) {
+      c.scrollTop = c.scrollHeight;
+      nearBottom.current = true;
+      setShowScrollBtn(false);
+    }
+  };
 
   // Fetch feedback counts — skip during streaming to avoid flicker
   const streamJustEnded = useRef(false);
@@ -90,11 +228,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     return () => clearTimeout(timer);
   }, [messages, loading]);
 
-  const handleCopy = (id: string, content: string) => {
+  const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content);
-    setCopiedId(id);
     showToast("success", "已复制到剪贴板");
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleFeedback = async (messageId: string, rating: "up" | "down") => {
@@ -126,25 +262,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   };
 
   if (messages.length === 0 && !loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-accent-soft flex items-center justify-center mb-6">
-          <Sparkles className="h-7 w-7 text-accent" />
-        </div>
-        <h2 className="text-[17px] font-serif font-normal text-text">智能问答助手</h2>
-        <p className="mt-2 max-w-md text-[15px] text-text-secondary leading-relaxed">
-          基于电池产线知识库，为你提供准确、可追溯的技术问答。
-        </p>
-        <div className="mt-8 flex flex-wrap justify-center gap-2">
-          {["Busbar 激光焊接有哪些关键参数？", "模组 EOL 测试包含哪些项目？", "CCD 检测误判常见原因有哪些？", "电芯分选的标准是什么？"].map((q) => (
-            <button key={q} onClick={() => onInitialQuestion(q)}
-              className="px-4 py-2 rounded-xl border border-border text-[13px] text-text-secondary hover:border-accent hover:text-accent hover:bg-accent-soft/50 transition-all duration-normal">
-              {q}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
+    return <EmptyWelcome onQuestion={onInitialQuestion} />;
   }
 
   return (
@@ -184,7 +302,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                   <div className="relative group/bubble inline-flex items-center gap-1">
                     {/* Copy + delete on hover — appear to the LEFT of the bubble */}
                     <div className="flex items-center gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity order-first">
-                      <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.id, msg.content); }}
+                      <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.content); }}
                         className="p-1 rounded text-text-muted hover:text-text transition-colors" title="复制">
                         <Copy className="h-3.5 w-3.5" />
                       </button>
@@ -202,9 +320,18 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                   </div>
                 )
               ) : (
-                /* AI message — plain text */
-                <div className="text-[15px] leading-relaxed text-text">
-                  <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
+                /* AI message — with subtle card background */
+                <div className="rounded-2xl bg-surface-page border border-border/60 px-5 py-4 shadow-sm-soft">
+                  {/* Low confidence warning */}
+                  {msg.confidence !== undefined && msg.confidence > 0 && msg.confidence < 0.6 && (
+                    <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-warning-soft border border-warning/20 text-[13px] text-warning">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>本回答置信度较低（{(msg.confidence * 100).toFixed(0)}%），请人工核对原文</span>
+                    </div>
+                  )}
+                  <div className="text-[15px] leading-relaxed text-text">
+                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { const s = msg.sources?.[idx]; if (s) onPreviewSource(s as Source); }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -213,14 +340,27 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             {!isUser && (
               <>
                 {msg.sources && msg.sources.length > 0 && (
-                  <button onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
-                    className="inline-flex items-center gap-1 mt-2 text-xs text-accent hover:text-accent-hover transition-colors">
-                    <FileSearch className="h-3 w-3" />
-                    查看 {msg.sources.length} 条引用
-                    {msg.confidence !== undefined && msg.confidence > 0 && (
-                      <span className="text-text-muted ml-1">· 置信度 {(msg.confidence * 100).toFixed(0)}%</span>
-                    )}
-                  </button>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-surface-page hover:border-accent/40 hover:bg-accent-soft/50 transition-all duration-normal"
+                    >
+                      <FileSearch className="h-3.5 w-3.5 text-accent" />
+                      <span className="text-xs text-text-secondary">
+                        引用来源
+                        <span className="font-semibold text-accent ml-1">{msg.sources.length}</span> 条
+                      </span>
+                      {msg.confidence !== undefined && msg.confidence > 0 && (
+                        <span className={`text-[11px] font-semibold ml-1 px-1.5 py-0.5 rounded-full ${
+                          msg.confidence >= 0.8 ? "bg-success/10 text-success" :
+                          msg.confidence >= 0.6 ? "bg-accent/10 text-accent" :
+                          "bg-warning/10 text-warning"
+                        }`}>
+                          可信度 {(msg.confidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </button>
+                  </div>
                 )}
                 {msg.followups && msg.followups.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
@@ -241,7 +381,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               {/* AI: feedback actions on hover. User: actions float on bubble itself */}
               {!isUser && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => handleCopy(msg.id, msg.content)}
+                  <button onClick={() => handleCopy(msg.content)}
                     className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
                     <Copy className="h-3 w-3" />
                   </button>
@@ -264,6 +404,11 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       {/* Streaming message */}
       {loading && streamingContent && (
         <div className="flex flex-col items-start">
+          <div className="flex items-center gap-2 mb-2 text-xs text-accent font-medium">
+            <MessageSquare className="h-3.5 w-3.5" />
+            正在生成答案...
+            <span className="inline-block w-[3px] h-3.5 bg-accent animate-pulse rounded-sm" />
+          </div>
           <div className="max-w-[85%]">
             <div className="text-[15px] leading-relaxed text-text">
               <MarkdownContent content={streamingContent} />
@@ -273,18 +418,13 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         </div>
       )}
 
-      {/* Loading indicator */}
+      {/* Loading indicator — multi-stage */}
       {loading && !streamingContent && (
         <div className="flex flex-col items-start">
-          <div className="flex items-center gap-2 text-sm text-text-muted">
-            <span className="h-2 w-2 rounded-full bg-accent animate-bounce [animation-delay:0ms]" />
-            <span className="h-2 w-2 rounded-full bg-accent animate-bounce [animation-delay:150ms]" />
-            <span className="h-2 w-2 rounded-full bg-accent animate-bounce [animation-delay:300ms]" />
-            检索知识库中...
-            <button onClick={onCancelStream} className="ml-2 p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止">
-              <StopCircle size={14} />
-            </button>
-          </div>
+          <StreamStages />
+          <button onClick={onCancelStream} className="mt-2 p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止">
+            <StopCircle size={14} />
+          </button>
         </div>
       )}
 
@@ -308,6 +448,17 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             <RefreshCw className="h-3 w-3" />重试
           </button>
         </div>
+      )}
+
+      {/* Scroll-to-bottom floating button */}
+      {showScrollBtn && (
+        <button
+          onClick={handleScrollToBottom}
+          className="sticky bottom-4 mx-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-white border border-border shadow-md-soft text-xs text-text-secondary hover:text-accent hover:border-accent/50 transition-all animate-fade-in-up z-10"
+        >
+          <ChevronDown className="h-3.5 w-3.5" />
+          滚动到底部
+        </button>
       )}
 
       <div ref={bottomRef} />

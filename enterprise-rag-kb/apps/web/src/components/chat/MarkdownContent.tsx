@@ -1,5 +1,5 @@
-// Lightweight markdown renderer — handles the common formatting
-// patterns from LLM answers without adding a heavy dependency.
+// Lightweight markdown renderer — handles common LLM formatting
+// patterns including tables, code blocks, and styled quotes.
 
 function escapeHtml(text: string): string {
   return text
@@ -8,118 +8,185 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+function renderInline(text: string): string {
+  let result = escapeHtml(text);
+
+  // Bold (**text**)
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-text">$1</strong>');
+
+  // Italic (*text*)
+  result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  // Inline code (`code`)
+  result = result.replace(/`([^`]+)`/g, '<code class="rounded-md bg-primary-soft px-1.5 py-0.5 text-[13px] font-mono text-primary">$1</code>');
+
+  // Links [text](url)
+  result = result.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" class="text-accent underline decoration-accent/30 hover:decoration-accent transition-colors" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+
+  // Highlight engineering parameter values: ≥200MΩ, 500VDC, 3s, ≤0.5mm etc.
+  result = result.replace(
+    /([≥≤]?\d+(?:\.\d+)?\s*(?:MΩ|kΩ|Ω|kV|VDC|V|mV|A|mA|MPa|kPa|N|mm|cm|μm|℃|°C|s|ms|min|h)\b)/g,
+    '<strong class="font-semibold text-[#b3462a] bg-fresh-soft px-1 rounded tracking-tight">$1</strong>'
+  );
+
+  return result;
+}
+
 function renderMarkdownLine(line: string): string {
   // Heading
   const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
   if (hMatch) {
     const level = hMatch[1].length;
     const sizes = ["text-lg", "text-base", "text-sm", "text-xs", "text-xs", "text-xs"];
-    return `<h${level} class="font-semibold ${sizes[level - 1]} mt-3 mb-1">${renderInline(hMatch[2])}</h${level}>`;
+    const margins = ["mt-6 mb-3", "mt-5 mb-2", "mt-4 mb-1.5", "mt-3 mb-1"];
+    const m = margins[Math.min(level - 1, margins.length - 1)];
+    return `<h${level} class="font-semibold ${sizes[level - 1]} ${m} text-text">${renderInline(hMatch[2])}</h${level}>`;
   }
 
   // Unordered list
   const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
   if (ulMatch) {
-    return `<li class="ml-4 list-disc">${renderInline(ulMatch[1])}</li>`;
+    return `<li class="ml-4 list-disc marker:text-accent">${renderInline(ulMatch[1])}</li>`;
   }
 
   // Ordered list
   const olMatch = line.match(/^\d+[\.\)]\s+(.+)$/);
   if (olMatch) {
-    return `<li class="ml-4 list-decimal">${renderInline(olMatch[1])}</li>`;
+    return `<li class="ml-4 list-decimal marker:text-accent marker:font-medium">${renderInline(olMatch[1])}</li>`;
   }
 
   // Horizontal rule
   if (/^[-*_]{3,}$/.test(line.trim())) {
-    return '<hr class="my-2 border-border" />';
+    return '<hr class="my-5 border-border" />';
   }
 
-  // Blockquote
+  // Blockquote — check for special callout syntaxes
   if (line.startsWith("> ")) {
-    return `<blockquote class="border-l-2 border-accent pl-3 my-1 text-text-secondary">${renderInline(line.slice(2))}</blockquote>`;
+    const content = renderInline(line.slice(2));
+    // Check for callout labels like "⚠️" or "✅" or "🔧" or "📋" at start
+    const calloutMatch = content.match(/^([\u{1F300}-\u{1FAFF}]+)\s*(.*)/u);
+    if (calloutMatch) {
+      return `<blockquote class="border-l-[3px] border-accent bg-accent-soft/60 rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed">
+        <span class="inline-flex items-center gap-1.5 font-medium text-text">${calloutMatch[1]} ${calloutMatch[2]}</span>
+      </blockquote>`;
+    }
+    return `<blockquote class="border-l-[3px] border-border hover:border-accent/40 bg-surface-page rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed transition-colors">${content}</blockquote>`;
   }
 
-  return renderInline(line);
+  return `<span>${renderInline(line)}</span>`;
 }
 
-function renderInline(text: string): string {
-  let result = escapeHtml(text);
+function renderTable(lines: string[]): string {
+  if (lines.length < 2) return "";
 
-  // Bold (**text**)
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+  const parseRow = (line: string) =>
+    line
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((c) => c.trim());
 
-  // Italic (*text*)
-  result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  const headerCells = parseRow(lines[0]);
+  const isSeparator = (l: string) => /^\|[\s\-:|]+\|$/.test(l);
+  const sepLineIdx = lines.findIndex((l, i) => i > 0 && isSeparator(l));
 
-  // Inline code (`code`)
-  result = result.replace(/`([^`]+)`/g, '<code class="rounded bg-primary-soft px-1 py-0.5 text-xs font-mono text-error">$1</code>');
+  let headers = headerCells;
+  let bodyLines = lines.slice(1);
 
-  // Links [text](url)
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" class="text-accent underline hover:text-accent/80" target="_blank" rel="noopener noreferrer">$1</a>'
-  );
+  if (sepLineIdx > 0) {
+    headers = parseRow(lines[sepLineIdx - 1]);
+    bodyLines = [...lines.slice(0, sepLineIdx - 1), ...lines.slice(sepLineIdx + 1)];
+    bodyLines = bodyLines.filter((l) => isSeparator(l) === false);
+  }
 
-  return result;
+  const thHtml = headers
+    .map((h) => `<th class="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary bg-surface-hover border-b border-border first:rounded-tl-lg last:rounded-tr-lg">${renderInline(h)}</th>`)
+    .join("");
+
+  const trHtml = bodyLines
+    .map((row) => {
+      const cells = parseRow(row);
+      // Pad to header count
+      while (cells.length < headers.length) cells.push("");
+      const tdHtml = cells
+        .map((c, i) => `<td class="px-3 py-2 text-sm text-text-secondary border-b border-divider ${i === 0 ? "font-medium text-text" : ""}">${renderInline(c)}</td>`)
+        .join("");
+      return `<tr class="hover:bg-surface-hover transition-colors">${tdHtml}</tr>`;
+    })
+    .join("");
+
+  return `<div class="my-4 overflow-x-auto rounded-xl border border-border shadow-sm-soft">
+    <table class="w-full text-left">
+      <thead><tr>${thHtml}</tr></thead>
+      <tbody>${trHtml}</tbody>
+    </table>
+  </div>`;
 }
 
 function renderCodeBlock(code: string, language?: string): string {
-  const escaped = escapeHtml(code);
   return (
-    `<div class="my-2 rounded-md border bg-primary-soft/50 overflow-hidden">` +
+    `<div class="my-4 rounded-xl border border-border overflow-hidden shadow-sm-soft">` +
     (language
-      ? `<div class="border-b px-3 py-1 text-xs text-text-muted font-mono">${escapeHtml(language)}</div>`
+      ? `<div class="flex items-center justify-between px-4 py-2 bg-surface-page border-b border-divider">
+          <span class="text-xs text-text-muted font-mono">${escapeHtml(language)}</span>
+          <span class="text-[10px] text-text-muted/50">code</span>
+        </div>`
       : "") +
-    `<pre class="p-3 overflow-x-auto text-xs font-mono text-text"><code>${escaped}</code></pre>` +
+    `<pre class="p-4 overflow-x-auto text-[13px] font-mono text-text leading-relaxed bg-[#fafaf8]"><code>${escapeHtml(code)}</code></pre>` +
     `</div>`
   );
 }
 
 export function renderMarkdown(md: string): string {
-  const lines = md.split("\n");
+  const rawLines = md.split("\n");
   const result: string[] = [];
   let i = 0;
-  let inCodeBlock = false;
-  let codeLines: string[] = [];
-  let codeLang = "";
 
-  while (i < lines.length) {
-    const line = lines[i];
+  while (i < rawLines.length) {
+    const line = rawLines[i];
 
-    // Code block fence
+    // Code block fence — consume until closing fence
     if (line.trim().startsWith("```")) {
-      if (!inCodeBlock) {
-        inCodeBlock = true;
-        codeLang = line.trim().slice(3).trim();
-        codeLines = [];
-      } else {
-        result.push(renderCodeBlock(codeLines.join("\n"), codeLang));
-        inCodeBlock = false;
-      }
+      const codeLang = line.trim().slice(3).trim();
+      const codeLines: string[] = [];
       i++;
+      while (i < rawLines.length) {
+        if (rawLines[i].trim().startsWith("```")) { i++; break; }
+        codeLines.push(rawLines[i]);
+        i++;
+      }
+      result.push(renderCodeBlock(codeLines.join("\n"), codeLang));
       continue;
     }
 
-    if (inCodeBlock) {
-      codeLines.push(line);
-      i++;
-      continue;
+    // Table detection — consecutive lines starting/ending with |
+    if (/^\|.+\|$/.test(line.trim())) {
+      const tableLines: string[] = [];
+      while (i < rawLines.length) {
+        const l = rawLines[i].trim();
+        if (!/^\|.+\|$/.test(l) && !/^\|[\s\-:|]+\|$/.test(l)) break;
+        tableLines.push(l);
+        i++;
+      }
+      if (tableLines.length >= 2) {
+        result.push(renderTable(tableLines));
+        continue;
+      }
+      // Fall through: single | line (not really a table)
+      i -= tableLines.length;
     }
 
     const trimmed = line.trim();
     if (trimmed === "") {
-      // Don't output empty <p> tags; close any open paragraph context
       i++;
       continue;
     }
 
-    result.push(`<p class="mb-2">${renderMarkdownLine(line)}</p>`);
+    result.push(`<p class="mb-2 text-[15px] leading-relaxed">${renderMarkdownLine(line)}</p>`);
     i++;
-  }
-
-  // Unclosed code block
-  if (inCodeBlock) {
-    result.push(renderCodeBlock(codeLines.join("\n"), codeLang));
   }
 
   return result.join("\n");
@@ -134,7 +201,7 @@ interface MarkdownContentProps {
 export function MarkdownContent({ content, sources, onSourceClick }: MarkdownContentProps) {
   let html = renderMarkdown(content);
 
-  // Replace [来源 N] with academic-style citation links: [N. 文档名称]
+  // Replace [来源 N] with styled citation badges
   if (sources && sources.length > 0) {
     html = html.replace(
       /\[来源\s*(\d+)\]/g,
@@ -142,7 +209,8 @@ export function MarkdownContent({ content, sources, onSourceClick }: MarkdownCon
         const idx = parseInt(numStr, 10) - 1;
         const src = sources[idx];
         const title = src?.document_title || `来源 ${numStr}`;
-        return `<a href="#" class="source-ref-link inline text-xs text-text-muted hover:text-accent transition-colors" data-source-idx="${idx}" title="${title}">[${numStr}. ${title}]</a>`;
+        const shortTitle = title.length > 20 ? title.slice(0, 18) + "…" : title;
+        return `<a href="#" class="source-ref-link inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent-soft text-[11px] text-accent hover:bg-accent hover:text-white shadow-sm-soft hover:shadow-md-soft transition-all duration-fast font-medium cursor-pointer no-underline" data-source-idx="${idx}" title="${title}">[${numStr}] ${shortTitle}</a>`;
       }
     );
   }
