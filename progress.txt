@@ -4,7 +4,8 @@
 
 - Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
 - 当前 PRD 已按 Ralph 要求重整为单任务、单服务、可验证、可提交的任务队列。
-- 下一轮应优先处理 `web`: 修复聊天滚动体验，确保页面切换返回保留当前位置、切换会话按会话恢复位置、发送新消息后回到底部。
+- 最新完成 `web`: 验证并收紧问答卡片动作语义。
+- 下一轮应优先处理 `web`: 输入框发送按钮在生成中切换为中断按钮，并验证中断后不会生成可收藏/可反馈的临时消息。
 
 ## 已完成
 
@@ -57,27 +58,33 @@
 - Blockers: 无。
 - Next: 重整 PRD，使后续 Codex Ralph 可以稳定选择任务。
 
+### 2026-05-24 - 验证问答卡片动作语义
+
+- Service: web
+- Task: `web`: 验证问答卡片动作语义。用户问题 hover 显示复制、编辑、删除；删除必须二次确认，并连带删除对应回答或后续分支。回答不提供删除，提供复制、点赞、点踩、收藏、重试这些功能是否完善。
+- Changed: 回答重试改为按当前回答定位上一条用户问题并从该分支重新生成；用户编辑改为先通过现有删除/截断接口移除旧分支再重新提问；流式或未持久化用户消息禁用编辑/删除；流式完成后重新拉取会话消息，确保后续动作使用后端持久化消息 ID。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - Chrome `http://localhost:5174/chat` 烟雾验证：聊天页渲染，回答动作包含复制/收藏/点赞/点踩/重新生成此回答/查看证据且不含删除；用户问题动作包含复制/编辑/删除；编辑模式可打开并取消；删除二次确认文案正确并已取消，未删除数据。
+- Commit: `ff85043`
+- Blockers: 无。注意：根脚本 `pnpm dev` 当前会因 workspace 脚本解析失败退出，本轮改用 `pnpm run dev:web`；API 端口 3001 已有进程占用，浏览器烟雾复用现有 API。
+- Next: `web`: 输入框发送按钮在生成中切换为中断按钮，需验证中断后不会生成可收藏/可反馈的临时消息。
+
 ## 当前待提交
 
-- Service: chore
-- Task: `chore`: 将当前 PRD/progress 按 Ralph 要求重整为可执行任务源。
-- Changed: 重写 `PRD.md` 和 `progress.txt`，把聊天体验改造拆成 `web`、`api`、`rag`、`chore` 的单服务任务。
-- Verification:
-  - `git diff --check -- PRD.md progress.txt`
-  - `pnpm run audit:harness`
-- Commit: 待提交。
-- Blockers: 无。
-- Next: 提交后运行 `./ralph-once.sh` 执行下一个 `web` 滚动任务。
+- 无服务代码待提交。
+- 本文件包含本轮进度记录，未并入 `ff85043`，避免 web 服务 commit 混入根级进度文件。
 
 ## 下一轮建议
 
 - Service: web
-- Task: `web`: 检查聊天滚动体验，流失输出是卡片自动滚动时是否顺滑。
+- Task: `web`: 输入框发送按钮在生成中切换为中断按钮，需验证中断后不会生成可收藏/可反馈的临时消息。
 
 - Required verification:
   - `pnpm run lint:web`
   - `pnpm run build:web`
-  - 浏览器验证：打字机时视觉会不会跳，结束时滚动条好不好闪一下。
+  - 浏览器验证：发送问题后按钮切换为中断；中断后临时回答不出现收藏/反馈动作；可继续重新提问。
 
 ## 执行提醒
 
