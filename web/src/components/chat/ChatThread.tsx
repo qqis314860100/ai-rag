@@ -18,8 +18,8 @@ interface ChatThreadProps {
   onFollowUp: (query: string) => void;
   onCancelStream: () => void;
   onInitialQuestion: (query: string) => void;
-  onRetry: () => void;
-  onEditUser: (messageId: string, content: string) => void;
+  onRetry: (messageId?: string) => void;
+  onEditUser: (messageId: string, content: string) => void | Promise<void>;
   onDeleteMessage: (messageId: string) => void;
   onSourceAnchor?: (sources: Source[], index: number) => void;
 }
@@ -31,6 +31,10 @@ function formatTime(iso: string) {
 
 function canUsePersistedAssistantActions(messageId: string) {
   return !messageId.startsWith("stream-") && !messageId.startsWith("interrupted-");
+}
+
+function canUsePersistedUserActions(messageId: string) {
+  return !messageId.startsWith("user-");
 }
 
 function getPersistedMessageId(message: ChatMessage) {
@@ -291,11 +295,13 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   };
 
   const handleStartEdit = (msg: ChatMessage) => {
+    if (!canUsePersistedUserActions(getPersistedMessageId(msg))) return;
     setEditingMsgId(msg.id);
     setEditValue(msg.content);
   };
 
   const handleDeleteUserMessage = (msg: ChatMessage) => {
+    if (!canUsePersistedUserActions(getPersistedMessageId(msg))) return;
     const ok = window.confirm("确认删除这一轮问答及其后续分支吗？此操作会连带删除对应回答。");
     if (!ok) return;
     onDeleteMessage(msg.id);
@@ -400,6 +406,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const isUser = msg.role === "user";
         const persistedMessageId = getPersistedMessageId(msg);
         const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
+        const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
+        const userBranchActionsDisabled = loading || !canPersistUserActions;
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
 
         return (
@@ -437,12 +445,20 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                         className="p-1 rounded text-text-muted hover:text-text transition-colors" title="复制">
                         <Copy className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); handleStartEdit(msg); }}
-                        className="p-1 rounded text-text-muted hover:text-accent transition-colors" title="编辑并重新提问">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleStartEdit(msg); }}
+                        disabled={userBranchActionsDisabled}
+                        className="p-1 rounded text-text-muted hover:text-accent disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:text-text-muted transition-colors"
+                        title={loading ? "生成中不可编辑" : canPersistUserActions ? "编辑并重新提问" : "消息保存后可编辑"}
+                      >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteUserMessage(msg); }}
-                        className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="删除本轮问答">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteUserMessage(msg); }}
+                        disabled={userBranchActionsDisabled}
+                        className="p-1 rounded text-text-muted hover:text-danger disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:text-text-muted transition-colors"
+                        title={loading ? "生成中不可删除" : canPersistUserActions ? "删除本轮问答" : "消息保存后可删除"}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -560,8 +576,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                       {fb.down > 0 && <span className="text-[11px] text-text-muted">{fb.down}</span>}
                     </>
                   )}
-                  <button onClick={onRetry}
-                    className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成最近回答">
+                  <button onClick={() => onRetry(msg.id)}
+                    className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成此回答">
                     <RefreshCw className="h-3 w-3" />
                   </button>
                   {msg.sources && msg.sources.length > 0 && (
@@ -598,7 +614,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             <AlertCircle className="h-4 w-4" />
             {streamError}
           </div>
-          <button onClick={onRetry} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
+          <button onClick={() => onRetry()} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
             <RefreshCw className="h-3 w-3" />重试
           </button>
         </div>
@@ -607,7 +623,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       {!loading && streamStopped && (
         <div className="flex flex-col items-start">
           <span className="text-sm text-text-muted">已中断</span>
-          <button onClick={onRetry} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
+          <button onClick={() => onRetry()} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
             <RefreshCw className="h-3 w-3" />重试
           </button>
         </div>

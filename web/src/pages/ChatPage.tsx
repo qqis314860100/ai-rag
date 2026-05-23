@@ -74,6 +74,7 @@ export default function ChatPage() {
     setActiveSessionId,
     setMessages,
     loadSessions,
+    loadMessages,
     createSession,
     deleteSession,
   } = useChatHistory(urlSessionId);
@@ -336,8 +337,15 @@ export default function ChatPage() {
         )
       );
       loadSessions();
+      const sessionId = activeSessionIdRef.current;
+      if (sessionId) {
+        window.setTimeout(() => {
+          void loadMessages(sessionId);
+        }, 0);
+      }
     }
   }, [
+    loadMessages,
     loadSessions,
     setMessages,
     stream.confidence,
@@ -438,6 +446,7 @@ export default function ChatPage() {
       const session = await createSession(message.substring(0, 50));
       if (!session) return;
       sid = session.id;
+      activeSessionIdRef.current = sid;
       setActiveSessionId(sid);
     }
     const userMsg: ChatMessage = {
@@ -470,19 +479,46 @@ export default function ChatPage() {
     handleSend(query);
   }, [handleSend, isSending]);
 
-  const handleRetry = useCallback(() => {
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-    if (!lastUserMsg) return;
-    handleSend(lastUserMsg.content);
-  }, [messages, handleSend]);
-
-  const handleEditUser = useCallback((messageId: string, newContent: string) => {
+  const handleEditUser = useCallback(async (messageId: string, newContent: string) => {
     if (!newContent.trim() || isSending) return;
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
-    setMessages((prev) => prev.slice(0, idx));
-    handleSend(newContent.trim());
-  }, [messages, handleSend, isSending, setMessages]);
+    if (messages[idx].role !== "user") return;
+
+    try {
+      await api.delete(`/chat/messages/${encodeURIComponent(messageId)}`);
+      setMessages((prev) => prev.slice(0, idx));
+      setSelectedSources(null);
+      await handleSend(newContent.trim());
+    } catch {
+      showToast("error", "编辑消息失败");
+    }
+  }, [handleSend, isSending, messages, setMessages]);
+
+  const handleRetry = useCallback((messageId?: string) => {
+    if (isSending) return;
+
+    let lastUserMsg: ChatMessage | undefined;
+    if (messageId) {
+      const answerIdx = messages.findIndex((m) => m.id === messageId || m.persistedId === messageId);
+      for (let i = answerIdx - 1; i >= 0; i -= 1) {
+        if (messages[i].role === "user") {
+          lastUserMsg = messages[i];
+          break;
+        }
+      }
+    }
+
+    lastUserMsg ||= [...messages].reverse().find((m) => m.role === "user");
+    if (!lastUserMsg) return;
+
+    if (lastUserMsg.id.startsWith("user-")) {
+      handleSend(lastUserMsg.content);
+      return;
+    }
+
+    void handleEditUser(lastUserMsg.id, lastUserMsg.content);
+  }, [handleEditUser, handleSend, isSending, messages]);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);
