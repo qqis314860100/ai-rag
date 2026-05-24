@@ -318,6 +318,9 @@ router.patch("/chat/messages/:id", async (req: Request, res: Response, next: Nex
     if (!isOwner && !isAdmin) {
       throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限修改该消息。", 403);
     }
+    if (existing.role !== "user") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能编辑用户消息。", 400);
+    }
 
     const updated = updateMessageAndTruncateSession(messageId, content.trim());
     if (!updated) {
@@ -350,6 +353,9 @@ router.delete("/chat/messages/:id", async (req: Request, res: Response, next: Ne
     const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
     if (!isOwner && !isAdmin) {
       throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限删除该消息。", 403);
+    }
+    if (existing.role !== "user") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能删除用户消息。", 400);
     }
 
     const deleted = deleteMessageAndTruncateSession(messageId);

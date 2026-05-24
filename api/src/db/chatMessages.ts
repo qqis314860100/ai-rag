@@ -30,7 +30,7 @@ interface OrderedMessageRow {
 export function listMessagesBySession(sessionId: string): ChatMessageRow[] {
   const db = getDb();
   return db
-    .prepare("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC")
+    .prepare("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC")
     .all(sessionId) as ChatMessageRow[];
 }
 
@@ -47,9 +47,8 @@ function listOrderedMessageIds(sessionId: string): OrderedMessageRow[] {
     .all(sessionId) as OrderedMessageRow[];
 }
 
-function deleteMessageIds(ids: string[]): void {
+function deleteMessageIds(db: ReturnType<typeof getDb>, ids: string[]): void {
   if (ids.length === 0) return;
-  const db = getDb();
   const stmt = db.prepare("DELETE FROM chat_messages WHERE id = ?");
   for (const id of ids) {
     stmt.run(id);
@@ -103,13 +102,18 @@ export function updateMessageAndTruncateSession(messageId: string, content: stri
   const index = ordered.findIndex((row) => row.id === messageId);
   if (index === -1) return existing;
 
-  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
-  deleteMessageIds(ordered.slice(index + 1).map((row) => row.id));
-  touchSession(existing.session_id);
+  const truncateBranch = db.transaction((idsToDelete: string[]) => {
+    db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
+    deleteMessageIds(db, idsToDelete);
+    touchSession(existing.session_id);
+  });
+
+  truncateBranch(ordered.slice(index + 1).map((row) => row.id));
   return getMessageById(messageId);
 }
 
 export function deleteMessageAndTruncateSession(messageId: string): boolean {
+  const db = getDb();
   const existing = getMessageById(messageId);
   if (!existing) return false;
 
@@ -117,8 +121,12 @@ export function deleteMessageAndTruncateSession(messageId: string): boolean {
   const index = ordered.findIndex((row) => row.id === messageId);
   if (index === -1) return false;
 
-  deleteMessageIds(ordered.slice(index).map((row) => row.id));
-  touchSession(existing.session_id);
+  const truncateBranch = db.transaction((idsToDelete: string[]) => {
+    deleteMessageIds(db, idsToDelete);
+    touchSession(existing.session_id);
+  });
+
+  truncateBranch(ordered.slice(index).map((row) => row.id));
   return true;
 }
 

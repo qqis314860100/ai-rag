@@ -65,7 +65,7 @@ const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
   if (ALLOWED_EXTENSIONS[ext] || ALLOWED_MIME_TYPES[file.mimetype]) {
     cb(null, true);
   } else {
-    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "不支持的文件类型。允许: pdf, txt, md, docx", 400));
+    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "不支持的文件类型。允许: pdf, txt, md, docx", 400), false);
   }
 };
 
