@@ -10,7 +10,7 @@
 
 ## 目标
 
-用 Ralph loop 方式把聊天体验改造拆成小任务执行。每一轮只做一个可验收任务，只改一个服务，只提交一个验证通过的 commit。
+用 Ralph loop 方式把聊天体验改造拆成小任务执行。每一轮只做一个可验收任务，只改一个服务，并按风险等级选择足够小的验证。
 
 ## 当前实际状态（2026-05-24）
 
@@ -41,13 +41,14 @@
 
 - 每轮只选择一个未完成任务。
 - 每轮只覆盖一个服务：`web`、`api` 或 `rag`。
-- 每轮完成后必须先验证，再提交。
+- 每轮完成后必须先完成对应风险等级的验证，再提交。
 - Commit 使用 Conventional Commits，scope 只能是 `web`、`api`、`rag`；纯仓库工具任务可用 `chore:`。
 - Commit message 不包含 AI footer。
-- 修改 UI 必须至少执行 `pnpm run lint:web` 和 `pnpm run build:web`，并尽量浏览器烟雾验证。
-- 修改 API 必须至少执行 `pnpm run build:api`，涉及接口行为时补 API 烟雾或集成测试。
-- 修改 RAG 必须至少执行 `python3 -m compileall rag/app` 或等价检查，涉及检索/生成时补服务烟雾。
-- `progress.txt` 必须记录本轮任务、验证命令、commit hash、阻塞项和下一步建议。
+- A 级小改动只跑目标函数、语法、类型或局部 smoke；不强制全量 build 或浏览器回归。
+- B 级普通服务改动跑服务级最小构建/测试和定点烟雾。
+- C 级核心链路改动才要求真实浏览器/API/RAG 链路验证。
+- Ralph 自动循环中，功能提交可以顺带只修改 `PRD.md` checkbox 来推进队列。
+- `progress.txt` 只在阶段完成、阻塞、范围变化、用户要求或 AFK loop 结束时同步，不再每轮必交。
 
 ## 任务队列
 
@@ -92,7 +93,7 @@
 
 ## 每轮验收模板
 
-每次 Ralph 迭代完成后，必须在 `progress.txt` 追加：
+阶段完成、阻塞、范围变化、用户要求或 AFK loop 结束时，在 `progress.txt` 追加：
 
 ```text
 ## YYYY-MM-DD - <任务名>

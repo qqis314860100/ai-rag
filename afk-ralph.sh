@@ -46,6 +46,19 @@ validate_new_commits() {
   fi
 }
 
+validate_queue_advanced() {
+  local before_count="$1"
+  local after_count="$2"
+  local iteration="$3"
+
+  if [ "${after_count}" -ge "${before_count}" ]; then
+    echo "Ralph guard stopped: PRD task queue did not advance in iteration ${iteration}."
+    echo "Before remaining: ${before_count}"
+    echo "After remaining:  ${after_count}"
+    exit 1
+  fi
+}
+
 build_status() {
   local current_task
   local remaining_tasks
@@ -72,12 +85,11 @@ build_status() {
     printf '\n%s\n' "## 本轮要求"
     printf '%s\n' "1. 只执行自动任务队列第 1 条，不要跳任务。"
     printf '%s\n' "2. 只改一个服务。"
-    printf '%s\n' "3. 用最小验证，过了再提交。"
-    printf '%s\n' "4. 完成后把 PRD.md 对应任务标记为 [x]，并追加 progress.txt 记录。"
-    printf '%s\n' "5. 先提交任务代码，再提交 progress.txt / PRD.md 状态。"
-    printf '%s\n' "6. 状态提交后不要停，脚本会自动进入下一轮。"
-    printf '%s\n' "7. 提交信息用 Conventional Commits，描述用中文。"
-    printf '%s\n' "8. 如果自动任务队列为空，输出 <promise>COMPLETE</promise>。"
+    printf '%s\n' "3. 按 A/B/C 风险分级选择最小验证；小改动不要跑全量流程。"
+    printf '%s\n' "4. 完成后把 PRD.md 对应任务标记为 [x]，允许和功能代码放在同一个提交里以推进队列。"
+    printf '%s\n' "5. 不要每轮都更新 progress.txt；只在阶段完成、阻塞、范围变化或 loop 结束时同步。"
+    printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
+    printf '%s\n' "7. 如果自动任务队列为空，输出 <promise>COMPLETE</promise>。"
     printf '\n%s\n' "请直接执行本轮要做的任务，不要只复述摘要。"
   } > "${STATUS_FILE}"
 }
@@ -129,12 +141,7 @@ run_guarded_iteration() {
   ensure_clean_worktree "after iteration ${iteration}"
   validate_new_commits "${before_head}"
   after_count="$(remaining_task_count)"
-  if [ "${after_count}" -ge "${before_count}" ]; then
-    echo "Ralph guard stopped: PRD task queue did not advance in iteration ${iteration}."
-    echo "Before remaining: ${before_count}"
-    echo "After remaining:  ${after_count}"
-    exit 1
-  fi
+  validate_queue_advanced "${before_count}" "${after_count}" "${iteration}"
 
   if [ "${after_count}" -eq 0 ]; then
     echo "<promise>COMPLETE</promise>"
