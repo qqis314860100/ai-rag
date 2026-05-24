@@ -16,14 +16,14 @@ Read these before editing anything:
 - [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
 ## Hard Rules
-- One commit must touch only one service: `web`, `api`, or `rag`.
-- If a task spans services, split it into separate commits and verify each service independently.
-- Never commit a mixed-service diff.
-- Never commit before the relevant user-visible flow is verified.
+- One commit should express one topic: one feature, one fix, one refactor, or one workflow/doc update.
+- Cross-service changes are allowed when they are the same topic and preserve the architecture boundaries.
+- Never mix unrelated changes in one commit.
+- Never commit before the matching normal or high-risk verification is complete.
 - Use Conventional Commits: `type(scope): description`.
-- `scope` must be one of `web`, `api`, or `rag`.
+- Prefer `web`, `api`, or `rag` scopes for single-service changes; use `repo` or omit scope for coherent cross-service or repository-level changes.
 - Do not include AI-related footer text in commit messages.
-- Treat single-service commits as the unit for future rollback.
+- Treat single-topic commits as the unit for future rollback.
 - New human-readable documentation files created from project discussion must use Chinese filenames and Chinese titles, such as requirements, design, architecture, technical notes, and plans. Do not force rename historical English docs, and do not apply this rule to code, config, scripts, tests, assets, or identifiers.
 
 ## Architecture Boundaries
@@ -45,7 +45,7 @@ Read these before editing anything:
 - API integration tests: `pnpm run test:api`
 
 ## Before Finishing
-- Run the relevant build and lint checks for the touched service.
-- Verify the user-visible flow, not just compilation.
-- Keep the diff to one service when preparing a commit.
-- If the change crosses services, split it before commit.
+- Run the smallest verification that covers the change risk.
+- Verify the real user or service flow only for high-risk paths.
+- Keep the diff to one topic when preparing a commit.
+- If the change crosses services, confirm it is one coherent topic before committing.

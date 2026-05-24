@@ -22,17 +22,18 @@ Read these before editing anything:
 - [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
 ## Hard Rules
-- One commit must touch only one service: `web`, `api`, or `rag`.
-- If a task spans services, split it into separate commits and verify each service independently.
-- Never commit a mixed-service diff.
-- Never commit before the relevant risk-tier verification is complete.
+- One commit should express one topic: one feature, one fix, one refactor, or one workflow/doc update.
+- Cross-service changes are allowed when they are the same topic and preserve the architecture boundaries.
+- Never mix unrelated changes in one commit.
+- Never commit before the matching normal or high-risk verification is complete.
 - Use Conventional Commits: `type(scope): description`.
-- `scope` must be one of `web`, `api`, or `rag`.
+- Prefer `web`, `api`, or `rag` scopes for single-service changes; use `repo` or omit scope for coherent cross-service or repository-level changes.
 - Do not include AI-related footer text in commit messages.
-- Treat single-service commits as the unit for future rollback.
-- If you run a Ralph loop or any other autonomous coding loop, it still must obey single-task, single-service, and risk-tier verification rules.
+- Treat single-topic commits as the unit for future rollback.
+- Manual development does not need to maintain a Ralph-style task ledger.
+- If you run a Ralph loop or any other autonomous coding loop, it must obey one queued task per iteration, clean-worktree start, smallest useful verification, and stop-on-failure rules.
 - Do not start an autonomous loop on a dirty worktree unless the user explicitly accepts the risk.
-- Use lightweight verification for small low-risk changes. Full browser/API/RAG flow validation is required only for core paths or high-risk changes.
+- Use lightweight verification for normal changes. Full browser/API/RAG flow validation is required only for high-risk changes.
 - `progress.txt` is a stage summary, not a per-task ledger. Update it only when a milestone finishes, a blocker appears, scope changes, the user asks, or an AFK loop ends.
 - Ralph tasks may update the matching `PRD.md` checkbox in the same functional commit so the queue can advance without adding a separate state-only commit.
 - New human-readable documentation files created from project discussion must use Chinese filenames and Chinese titles, such as requirements, design, architecture, technical notes, and plans. Do not force rename historical English docs, and do not apply this rule to code, config, scripts, tests, assets, or identifiers.
@@ -56,6 +57,6 @@ Read these before editing anything:
 - API integration tests: `pnpm run test:api`
 
 - Run the smallest verification that covers the change risk.
-- Verify the user-visible flow only when the change affects a user-visible or core service path.
-- Keep the diff to one service when preparing a commit.
-- If the change crosses services, split it before commit.
+- Verify the real user or service flow only for high-risk paths.
+- Keep the diff to one topic when preparing a commit.
+- If the change crosses services, confirm it is one coherent topic before committing.

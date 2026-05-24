@@ -84,8 +84,8 @@ build_status() {
     fi
     printf '\n%s\n' "## 本轮要求"
     printf '%s\n' "1. 只执行自动任务队列第 1 条，不要跳任务。"
-    printf '%s\n' "2. 只改一个服务。"
-    printf '%s\n' "3. 按 A/B/C 风险分级选择最小验证；小改动不要跑全量流程。"
+    printf '%s\n' "2. 只做一个主题；允许同主题少量跨服务，但不要混入无关改动。"
+    printf '%s\n' "3. 按普通/高风险两档选择最小验证；普通改动不要跑全量流程。"
     printf '%s\n' "4. 完成后把 PRD.md 对应任务标记为 [x]，允许和功能代码放在同一个提交里以推进队列。"
     printf '%s\n' "5. 不要每轮都更新 progress.txt；只在阶段完成、阻塞、范围变化或 loop 结束时同步。"
     printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
