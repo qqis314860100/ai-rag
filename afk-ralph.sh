@@ -7,6 +7,7 @@ if [ -z "${1:-}" ]; then
 fi
 
 LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.git/ralph-loop.last.md}"
+STATUS_FILE="${RALPH_STATUS_FILE:-.git/ralph-loop.status.md}"
 MODE="${1}"
 
 is_positive_integer() {
@@ -71,17 +72,25 @@ validate_new_commits() {
   done <<< "${commits}"
 }
 
+build_status() {
+  {
+    printf '%s\n' "@AGENTS.md"
+    printf '%s\n' "@PRD.md"
+    printf '\n%s\n' "## 进度摘要"
+    sed -n '1,20p' progress.txt
+    printf '\n%s\n' "## 本轮要求"
+    printf '%s\n' "1. 只做当前最高优先级的一个任务。"
+    printf '%s\n' "2. 只改一个服务。"
+    printf '%s\n' "3. 用最小验证，过了再提交。"
+    printf '%s\n' "4. 进度写回 progress.txt。"
+    printf '%s\n' "5. 提交信息用 Conventional Commits，描述用中文。"
+    printf '%s\n' "6. 如果 PRD 已完成，输出 <promise>COMPLETE</promise>。"
+  } > "${STATUS_FILE}"
+}
+
 build_prompt() {
-  cat <<'EOF'
-@AGENTS.md @CLAUDE.md @docs/EXECUTION_RULES.md @docs/CONTRIBUTING.md @PRD.md @progress.txt
-1. Find the highest-priority incomplete task and implement exactly one service slice.
-2. Touch only one service: web, api, or rag. Do not edit root lockfiles or package metadata unless the task explicitly targets tooling.
-3. Run the relevant verification, including build/lint and user-visible smoke checks when applicable.
-4. Update progress.txt with what was done, verification run, commit hash if committed, and any blockers.
-5. Commit only after verification passes, using Conventional Commits with scope web, api, or rag and no AI footer text.
-ONLY WORK ON A SINGLE TASK. NEVER COMMIT A MIXED-SERVICE DIFF.
-If the PRD is complete, output <promise>COMPLETE</promise>.
-EOF
+  build_status
+  printf '@%s\n' "${STATUS_FILE}"
 }
 
 run_iteration() {
