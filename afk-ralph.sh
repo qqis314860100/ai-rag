@@ -2,11 +2,74 @@
 set -euo pipefail
 
 if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <iterations>"
+  echo "Usage: $0 <iterations|until-complete>"
   exit 1
 fi
 
 LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.ralph-loop.last.md}"
+MODE="${1}"
+
+is_positive_integer() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+ensure_clean_worktree() {
+  local phase="$1"
+  local status
+  status="$(git status --short)"
+
+  if [ -n "${status}" ]; then
+    echo "Ralph guard stopped: worktree is dirty ${phase}."
+    echo "${status}"
+    exit 1
+  fi
+}
+
+validate_commit_scope() {
+  local commit="$1"
+  local files
+  files="$(git diff-tree --no-commit-id --name-only -r "${commit}")"
+
+  if [ -z "${files}" ]; then
+    echo "Ralph guard stopped: commit ${commit} has no file changes."
+    exit 1
+  fi
+
+  local service_count
+  service_count="$(printf '%s\n' "${files}" | awk -F/ '$1 == "web" || $1 == "api" || $1 == "rag" { print $1 }' | sort -u | wc -l | tr -d ' ')"
+
+  if [ "${service_count}" -gt 1 ]; then
+    echo "Ralph guard stopped: commit ${commit} touches multiple services."
+    printf '%s\n' "${files}"
+    exit 1
+  fi
+
+  if [ "${service_count}" -eq 1 ]; then
+    local mixed_files
+    mixed_files="$(printf '%s\n' "${files}" | awk -F/ '$1 != "web" && $1 != "api" && $1 != "rag" { print }')"
+    if [ -n "${mixed_files}" ]; then
+      echo "Ralph guard stopped: commit ${commit} mixes a service with non-service files."
+      printf '%s\n' "${files}"
+      exit 1
+    fi
+  fi
+}
+
+validate_new_commits() {
+  local before_head="$1"
+  local commits
+  commits="$(git rev-list --reverse "${before_head}..HEAD")"
+
+  if [ -z "${commits}" ]; then
+    echo "Ralph guard stopped: iteration finished without a new commit or COMPLETE signal."
+    exit 1
+  fi
+
+  local commit
+  while IFS= read -r commit; do
+    validate_commit_scope "${commit}"
+  done <<< "${commits}"
+}
 
 build_prompt() {
   cat <<'EOF'
@@ -29,13 +92,38 @@ run_iteration() {
     "$(build_prompt)"
 }
 
-for ((i=1; i<=$1; i++)); do
-  result=$(run_iteration)
+run_guarded_iteration() {
+  local iteration="$1"
+  local before_head
+  local result
 
-  echo "$result"
+  ensure_clean_worktree "before iteration ${iteration}"
+  before_head="$(git rev-parse HEAD)"
+  result="$(run_iteration)"
 
-  if [[ "$result" == *"<promise>COMPLETE</promise>"* ]]; then
-    echo "PRD complete after $i iterations."
+  echo "${result}"
+
+  if [[ "${result}" == *"<promise>COMPLETE</promise>"* ]]; then
+    ensure_clean_worktree "after COMPLETE"
+    echo "PRD complete after ${iteration} iterations."
     exit 0
   fi
+
+  ensure_clean_worktree "after iteration ${iteration}"
+  validate_new_commits "${before_head}"
+}
+
+if is_positive_integer "${MODE}"; then
+  max_iterations="${MODE}"
+elif [ "${MODE}" = "until-complete" ]; then
+  max_iterations=0
+else
+  echo "Usage: $0 <iterations|until-complete>"
+  exit 1
+fi
+
+i=1
+while [ "${max_iterations}" -eq 0 ] || [ "${i}" -le "${max_iterations}" ]; do
+  run_guarded_iteration "${i}"
+  i=$((i + 1))
 done
