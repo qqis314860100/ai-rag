@@ -1,14 +1,59 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, FileText, ExternalLink, Loader2, MessageSquare, Send, Trash2, Pencil, CornerDownRight, ArrowUpRight, Eye, FileCode } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { X, FileText, MessageSquare, Send, Trash2, Pencil, FileCode, Globe, Loader2, ExternalLink, CornerDownRight } from "lucide-react";
 import type { Source, DocComment } from "../../types";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { showToast } from "../ui/Toast";
+import { MarkdownContent } from "./MarkdownContent";
 
 interface Props {
   source: Source;
   onClose: () => void;
   onAskAbout?: (source: Source) => void;
+}
+
+type PreviewMode = "text" | "markdown" | "raw" | "pdf" | "html" | "code";
+
+const PREVIEW_MODES: Array<{
+  mode: PreviewMode;
+  label: string;
+  icon: typeof FileText;
+  enabled: boolean;
+  note?: string;
+}> = [
+  { mode: "text", label: "文本", icon: FileText, enabled: true },
+  { mode: "markdown", label: "Markdown", icon: MessageSquare, enabled: true },
+  { mode: "raw", label: "原文", icon: FileCode, enabled: true },
+  { mode: "pdf", label: "PDF", icon: FileText, enabled: false, note: "待接入 PDF 预览" },
+  { mode: "html", label: "HTML", icon: Globe, enabled: false, note: "待接入 HTML 清洗预览" },
+  { mode: "code", label: "代码", icon: FileCode, enabled: false, note: "待接入代码高亮预览" },
+];
+
+function looksLikeMarkdown(text: string) {
+  return /(^#{1,6}\s)|(```)|(^[-*]\s)|(^\d+[.)]\s)|(\|.+\|)|(\[[^\]]+\]\([^)]+\))/m.test(text);
+}
+
+function detectInitialMode(documentType: string | undefined, category: string | undefined, body: string): PreviewMode {
+  const sourceType = `${documentType || ""} ${category || ""}`.toLowerCase();
+  if (sourceType.includes("markdown") || sourceType.includes("md") || looksLikeMarkdown(body)) {
+    return "markdown";
+  }
+  return "text";
+}
+
+function getDocumentFormatLabel(documentTypeValue?: string, pageNumber?: number) {
+  const documentType = documentTypeValue?.trim();
+  if (documentType) return documentType;
+  if (pageNumber) return "page";
+  return "文本";
+}
+
+function renderTextBody(text: string) {
+  return (
+    <div className="prose prose-sm max-w-none text-sm leading-relaxed text-text whitespace-pre-wrap">
+      {text}
+    </div>
+  );
 }
 
 export default function DocPreview({ source, onClose, onAskAbout }: Props) {
@@ -22,19 +67,40 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chunk" | "original">("chunk");
+  const [activeTab, setActiveTab] = useState<PreviewMode>(() => detectInitialMode(source.document_type, source.category, source.content || source.snippet || ""));
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [originalLoading, setOriginalLoading] = useState(false);
 
+  const supportedContent = useMemo(() => content || source.content || source.snippet || "", [content, source.content, source.snippet]);
+  const formatLabel = useMemo(() => getDocumentFormatLabel(source.document_type, source.page_number), [source.document_type, source.page_number]);
+
   const loadComments = useCallback(() => {
-    api.get<{ data: { items: DocComment[] } }>(`/documents/${source.document_id}/comments?chunk_id=${source.chunk_id}`)
+    api
+      .get<{ data: { items: DocComment[] } }>(`/documents/${source.document_id}/comments?chunk_id=${source.chunk_id}`)
       .then((res) => setComments(res.data?.items || []))
       .catch(() => {})
       .finally(() => setCommentsLoading(false));
   }, [source.document_id, source.chunk_id]);
 
   useEffect(() => {
-    api.post("/stats/browse", { event_type: "source_view", resource_type: "chunk", resource_id: source.chunk_id, metadata: { document_title: source.document_title, score: source.score } }).catch(() => {});
+    setActiveTab(detectInitialMode(source.document_type, source.category, source.content || source.snippet || ""));
+    setContent(null);
+    setLoading(true);
+    setComments([]);
+    setCommentsLoading(true);
+    setCommentText("");
+    setReplyTo(null);
+    setEditingId(null);
+    setEditText("");
+    setOriginalContent(null);
+    setOriginalLoading(false);
+
+    api.post("/stats/browse", {
+      event_type: "source_view",
+      resource_type: "chunk",
+      resource_id: source.chunk_id,
+      metadata: { document_title: source.document_title, score: source.score },
+    }).catch(() => {});
 
     const immediateContent = source.content || source.snippet || "";
     if (immediateContent) {
@@ -42,7 +108,8 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
       setLoading(false);
     }
 
-    api.get<{ data: { content: string } }>(`/documents/chunks/${source.chunk_id}`)
+    api
+      .get<{ data: { content: string } }>(`/documents/chunks/${source.chunk_id}`)
       .then((res) => {
         if (res.data?.content) setContent(res.data.content);
       })
@@ -50,20 +117,30 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
       .finally(() => setLoading(false));
 
     loadComments();
-  }, [source.chunk_id]);
+  }, [
+    loadComments,
+    source.category,
+    source.chunk_id,
+    source.content,
+    source.document_title,
+    source.document_type,
+    source.score,
+    source.snippet,
+  ]);
 
   const loadOriginalFile = useCallback(() => {
     if (originalContent !== null) return;
     setOriginalLoading(true);
     const sectionPath = encodeURIComponent(source.section_path || "");
-    api.get<{ data: { content: string } }>(`/documents/${source.document_id}/raw?section_path=${sectionPath}`)
+    api
+      .get<{ data: { content: string } }>(`/documents/${source.document_id}/raw?section_path=${sectionPath}`)
       .then((res) => setOriginalContent(res.data?.content || ""))
       .catch(() => setOriginalContent(""))
       .finally(() => setOriginalLoading(false));
-  }, [source.document_id, originalContent]);
+  }, [originalContent, source.document_id, source.section_path]);
 
   const handleSubmit = async (parentId?: string) => {
-    const text = parentId ? commentText : commentText;
+    const text = commentText;
     if (!text.trim() || submitting) return;
     setSubmitting(true);
     try {
@@ -115,220 +192,284 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
     setEditText(c.content);
   };
 
-  const highlightSnippet = (text: string) => text.replace(/\n/g, "<br/>");
-
   const topLevelComments = comments.filter((c) => !c.parent_id);
   const replies = (parentId: string) => comments.filter((c) => c.parent_id === parentId);
 
-  return (
-    <div className="flex h-full flex-col bg-surface overflow-hidden animate-fade-in-right">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-divider shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="h-4 w-4 text-accent shrink-0" />
-          <h3 className="text-sm font-semibold text-text truncate">{source.document_title}</h3>
+  const renderPreviewBody = () => {
+    if (activeTab === "pdf" || activeTab === "html" || activeTab === "code") {
+      const disabledTab = PREVIEW_MODES.find((item) => item.mode === activeTab);
+      const DisabledIcon = disabledTab?.icon;
+      return (
+        <div className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-text-muted shadow-sm-soft">
+            {DisabledIcon ? <DisabledIcon className="h-5 w-5" /> : null}
+          </div>
+          <p className="mt-3 text-sm font-semibold text-text">{disabledTab?.label} 预览待接入</p>
+          <p className="mt-1 max-w-[20rem] text-xs leading-relaxed text-text-muted">
+            {disabledTab?.note || "当前仅支持文本、Markdown 和原文切换。"}
+          </p>
         </div>
-        <button onClick={onClose} className="rounded-lg p-1.5 text-text-muted hover:bg-surface-hover hover:text-text transition-colors"><X className="h-4 w-4" /></button>
+      );
+    }
+
+    if (activeTab === "raw") {
+      if (originalLoading || originalContent === null) {
+        return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-text-muted" /></div>;
+      }
+
+      if (originalContent) {
+        return (
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-border bg-[#fafaf8] p-4 text-[13px] leading-relaxed text-text">
+            {originalContent}
+          </pre>
+        );
+      }
+
+      if (originalContent === "") {
+        return (
+          <div className="rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+            <FileText className="mx-auto h-8 w-8 text-text-muted/30" />
+            <p className="mt-3 text-sm text-text-muted">无法加载原文</p>
+            <p className="mt-1 text-xs text-text-muted">文档文件可能已被移动或删除</p>
+          </div>
+        );
+      }
+    }
+
+    if (loading && !supportedContent) {
+      return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-text-muted" /></div>;
+    }
+
+    if (!supportedContent) {
+      return (
+        <div className="rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+          <FileText className="mx-auto h-8 w-8 text-text-muted/30" />
+          <p className="mt-3 text-sm text-text-muted">无法加载内容</p>
+          <p className="mt-1 text-xs text-text-muted">{(source.content || source.snippet || "").substring(0, 100)}...</p>
+        </div>
+      );
+    }
+
+    if (activeTab === "markdown") {
+      return (
+        <div className="rounded-2xl border border-border bg-white p-4">
+          <MarkdownContent content={supportedContent} />
+        </div>
+      );
+    }
+
+    return renderTextBody(supportedContent);
+  };
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden bg-surface animate-fade-in-right">
+      <div className="flex shrink-0 items-center justify-between border-b border-divider px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <FileText className="h-4 w-4 shrink-0 text-accent" />
+          <h3 className="truncate text-sm font-semibold text-text">{source.document_title}</h3>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text">
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Meta bar */}
-      <div className={`px-4 py-2 border-b border-divider bg-surface-page/50 shrink-0 ${
-        source.category === "安全规范" ? "border-l-[3px] border-l-danger" : ""
-      }`}>
+      <div className={`shrink-0 border-b border-divider bg-surface-page/50 px-4 py-2 ${source.category === "安全规范" ? "border-l-[3px] border-l-danger" : ""}`}>
         <p className="text-xs text-text-muted">{source.section_path}</p>
-        <div className="flex items-center gap-3 mt-1">
+        <div className="mt-1 flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-accent">相关度 {(source.score * 100).toFixed(0)}%</span>
+          <span className="text-[10px] text-text-muted font-mono">{formatLabel}</span>
           {source.version && <span className="text-[10px] text-text-muted font-mono">V{source.version}</span>}
           <span className="text-[10px] text-text-muted font-mono">{source.chunk_id?.substring(0, 16)}</span>
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="ml-auto flex items-center gap-2">
             {onAskAbout && (
               <button
                 onClick={() => onAskAbout(source)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-accent-soft hover:bg-accent text-accent hover:text-white text-[10px] font-medium transition-all"
+                className="inline-flex items-center gap-1 rounded-lg bg-accent-soft px-2 py-1 text-[10px] font-medium text-accent transition-all hover:bg-accent hover:text-white"
               >
                 <MessageSquare className="h-3 w-3" />基于此段落追问
               </button>
             )}
-            <a href={`/documents?doc_id=${source.document_id}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-[10px] text-accent hover:underline"><ArrowUpRight className="h-3 w-3" />打开原文</a>
+            <a href={`/documents?doc_id=${source.document_id}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-[10px] text-accent hover:underline">
+              <ExternalLink className="h-3 w-3" />
+              打开原文
+            </a>
           </div>
         </div>
       </div>
 
-      {/* Content + Comments scrollable area */}
       <div className="flex-1 overflow-y-auto">
-        {/* Tab switcher */}
-        <div className="flex border-b border-divider bg-surface-page/30">
-          <button
-            onClick={() => setActiveTab("chunk")}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px
-              ${activeTab === "chunk" ? "text-accent border-accent" : "text-text-muted border-transparent hover:text-text"}`}
-          >
-            <Eye className="h-3.5 w-3.5" />引用片段
-          </button>
-          <button
-            onClick={() => { setActiveTab("original"); loadOriginalFile(); }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px
-              ${activeTab === "original" ? "text-accent border-accent" : "text-text-muted border-transparent hover:text-text"}`}
-          >
-            <FileCode className="h-3.5 w-3.5" />查看原文
-          </button>
+        <div className="border-b border-divider bg-surface-page/30 px-4 py-3">
+          <div className="grid grid-cols-3 gap-2">
+            {PREVIEW_MODES.map((mode) => {
+              const Icon = mode.icon;
+              const selected = activeTab === mode.mode;
+              return (
+                <button
+                  key={mode.mode}
+                  type="button"
+                  disabled={!mode.enabled}
+                  onClick={() => {
+                    if (!mode.enabled) return;
+                    setActiveTab(mode.mode);
+                    if (mode.mode === "raw") loadOriginalFile();
+                  }}
+                  title={mode.enabled ? `切换到${mode.label}` : mode.note}
+                  className={`rounded-xl border px-2.5 py-2 text-left transition-colors ${
+                    mode.enabled
+                      ? selected
+                        ? "border-accent bg-white text-text shadow-sm-soft"
+                        : "border-border bg-white/90 text-text-muted hover:border-accent/40 hover:text-text"
+                      : "cursor-not-allowed border-dashed border-border/70 bg-surface-page text-text-muted/70 opacity-70"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Icon className={`h-3.5 w-3.5 shrink-0 ${selected && mode.enabled ? "text-accent" : "text-current"}`} />
+                    <span className="text-xs font-medium">{mode.label}</span>
+                  </div>
+                  <p className="mt-1 text-[10px] leading-tight text-text-muted">
+                    {mode.enabled ? (mode.mode === "raw" ? "原始文件视图" : "当前可用") : (mode.note || "待接入")}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {activeTab === "chunk" ? (
-        /* Chunk content */
-        <div className="p-4 border-b border-divider">
-          {loading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 text-text-muted animate-spin" /></div>
-          ) : content ? (
-            <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed" dangerouslySetInnerHTML={{ __html: highlightSnippet(content) }} />
-          ) : (
-            <div className="text-center py-12">
-              <FileText className="h-8 w-8 text-text-muted/30 mx-auto mb-2" />
-              <p className="text-sm text-text-muted">无法加载全文</p>
-              <p className="text-xs text-text-muted mt-1">{(source.content || source.snippet || "").substring(0, 100)}...</p>
-            </div>
-          )}
+        <div className="border-b border-divider bg-white px-4 py-4">
+          {renderPreviewBody()}
         </div>
-        ) : (
-        /* Original document view */
-        <div className="p-4">
-          {originalLoading ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 text-text-muted animate-spin" /></div>
-          ) : originalContent ? (
-            <div className="prose prose-sm max-w-none text-sm text-text leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
-              {originalContent}
-            </div>
-          ) : originalContent === "" ? (
-            <div className="text-center py-12">
-              <FileText className="h-8 w-8 text-text-muted/30 mx-auto mb-2" />
-              <p className="text-sm text-text-muted">无法加载原文</p>
-              <p className="text-xs text-text-muted mt-1">文档文件可能已被移动或删除</p>
-            </div>
-          ) : null}
-        </div>
-        )}
 
-        {/* Comments section */}
         <div className="p-4">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="mb-3 flex items-center gap-2">
             <MessageSquare className="h-4 w-4 text-text-muted" />
             <h4 className="text-sm font-semibold text-text">评论 ({topLevelComments.length})</h4>
           </div>
 
           {commentsLoading ? (
-            <div className="flex items-center justify-center py-4"><Loader2 className="h-4 w-4 text-text-muted animate-spin" /></div>
+            <div className="flex items-center justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-text-muted" /></div>
           ) : (
             <div className="space-y-3">
               {topLevelComments.map((c) => (
                 <div key={c.id}>
                   <div className="group rounded-lg bg-surface-page p-3">
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="mb-1 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-text">{c.user_name}</span>
                         <span className="text-[10px] text-text-muted">{new Date(c.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                       </div>
                       {user && c.user_id === user.id && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => startEdit(c)} className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"><Pencil className="h-3 w-3" /></button>
-                          <button onClick={() => handleDelete(c.id)} className="p-1 rounded text-text-muted hover:text-danger hover:bg-danger-soft"><Trash2 className="h-3 w-3" /></button>
+                        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button onClick={() => startEdit(c)} className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"><Pencil className="h-3 w-3" /></button>
+                          <button onClick={() => handleDelete(c.id)} className="rounded p-1 text-text-muted hover:bg-danger-soft hover:text-danger"><Trash2 className="h-3 w-3" /></button>
                         </div>
                       )}
                     </div>
                     {editingId === c.id ? (
-                      <div className="flex gap-2 mt-1">
+                      <div className="mt-1 flex gap-2">
                         <input
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleEdit(c.id); if (e.key === "Escape") setEditingId(null); }}
-                          className="flex-1 px-2 py-1 text-xs border border-border rounded bg-surface focus:outline-none focus:border-accent"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleEdit(c.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="flex-1 rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
                           autoFocus
                         />
-                        <button onClick={() => handleEdit(c.id)} disabled={submitting} className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-50">保存</button>
+                        <button onClick={() => handleEdit(c.id)} disabled={submitting} className="rounded bg-accent px-2 py-1 text-xs text-white hover:bg-accent-hover disabled:opacity-50">保存</button>
                       </div>
                     ) : (
-                      <p className="text-sm text-text-secondary leading-relaxed">{c.content}</p>
+                      <p className="text-sm leading-relaxed text-text-secondary">{c.content}</p>
                     )}
                     <button
-                      onClick={() => { setReplyTo(replyTo === c.id ? null : c.id); setCommentText(""); }}
-                      className="mt-1 text-[10px] text-text-muted hover:text-accent transition-colors"
+                      onClick={() => {
+                        setReplyTo(replyTo === c.id ? null : c.id);
+                        setCommentText("");
+                      }}
+                      className="mt-1 text-[10px] text-text-muted transition-colors hover:text-accent"
                     >
                       回复
                     </button>
                   </div>
 
-                  {/* Replies */}
                   {replies(c.id).map((r) => (
-                    <div key={r.id} className="ml-6 mt-1 group rounded-lg bg-surface-page p-2.5 border-l-2 border-accent/20">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <div className="flex items-center gap-2">
-                          <CornerDownRight className="h-3 w-3 text-text-muted" />
-                          <span className="text-xs font-semibold text-text">{r.user_name}</span>
-                          <span className="text-[10px] text-text-muted">{new Date(r.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        </div>
-                        {user && r.user_id === user.id && (
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => startEdit(r)} className="p-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"><Pencil className="h-3 w-3" /></button>
-                            <button onClick={() => handleDelete(r.id)} className="p-1 rounded text-text-muted hover:text-danger hover:bg-danger-soft"><Trash2 className="h-3 w-3" /></button>
+                    <div key={r.id} className="group ml-4 mt-2 border-l-2 border-border pl-3">
+                      <div className="rounded-lg bg-surface-page/70 p-2.5">
+                        <div className="mb-1 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CornerDownRight className="h-3 w-3 text-text-muted" />
+                            <span className="text-xs font-semibold text-text">{r.user_name}</span>
+                            <span className="text-[10px] text-text-muted">{new Date(r.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                           </div>
+                          {user && r.user_id === user.id && (
+                            <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button onClick={() => startEdit(r)} className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"><Pencil className="h-3 w-3" /></button>
+                              <button onClick={() => handleDelete(r.id)} className="rounded p-1 text-text-muted hover:bg-danger-soft hover:text-danger"><Trash2 className="h-3 w-3" /></button>
+                            </div>
+                          )}
+                        </div>
+                        {editingId === r.id ? (
+                          <div className="mt-1 flex gap-2">
+                            <input
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleEdit(r.id);
+                                if (e.key === "Escape") setEditingId(null);
+                              }}
+                              className="flex-1 rounded border border-border bg-surface px-2 py-1 text-xs focus:border-accent focus:outline-none"
+                              autoFocus
+                            />
+                            <button onClick={() => handleEdit(r.id)} disabled={submitting} className="rounded bg-accent px-2 py-1 text-xs text-white hover:bg-accent-hover disabled:opacity-50">保存</button>
+                          </div>
+                        ) : (
+                          <p className="text-sm leading-relaxed text-text-secondary">{r.content}</p>
                         )}
                       </div>
-                      {editingId === r.id ? (
-                        <div className="flex gap-2 mt-1">
-                          <input
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") handleEdit(r.id); if (e.key === "Escape") setEditingId(null); }}
-                            className="flex-1 px-2 py-1 text-xs border border-border rounded bg-surface focus:outline-none focus:border-accent"
-                            autoFocus
-                          />
-                          <button onClick={() => handleEdit(r.id)} disabled={submitting} className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent-hover disabled:opacity-50">保存</button>
-                        </div>
-                      ) : (
-                        <p className="text-sm text-text-secondary leading-relaxed">{r.content}</p>
-                      )}
                     </div>
                   ))}
-
-                  {/* Reply input */}
-                  {replyTo === c.id && (
-                    <div className="ml-6 mt-1 flex gap-2">
-                      <input
-                        value={commentText}
-                        onChange={(e) => setCommentText(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(c.id); if (e.key === "Escape") setReplyTo(null); }}
-                        placeholder="输入回复..."
-                        className="flex-1 px-2 py-1.5 text-xs border border-border rounded-lg bg-surface focus:outline-none focus:border-accent"
-                        autoFocus
-                      />
-                      <button onClick={() => handleSubmit(c.id)} disabled={submitting || !commentText.trim()} className="p-1.5 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50"><Send className="h-3.5 w-3.5" /></button>
-                    </div>
-                  )}
                 </div>
               ))}
+
               {topLevelComments.length === 0 && (
-                <p className="text-xs text-text-muted text-center py-4">暂无评论，来说点什么吧</p>
+                <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
+                  暂无评论
+                </div>
               )}
             </div>
           )}
+
+          <div className="mt-4 rounded-lg border border-border bg-surface-page p-3">
+            <textarea
+              value={commentText}
+              onChange={(e) => setCommentText(e.target.value)}
+              placeholder={replyTo ? "写回复..." : "写评论..."}
+              rows={3}
+              className="w-full resize-none rounded border border-border bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none"
+            />
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setReplyTo(null);
+                  setCommentText("");
+                }}
+                className="text-xs text-text-muted hover:text-text"
+              >
+                清空
+              </button>
+              <button
+                onClick={() => handleSubmit(replyTo || undefined)}
+                disabled={!commentText.trim() || submitting}
+                className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              >
+                <Send className="h-3 w-3" />
+                发送
+              </button>
+            </div>
+          </div>
+
+          {replyTo && <p className="mt-2 text-[10px] text-text-muted">正在回复上方评论</p>}
         </div>
-      </div>
-
-      {/* Comment input */}
-      <div className="px-4 py-3 border-t border-divider shrink-0 flex gap-2">
-        <input
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !replyTo) handleSubmit(); }}
-          placeholder={replyTo ? `回复中...` : "添加评论..."}
-          className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-surface-page focus:outline-none focus:border-accent"
-        />
-        <button onClick={() => handleSubmit()} disabled={submitting || !commentText.trim()} className="p-2 rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-50"><Send className="h-4 w-4" /></button>
-      </div>
-
-      {/* Footer */}
-      <div className="px-4 py-2.5 border-t border-divider shrink-0 flex items-center justify-between">
-        <a href="/documents" className="flex items-center gap-1.5 text-xs text-accent hover:underline"><ExternalLink className="h-3 w-3" />知识库管理</a>
-        <span className="text-[10px] text-text-muted">chunk: {source.chunk_id?.substring(0, 12)}</span>
       </div>
     </div>
   );
