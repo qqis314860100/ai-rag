@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 from pydantic import BaseModel, Field
+from ..core.source_metadata import build_source_metadata
 
 
 # ---------------------------------------------------------------------------
@@ -38,15 +39,150 @@ class ReindexResult(BaseModel):
 # Search
 # ---------------------------------------------------------------------------
 
+class SourceDocument(BaseModel):
+    id: str = ""
+    title: str = ""
+    category: str = ""
+    file_type: str = ""
+    mime_type: str = ""
+    security_level: str = ""
+    version: str = ""
+    status: str = ""
+
+
+class SourceSection(BaseModel):
+    path: str = ""
+    title: str = ""
+    level: int = 0
+
+
+class SourceChunk(BaseModel):
+    id: str = ""
+    index: int = 0
+    title: str = ""
+    type: str = "text"
+
+
+class SourcePage(BaseModel):
+    number: int = 0
+    available: bool = False
+
+
+class SourceOffset(BaseModel):
+    start: int | None = None
+    end: int | None = None
+    unit: str = "char"
+    available: bool = False
+
+
+class SourceFormat(BaseModel):
+    name: str = ""
+    mime_type: str = ""
+
+
+class SourceMetadata(BaseModel):
+    """Canonical source contract shared by search/chat outputs.
+
+    Availability and compatibility rules:
+    - `document` is always populated from the document id/title when available.
+    - `section` is populated when the parser emits headings or a section path.
+    - `chunk` is always populated after chunking.
+    - `page` is only meaningful for page-aware parsers; otherwise it stays 0.
+    - `offset` is reserved for future precise span tracking and may be `None`.
+    - `format` is filled from the ingest source type when known.
+    - `snippet` is always the retrieval preview and remains backward compatible.
+    - Flat legacy fields remain on `SearchHit`/`Source` until all consumers migrate.
+    """
+
+    document: SourceDocument = Field(default_factory=SourceDocument)
+    section: SourceSection = Field(default_factory=SourceSection)
+    chunk: SourceChunk = Field(default_factory=SourceChunk)
+    page: SourcePage = Field(default_factory=SourcePage)
+    offset: SourceOffset = Field(default_factory=SourceOffset)
+    format: SourceFormat = Field(default_factory=SourceFormat)
+    content_kind: str = ""
+    snippet: str = ""
+
+    @classmethod
+    def from_source(cls, source: Mapping[str, Any] | None) -> "SourceMetadata":
+        if not source:
+            return cls()
+
+        normalized = build_source_metadata(source)
+        document = normalized.get("document") if isinstance(normalized.get("document"), dict) else {}
+        section = normalized.get("section") if isinstance(normalized.get("section"), dict) else {}
+        chunk = normalized.get("chunk") if isinstance(normalized.get("chunk"), dict) else {}
+        page = normalized.get("page") if isinstance(normalized.get("page"), dict) else {}
+        offset = normalized.get("offset") if isinstance(normalized.get("offset"), dict) else {}
+        metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+        source_format = str(normalized.get("format") or normalized.get("file_type") or metadata.get("source_format") or "")
+        offset_start = offset.get("start")
+        if offset_start is None:
+            offset_start = metadata.get("offset_start")
+        offset_end = offset.get("end")
+        if offset_end is None:
+            offset_end = metadata.get("offset_end")
+
+        return cls(
+            document=SourceDocument(
+                id=str(normalized.get("document_id") or document.get("id") or ""),
+                title=str(normalized.get("document_title") or document.get("title") or ""),
+                category=str(document.get("category") or metadata.get("category") or ""),
+                file_type=str(document.get("file_type") or normalized.get("file_type") or ""),
+                mime_type=str(document.get("mime_type") or normalized.get("mime_type") or ""),
+                security_level=str(document.get("security_level") or metadata.get("security_level") or ""),
+                version=str(document.get("version") or metadata.get("version") or ""),
+                status=str(document.get("status") or metadata.get("status") or ""),
+            ),
+            section=SourceSection(
+                path=str(normalized.get("section_path") or section.get("path") or ""),
+                title=str(section.get("title") or normalized.get("section_path") or ""),
+                level=_coerce_int(section.get("level") or metadata.get("section_level")),
+            ),
+            chunk=SourceChunk(
+                id=str(normalized.get("chunk_id") or chunk.get("id") or ""),
+                index=_coerce_int(chunk.get("index") or metadata.get("chunk_index")),
+                title=str(chunk.get("title") or normalized.get("document_title") or ""),
+                type=str(chunk.get("type") or metadata.get("chunk_type") or "text"),
+            ),
+            page=SourcePage(
+                number=_coerce_int(normalized.get("page_number") or page.get("number")),
+                available=bool(page.get("available")),
+            ),
+            offset=SourceOffset(
+                start=_coerce_optional_int(offset_start),
+                end=_coerce_optional_int(offset_end),
+                unit=str(offset.get("unit") or metadata.get("offset_unit") or "char"),
+                available=bool(offset.get("available")),
+            ),
+            format=SourceFormat(
+                name=source_format,
+                mime_type=str(normalized.get("mime_type") or document.get("mime_type") or ""),
+            ),
+            content_kind=str(normalized.get("content_kind") or ""),
+            snippet=str(normalized.get("snippet") or "")[:200],
+        )
+
+
 class SearchHit(BaseModel):
     chunk_id: str
     document_id: str
     document_title: str
     section_path: str = ""
     page_number: int = 0
+    chunk_index: int = 0
+    section_level: int = 0
+    document_type: str = ""
+    source_format: str = ""
+    category: str = ""
+    version: str = ""
+    offset_start: int | None = None
+    offset_end: int | None = None
+    snippet: str = ""
     content: str
     score: float
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
 
 
 class SearchRequest(BaseModel):
@@ -96,9 +232,18 @@ class Source(BaseModel):
     document_title: str
     section_path: str = ""
     page_number: int = 0
+    chunk_index: int = 0
+    section_level: int = 0
+    document_type: str = ""
+    source_format: str = ""
+    category: str = ""
+    version: str = ""
+    offset_start: int | None = None
+    offset_end: int | None = None
     score: float
     snippet: str = ""
     content: str = ""
+    source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
 
 
 class ChatRequest(BaseModel):
@@ -137,3 +282,19 @@ class HealthResponse(BaseModel):
     chroma_status: str = "unknown"
     embedding_model: str = ""
     llm_provider: str = ""
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

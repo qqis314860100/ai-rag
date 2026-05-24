@@ -1,3 +1,6 @@
+from ..core.source_metadata import build_source_metadata
+from ..schemas.models import SourceMetadata
+
 SYSTEM_PROMPT = """你是企业电池产线知识库助手。
 你只能基于给定的知识库上下文回答问题。
 
@@ -31,11 +34,21 @@ def build_messages(
     total_chars = 0
 
     for i, chunk in enumerate(context_chunks, 1):
+        normalized = build_source_metadata(chunk)
+        source_metadata = SourceMetadata.from_source(normalized)
+        format_name = normalized.get("format") or normalized.get("document_type") or normalized.get("source_format") or "未知"
+        offset_start = normalized.get("offset", {}).get("start")
+        offset_end = normalized.get("offset", {}).get("end")
+        offset_text = "未知"
+        if offset_start is not None or offset_end is not None:
+            offset_text = f"{offset_start if offset_start is not None else '?'}-{offset_end if offset_end is not None else '?'}"
         source_block = (
             f"[来源 {i}]\n"
-            f"文档：《{chunk.get('document_title', '未知')}》\n"
-            f"章节：{chunk.get('section_path', '无')}\n"
-            f"页码：{chunk.get('page_number', 0)}\n"
+            f"文档：《{source_metadata.document.title or '未知'}》\n"
+            f"章节：{source_metadata.section.path or '无'}\n"
+            f"页码：{source_metadata.page.number or 0}\n"
+            f"格式：{format_name}\n"
+            f"区间：{offset_text}\n"
             f"内容：{chunk.get('content', '')}"
         )
 
@@ -73,6 +86,9 @@ def format_chunks_for_debug(chunks: list[dict]) -> list[dict]:
             "document_id": c.get("document_id", ""),
             "document_title": c.get("document_title", ""),
             "section_path": c.get("section_path", ""),
+            "page_number": c.get("page_number", 0),
+            "format": c.get("format") or c.get("document_type") or c.get("source_format", ""),
+            "snippet": c.get("snippet", ""),
             "score": c.get("score", 0),
             "content_preview": c.get("content", "")[:300],
         }
@@ -82,15 +98,12 @@ def format_chunks_for_debug(chunks: list[dict]) -> list[dict]:
 
 def extract_sources(context_chunks: list[dict]) -> list[dict]:
     return [
-        {
-            "chunk_id": c.get("chunk_id", ""),
-            "document_id": c.get("document_id", ""),
-            "document_title": c.get("document_title", ""),
-            "section_path": c.get("section_path", ""),
-            "page_number": c.get("page_number", 0),
-            "score": c.get("score", 0),
-            "snippet": c.get("content", "")[:200],
-            "content": c.get("content", ""),
-        }
+        _format_source_dict(c)
         for c in context_chunks
     ]
+
+
+def _format_source_dict(c: dict) -> dict:
+    normalized = build_source_metadata(c)
+    normalized["source_metadata"] = SourceMetadata.from_source(normalized).model_dump()
+    return normalized

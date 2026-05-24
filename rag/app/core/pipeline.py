@@ -1,5 +1,6 @@
 import time
 import logging
+import os
 from .config import config
 from ..parsers.base import ParserRegistry
 from ..parsers.markdown import MarkdownParser
@@ -35,7 +36,7 @@ class RagPipeline:
         self, document_id: str, file_path: str, metadata: dict | None = None
     ) -> dict:
         start = time.time()
-        meta = metadata or {}
+        meta = {**(metadata or {}), "source_format": _detect_source_format(file_path)}
 
         # 1. Parse document
         parser = ParserRegistry.get(file_path)
@@ -57,6 +58,7 @@ class RagPipeline:
                 "process": meta.get("process", ""),
                 "station": meta.get("station", ""),
                 "version": meta.get("version", "v1.0"),
+                "source_format": meta.get("source_format", ""),
             })
 
         # 5. Delete old chunks + upsert new
@@ -229,6 +231,21 @@ def _rewrite_query(query: str) -> str:
         if num:
             parts.append(f"第{num}章")
     return " ".join(parts)
+
+
+def _detect_source_format(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    return {
+        "md": "markdown",
+        "markdown": "markdown",
+        "txt": "text",
+        "text": "text",
+        "pdf": "pdf",
+        "html": "html",
+        "htm": "html",
+        "docx": "docx",
+        "doc": "doc",
+    }.get(ext, ext)
 
 
 def _keyword_rerank(query: str, hits: list[dict]) -> list[dict]:

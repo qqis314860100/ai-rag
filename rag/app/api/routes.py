@@ -169,6 +169,7 @@ def chat_stream(request: ChatRequest):
             # 2. Build prompt
             from ..llm.prompt_builder import build_messages, extract_sources
             messages = build_messages(request.query, hits, request.history, pipeline.config.rag_max_context_chars)
+            sources = extract_sources(hits)
 
             # 3. Stream LLM
             from ..llm.client import chat_stream as llm_stream
@@ -176,19 +177,9 @@ def chat_stream(request: ChatRequest):
             for sse_chunk in llm_stream(messages, temperature=pipeline.config.rag_temperature):
                 # Parse to inject sources on done event
                 if '"type": "done"' in sse_chunk:
-                    sources = extract_sources(hits)
                     done_data = {
                         "type": "done",
-                        "sources": [{
-                            "chunk_id": s.get("chunk_id", ""),
-                            "document_id": s.get("document_id", ""),
-                            "document_title": s.get("document_title", ""),
-                            "section_path": s.get("section_path", ""),
-                            "page_number": s.get("page_number", 0),
-                            "score": s.get("score", 0),
-                            "snippet": s.get("content", "")[:200],
-                            "content": s.get("content", ""),
-                        } for s in sources],
+                        "sources": sources,
                         "confidence": _estimate_confidence(hits),
                         "followups": _suggest_followups(request.query, hits),
                     }
