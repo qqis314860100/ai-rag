@@ -56,13 +56,17 @@ import sys
 
 kind = sys.argv[1]
 text = sys.argv[2]
+session_id = sys.argv[3] if len(sys.argv) > 3 else ""
 if kind == "chat":
-  print(json.dumps({"message": text, "stream": False}))
+  payload = {"message": text, "stream": False}
+  if session_id:
+    payload["session_id"] = session_id
+  print(json.dumps(payload))
 elif kind == "patch":
   print(json.dumps({"content": text}))
 else:
   raise SystemExit(1)
-' "$1" "$2"
+' "$1" "$2" "${3:-}"
 }
 
 assert_status() {
@@ -150,6 +154,26 @@ assert_status "${INTRUDER_DELETE_CODE}" "403" "non-owner DELETE should be reject
 echo "PASS: non-owner edit/delete returns 403"
 
 echo "--- owner edit truncates branch ---"
+FOLLOW_UP_QUESTION="Ralph API branch smoke: 再补一轮追问，用来验证编辑会截断后续分支。"
+FOLLOW_UP_RESPONSE="$(request POST /api/chat "$(json_payload chat "${FOLLOW_UP_QUESTION}" "${SESSION_ID}")" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+FOLLOW_UP_HTTP_CODE="$(printf '%s' "${FOLLOW_UP_RESPONSE}" | tail -1)"
+FOLLOW_UP_BODY="$(printf '%s' "${FOLLOW_UP_RESPONSE}" | sed '$d')"
+assert_status "${FOLLOW_UP_HTTP_CODE}" "200" "owner follow-up chat"
+
+FOLLOW_UP_MESSAGE_ID="$(printf '%s' "${FOLLOW_UP_BODY}" | json_path data.message_id)"
+if [ -z "${FOLLOW_UP_MESSAGE_ID}" ]; then
+  echo "FAIL: follow-up message_id missing from chat response"
+  exit 1
+fi
+
+BRANCH_BEFORE_PATCH_RESPONSE="$(request GET /api/chat/sessions/${SESSION_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+BRANCH_BEFORE_PATCH_CODE="$(printf '%s' "${BRANCH_BEFORE_PATCH_RESPONSE}" | tail -1)"
+BRANCH_BEFORE_PATCH_BODY="$(printf '%s' "${BRANCH_BEFORE_PATCH_RESPONSE}" | sed '$d')"
+assert_status "${BRANCH_BEFORE_PATCH_CODE}" "200" "load branched session before patch"
+
+BRANCH_BEFORE_PATCH_COUNT="$(printf '%s' "${BRANCH_BEFORE_PATCH_BODY}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]["messages"]))')"
+assert_eq "${BRANCH_BEFORE_PATCH_COUNT}" "4" "branch should contain two rounds before edit"
+
 EDITED_CONTENT="Ralph API branch smoke: 已编辑的问题内容。"
 OWNER_PATCH_RESPONSE="$(request PATCH /api/chat/messages/${USER_MESSAGE_ID} "$(json_payload patch "${EDITED_CONTENT}")" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
 OWNER_PATCH_CODE="$(printf '%s' "${OWNER_PATCH_RESPONSE}" | tail -1)"
@@ -174,7 +198,34 @@ assert_eq "${AFTER_PATCH_CONTENT}" "${EDITED_CONTENT}" "edited user content shou
 echo "PASS: owner edit truncates assistant branch"
 
 echo "--- owner delete truncates branch ---"
-OWNER_DELETE_RESPONSE="$(request DELETE /api/chat/messages/${USER_MESSAGE_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+DELETE_QUESTION="Ralph API branch smoke: 删除场景根问题。"
+DELETE_CREATE_RESPONSE="$(request POST /api/chat "$(json_payload chat "${DELETE_QUESTION}")" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+DELETE_CREATE_HTTP_CODE="$(printf '%s' "${DELETE_CREATE_RESPONSE}" | tail -1)"
+DELETE_CREATE_BODY="$(printf '%s' "${DELETE_CREATE_RESPONSE}" | sed '$d')"
+assert_status "${DELETE_CREATE_HTTP_CODE}" "200" "owner delete session creation"
+
+DELETE_SESSION_ID="$(printf '%s' "${DELETE_CREATE_BODY}" | json_path data.session_id)"
+if [ -z "${DELETE_SESSION_ID}" ]; then
+  echo "FAIL: delete session_id missing from chat response"
+  exit 1
+fi
+
+DELETE_FOLLOW_UP="Ralph API branch smoke: 删除场景的第二轮追问。"
+DELETE_FOLLOW_UP_RESPONSE="$(request POST /api/chat "$(json_payload chat "${DELETE_FOLLOW_UP}" "${DELETE_SESSION_ID}")" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+DELETE_FOLLOW_UP_HTTP_CODE="$(printf '%s' "${DELETE_FOLLOW_UP_RESPONSE}" | tail -1)"
+DELETE_FOLLOW_UP_BODY="$(printf '%s' "${DELETE_FOLLOW_UP_RESPONSE}" | sed '$d')"
+assert_status "${DELETE_FOLLOW_UP_HTTP_CODE}" "200" "owner delete follow-up chat"
+
+DELETE_BRANCH_RESPONSE="$(request GET /api/chat/sessions/${DELETE_SESSION_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+DELETE_BRANCH_CODE="$(printf '%s' "${DELETE_BRANCH_RESPONSE}" | tail -1)"
+DELETE_BRANCH_BODY="$(printf '%s' "${DELETE_BRANCH_RESPONSE}" | sed '$d')"
+assert_status "${DELETE_BRANCH_CODE}" "200" "load session before delete"
+
+DELETE_BRANCH_COUNT="$(printf '%s' "${DELETE_BRANCH_BODY}" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"]["messages"]))')"
+assert_eq "${DELETE_BRANCH_COUNT}" "4" "delete branch should contain two rounds before delete"
+
+DELETE_USER_MESSAGE_ID="$(printf '%s' "${DELETE_BRANCH_BODY}" | json_path data.messages.0.id)"
+OWNER_DELETE_RESPONSE="$(request DELETE /api/chat/messages/${DELETE_USER_MESSAGE_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
 OWNER_DELETE_CODE="$(printf '%s' "${OWNER_DELETE_RESPONSE}" | tail -1)"
 OWNER_DELETE_BODY="$(printf '%s' "${OWNER_DELETE_RESPONSE}" | sed '$d')"
 assert_status "${OWNER_DELETE_CODE}" "200" "owner DELETE"
@@ -182,7 +233,7 @@ assert_status "${OWNER_DELETE_CODE}" "200" "owner DELETE"
 DELETE_RESULT="$(printf '%s' "${OWNER_DELETE_BODY}" | json_path data.deleted)"
 assert_eq "${DELETE_RESULT}" "True" "delete result"
 
-AFTER_DELETE_RESPONSE="$(request GET /api/chat/sessions/${SESSION_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
+AFTER_DELETE_RESPONSE="$(request GET /api/chat/sessions/${DELETE_SESSION_ID} "" "${OWNER_ID}" "${OWNER_ROLE}" "${OWNER_NAME}")"
 AFTER_DELETE_CODE="$(printf '%s' "${AFTER_DELETE_RESPONSE}" | tail -1)"
 AFTER_DELETE_BODY="$(printf '%s' "${AFTER_DELETE_RESPONSE}" | sed '$d')"
 assert_status "${AFTER_DELETE_CODE}" "200" "load session after delete"

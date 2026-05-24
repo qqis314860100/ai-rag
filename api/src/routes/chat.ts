@@ -20,6 +20,10 @@ function canReadSession(req: Request, sessionUserId: string): boolean {
   return isOwner || isAdmin;
 }
 
+function canManageSession(req: Request, sessionUserId: string): boolean {
+  return canReadSession(req, sessionUserId);
+}
+
 function currentUser(req: Request): { id: string; name: string } {
   return {
     id: req.user?.id || "anonymous",
@@ -36,6 +40,20 @@ function requireReadableSession(req: Request, sessionId: string): ReturnType<typ
     throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限访问该会话。", 403);
   }
   return session;
+}
+
+function requireUserMessageMutationPermission(
+  req: Request,
+  sessionUserId: string,
+  existingRole: string,
+  action: "编辑" | "删除"
+): void {
+  if (!canManageSession(req, sessionUserId)) {
+    throw new AppError(ErrorCodes.FORBIDDEN, `当前用户无权限${action}该消息。`, 403);
+  }
+  if (existingRole !== "user") {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, `只能${action}用户消息。`, 400);
+  }
 }
 
 function normalizeNoteTarget(req: Request, input: Record<string, unknown>): NoteTarget {
@@ -616,16 +634,7 @@ router.patch("/chat/messages/:id", async (req: Request, res: Response, next: Nex
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
-
-    const userId = req.user?.id || "anonymous";
-    const isOwner = session.user_id === userId;
-    const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
-    if (!isOwner && !isAdmin) {
-      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限修改该消息。", 403);
-    }
-    if (existing.role !== "user") {
-      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能编辑用户消息。", 400);
-    }
+    requireUserMessageMutationPermission(req, session.user_id, existing.role, "编辑");
 
     const updated = updateMessageAndTruncateSession(messageId, content.trim());
     if (!updated) {
@@ -652,16 +661,7 @@ router.delete("/chat/messages/:id", async (req: Request, res: Response, next: Ne
     if (!session) {
       throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
     }
-
-    const userId = req.user?.id || "anonymous";
-    const isOwner = session.user_id === userId;
-    const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
-    if (!isOwner && !isAdmin) {
-      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限删除该消息。", 403);
-    }
-    if (existing.role !== "user") {
-      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能删除用户消息。", 400);
-    }
+    requireUserMessageMutationPermission(req, session.user_id, existing.role, "删除");
 
     const deleted = deleteMessageAndTruncateSession(messageId);
     if (!deleted) {
