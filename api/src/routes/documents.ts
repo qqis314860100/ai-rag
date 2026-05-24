@@ -19,6 +19,7 @@ import { requirePermission } from "../middleware/auth";
 import { ingestDocument, reindexDocument } from "../services/ragClient";
 import { getDb } from "../db";
 import { listComments, createComment, updateComment, softDeleteComment } from "../db/docComments";
+import { buildDocumentPreviewContract, getPreviewMimeType, listPreviewFormatDefinitions } from "../utils/documentPreview";
 
 const config = loadConfig();
 
@@ -101,6 +102,27 @@ router.get("/documents", async (req: Request, res: Response, next: NextFunction)
   }
 });
 
+// GET /api/documents/preview-contract - supported preview MIME/file-type contract
+router.get("/documents/preview-contract", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(
+      res,
+      {
+        version: "2026-05-24",
+        formats: listPreviewFormatDefinitions(),
+        contract: {
+          document_preview_field: "preview",
+          endpoint_fields: ["raw", "file", "chunk", "comments"],
+          unsupported_views_return_reason: true,
+        },
+      },
+      req.requestId
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/documents/:id - document detail
 router.get("/documents/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -110,11 +132,15 @@ router.get("/documents/:id", async (req: Request, res: Response, next: NextFunct
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
     }
     const formatted = formatDocument(doc) as ReturnType<typeof formatDocument> & { content?: string };
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
 
     // Include file content for text-based files
     try {
-      const ext = doc.file_name?.split(".").pop()?.toLowerCase() || "";
-      if (["md", "txt", "markdown"].includes(ext) && doc.file_path && fs.existsSync(doc.file_path)) {
+      if (preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
         formatted.content = fs.readFileSync(doc.file_path, "utf-8");
       }
     } catch (error) {
@@ -429,11 +455,17 @@ router.get("/documents/:id/raw", async (req: Request, res: Response, next: NextF
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
     }
 
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
+
     let content: string | null = null;
     const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
 
     // Strategy 1: direct file_path
-    if (doc.file_path && fs.existsSync(doc.file_path)) {
+    if (preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
       content = fs.readFileSync(doc.file_path, "utf-8");
     }
 
@@ -470,6 +502,15 @@ router.get("/documents/:id/raw", async (req: Request, res: Response, next: NextF
       }
     }
 
+    if (content === null && !preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
+      throw new AppError(
+        ErrorCodes.VALIDATION_ERROR,
+        "当前文件类型不支持原文文本预览，请使用 file endpoint。",
+        415,
+        { preview }
+      );
+    }
+
     if (content === null) {
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在，请确认知识库文件已上传。", 404);
     }
@@ -501,14 +542,16 @@ router.get("/documents/:id/file", async (req: Request, res: Response, next: Next
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在。", 404);
     }
 
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
     const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      ".pdf": "application/pdf",
-      ".md": "text/markdown",
-      ".txt": "text/plain",
-      ".markdown": "text/markdown",
-    };
-    res.type(mimeTypes[ext] || "application/octet-stream");
+    const mimeType = getPreviewMimeType(ext || doc.file_type);
+    res.type(mimeType);
+    res.setHeader("X-Document-File-Type", preview.file_type);
+    res.setHeader("X-Document-Preview-Kind", preview.content_kind);
     res.sendFile(path.resolve(filePath));
   } catch (err) {
     next(err);

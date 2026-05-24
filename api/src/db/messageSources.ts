@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 import { ChatMessageRow, getMessageById } from "./chatMessages";
+import { buildDocumentPreviewContract, DocumentPreviewContract } from "../utils/documentPreview";
 
 export interface MessageSourceRow {
   id: string;
@@ -33,6 +34,9 @@ interface SourceJson {
   score?: number;
   snippet?: string;
   content?: string;
+  file_type?: string;
+  mime_type?: string;
+  document_type?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -68,7 +72,7 @@ export interface MessageSourceDetail {
     raw_endpoint: string | null;
     file_endpoint: string | null;
     comments_endpoint: string | null;
-  };
+  } & DocumentPreviewContract;
   missing_fields: string[];
   created_at: string | null;
 }
@@ -164,6 +168,25 @@ function formatSourceDetail(row: MessageSourceRow, sourceJson: SourceJson): Mess
   const rawEndpoint = documentId
     ? `/api/documents/${encodeURIComponent(documentId)}/raw?section_path=${encodeURIComponent(sectionPath)}`
     : null;
+  const sourceFormat = [
+    sourceJson.file_type,
+    sourceJson.mime_type,
+    sourceJson.document_type,
+    typeof sourceJson.metadata?.file_type === "string" ? sourceJson.metadata.file_type : null,
+    typeof sourceJson.metadata?.mime_type === "string" ? sourceJson.metadata.mime_type : null,
+    typeof sourceJson.metadata?.format === "string" ? sourceJson.metadata.format : null,
+    typeof sourceJson.metadata?.source_type === "string" ? sourceJson.metadata.source_type : null,
+  ].find((value): value is string => Boolean(value));
+  const preview = buildDocumentPreviewContract({
+    documentId,
+    chunkId: row.chunk_id,
+    fileName: row.document_file_name,
+    fileType: row.document_file_type,
+    mimeType: sourceJson.mime_type,
+    sourceFormat,
+    hasInlineContent: Boolean(content),
+    rawEndpoint,
+  });
   const missingFields = [
     !documentId ? "document_id" : null,
     !sectionPath ? "section_path" : null,
@@ -202,9 +225,10 @@ function formatSourceDetail(row: MessageSourceRow, sourceJson: SourceJson): Mess
       }
       : null,
     preview: {
+      ...preview,
       chunk_endpoint: `/api/documents/chunks/${encodeURIComponent(row.chunk_id)}`,
-      raw_endpoint: rawEndpoint,
-      file_endpoint: documentId ? `/api/documents/${encodeURIComponent(documentId)}/file` : null,
+      raw_endpoint: preview.endpoints.raw,
+      file_endpoint: preview.endpoints.file,
       comments_endpoint: documentId
         ? `/api/documents/${encodeURIComponent(documentId)}/comments?chunk_id=${encodeURIComponent(row.chunk_id)}`
         : null,
