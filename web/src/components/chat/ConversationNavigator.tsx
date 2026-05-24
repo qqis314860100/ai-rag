@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BookOpenText,
+  BrainCircuit,
   ChevronRight,
   ClipboardList,
   FileSearch,
   GitBranch,
   Map,
-  MessageSquareText,
   NotebookPen,
+  Sparkles,
+  Workflow,
   X,
 } from "lucide-react";
 import SourcePanel from "./SourcePanel";
@@ -15,6 +17,12 @@ import { showToast } from "../ui/Toast";
 import type { ChatMessage, Source } from "../../types";
 
 type NavigatorView = "thread" | "evidence";
+
+type AiOrganizeOption = {
+  label: string;
+  description: string;
+  Icon: typeof BrainCircuit;
+};
 
 interface ConversationNavigatorProps {
   messages: ChatMessage[];
@@ -43,6 +51,11 @@ function scoreLabel(score?: number) {
   if (!score) return "引用";
   return `${Math.round(score * 100)}%`;
 }
+
+const aiOrganizeOptions: AiOrganizeOption[] = [
+  { label: "思维导图", description: "要点关系", Icon: BrainCircuit },
+  { label: "流程图", description: "步骤路径", Icon: Workflow },
+];
 
 export default function ConversationNavigator({
   messages,
@@ -274,19 +287,29 @@ export default function ConversationNavigator({
 
           <section className="mt-5">
             <div className="mb-2 flex items-center gap-2">
-              <Map className="h-4 w-4 text-text-muted" />
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">结构化输出</h3>
+              <Sparkles className="h-4 w-4 text-text-muted" />
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">AI 整理</h3>
             </div>
+            <button
+              onClick={() => showPendingToast("AI 整理")}
+              className="mb-2 flex w-full items-center justify-between rounded-lg border border-dashed border-border bg-white px-3 py-3 text-left transition-colors hover:border-accent/35 hover:bg-accent-soft/30"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <Map className="h-4 w-4 shrink-0 text-text-muted" />
+                <span className="truncate text-xs font-medium text-text-secondary">生成结构化摘要</span>
+              </span>
+              <span className="text-[10px] text-text-muted">待接入</span>
+            </button>
             <div className="grid grid-cols-2 gap-2">
-              {["思维导图", "流程图"].map((label) => (
+              {aiOrganizeOptions.map(({ label, description, Icon }) => (
                 <button
                   key={label}
                   onClick={() => showPendingToast(label)}
                   className="rounded-lg border border-border bg-white px-3 py-2 text-left transition-colors hover:border-accent/35 hover:bg-accent-soft/30"
                 >
-                  <MessageSquareText className="mb-2 h-4 w-4 text-text-muted" />
+                  <Icon className="mb-2 h-4 w-4 text-text-muted" />
                   <span className="block text-xs font-medium text-text-secondary">{label}</span>
-                  <span className="text-[10px] text-text-muted">待接入</span>
+                  <span className="text-[10px] text-text-muted">{description}</span>
                 </button>
               ))}
             </div>
