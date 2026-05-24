@@ -56,6 +56,22 @@ validate_commit_scope() {
   fi
 }
 
+commit_touches_service() {
+  local files="$1"
+  if printf '%s\n' "${files}" | awk -F/ '$1 == "web" || $1 == "api" || $1 == "rag" { found = 1 } END { exit(found ? 0 : 1) }'; then
+    return 0
+  fi
+  return 1
+}
+
+commit_touches_status_files() {
+  local files="$1"
+  if printf '%s\n' "${files}" | awk '$0 == "PRD.md" || $0 == "progress.txt" { found = 1 } END { exit(found ? 0 : 1) }'; then
+    return 0
+  fi
+  return 1
+}
+
 validate_new_commits() {
   local before_head="$1"
   local commits
@@ -67,9 +83,43 @@ validate_new_commits() {
   fi
 
   local commit
+  local has_service_commit=0
+  local has_status_commit=0
+  local last_commit=""
   while IFS= read -r commit; do
+    local files
+    files="$(git diff-tree --no-commit-id --name-only -r "${commit}")"
+
     validate_commit_scope "${commit}"
+
+    if commit_touches_service "${files}"; then
+      has_service_commit=1
+    fi
+
+    if commit_touches_status_files "${files}"; then
+      has_status_commit=1
+    fi
+
+    last_commit="${commit}"
   done <<< "${commits}"
+
+  if [ "${has_service_commit}" -eq 0 ]; then
+    echo "Ralph guard stopped: iteration finished without a service commit."
+    exit 1
+  fi
+
+  if [ "${has_status_commit}" -eq 0 ]; then
+    echo "Ralph guard stopped: iteration finished without a progress/PRD status commit."
+    exit 1
+  fi
+
+  local last_files
+  last_files="$(git diff-tree --no-commit-id --name-only -r "${last_commit}")"
+  if [ -n "$(printf '%s\n' "${last_files}" | awk '$0 != "PRD.md" && $0 != "progress.txt" { print }')" ]; then
+    echo "Ralph guard stopped: iteration must end with a progress/PRD status commit."
+    printf '%s\n' "${last_files}"
+    exit 1
+  fi
 }
 
 build_status() {
@@ -84,9 +134,10 @@ build_status() {
     printf '%s\n' "1. 只做当前最高优先级的一个任务。"
     printf '%s\n' "2. 只改一个服务。"
     printf '%s\n' "3. 用最小验证，过了再提交。"
-    printf '%s\n' "4. 进度写回 progress.txt。"
-    printf '%s\n' "5. 提交信息用 Conventional Commits，描述用中文。"
-    printf '%s\n' "6. 如果 PRD 已完成，输出 <promise>COMPLETE</promise>。"
+    printf '%s\n' "4. 先提交任务代码，再提交 progress.txt / PRD.md 状态。"
+    printf '%s\n' "5. 状态提交后不要停，脚本会自动进入下一轮。"
+    printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
+    printf '%s\n' "7. 如果 PRD 已完成，输出 <promise>COMPLETE</promise>。"
     printf '\n%s\n' "请直接执行本轮要做的任务，不要只复述摘要。"
   } > "${STATUS_FILE}"
 }

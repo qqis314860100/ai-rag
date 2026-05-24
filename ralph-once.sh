@@ -15,9 +15,10 @@ build_status() {
     printf '%s\n' "1. 只做当前最高优先级的一个任务。"
     printf '%s\n' "2. 只改一个服务。"
     printf '%s\n' "3. 用最小验证，过了再提交。"
-    printf '%s\n' "4. 进度写回 progress.txt。"
-    printf '%s\n' "5. 提交信息用 Conventional Commits，描述用中文。"
-    printf '%s\n' "6. 如果 PRD 已完成，输出 <promise>COMPLETE</promise>。"
+    printf '%s\n' "4. 先提交任务代码，再提交 progress.txt / PRD.md 状态。"
+    printf '%s\n' "5. 状态提交后不要停，脚本会自动进入下一轮。"
+    printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
+    printf '%s\n' "7. 如果 PRD 已完成，输出 <promise>COMPLETE</promise>。"
     printf '\n%s\n' "请直接执行本轮要做的任务，不要只复述摘要。"
   } > "${STATUS_FILE}"
 }
