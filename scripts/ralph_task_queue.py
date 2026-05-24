@@ -50,13 +50,17 @@ def format_task(task: dict[str, object], index: int) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("remaining", "next", "count", "json"), default="remaining")
+    parser.add_argument("--limit", type=int, default=0, help="Limit remaining task output; 0 means no limit.")
     args = parser.parse_args()
 
     tasks = load_tasks()
     remaining = [task for task in tasks if not task["done"]]
+    visible_remaining = remaining
+    if args.limit > 0:
+        visible_remaining = remaining[: args.limit]
 
     if args.mode == "json":
-        print(json.dumps({"remaining": remaining, "total": len(tasks)}, ensure_ascii=False, indent=2))
+        print(json.dumps({"remaining": visible_remaining, "total": len(tasks)}, ensure_ascii=False, indent=2))
         return 0
 
     if args.mode == "next":
@@ -69,7 +73,7 @@ def main() -> int:
         print(len(remaining))
         return 0
 
-    for index, task in enumerate(remaining):
+    for index, task in enumerate(visible_remaining):
         print(format_task(task, index))
 
     return 0

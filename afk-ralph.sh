@@ -9,6 +9,7 @@ fi
 LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.git/ralph-loop.last.md}"
 STATUS_FILE="${RALPH_STATUS_FILE:-.git/ralph-loop.status.md}"
 QUEUE_SCRIPT="${RALPH_QUEUE_SCRIPT:-scripts/ralph_task_queue.py}"
+QUEUE_PREVIEW_LIMIT="${RALPH_QUEUE_PREVIEW_LIMIT:-12}"
 MODE="${1}"
 
 is_positive_integer() {
@@ -61,16 +62,20 @@ validate_queue_advanced() {
 
 build_status() {
   local current_task
+  local remaining_count
   local remaining_tasks
   current_task="$(next_task)"
-  remaining_tasks="$(python3 "${QUEUE_SCRIPT}" --mode remaining)"
+  remaining_count="$(remaining_task_count)"
+  remaining_tasks="$(python3 "${QUEUE_SCRIPT}" --mode remaining --limit "${QUEUE_PREVIEW_LIMIT}")"
 
   {
     printf '%s\n' "@AGENTS.md"
-    printf '%s\n' "@PRD.md"
+    printf '\n%s\n' "## 任务来源"
+    printf '%s\n' "PRD.md 是任务队列来源，但本轮不要整份读取 PRD。需要勾选完成项时，用本轮任务文本通过 rg 定位对应 checkbox。"
     printf '\n%s\n' "## 进度摘要"
     sed -n '1,24p' progress.txt
     printf '\n%s\n' "## 自动任务队列"
+    printf '剩余任务数：%s\n' "${remaining_count}"
     if [ -n "${remaining_tasks}" ]; then
       printf '%s\n' "${remaining_tasks}"
     else
@@ -90,6 +95,7 @@ build_status() {
     printf '%s\n' "5. 不要每轮都更新 progress.txt；只在阶段完成、阻塞、范围变化或 loop 结束时同步。"
     printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
     printf '%s\n' "7. 如果自动任务队列为空，输出 <promise>COMPLETE</promise>。"
+    printf '%s\n' "8. 控制上下文：不要读取整份 PRD、完整 progress、构建产物或长日志；需要证据时只截取关键片段。"
     printf '\n%s\n' "请直接执行本轮要做的任务，不要只复述摘要。"
   } > "${STATUS_FILE}"
 }
