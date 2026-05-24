@@ -6,9 +6,17 @@ import { getSecurityLevelsForRequest } from "../middleware/auth";
 import { auditFromRequest } from "../services/auditService";
 import { listSessions, getSessionById, createSession, updateSession } from "../db/chatSessions";
 import { listMessagesBySession, createMessage, formatMessage, deleteMessageAndTruncateSession, getMessageById, updateMessageAndTruncateSession } from "../db/chatMessages";
+import { getMessageSourceDetail, listMessageSourceDetails } from "../db/messageSources";
 import { getDb } from "../db/index";
 
 const router = Router();
+
+function canReadSession(req: Request, sessionUserId: string): boolean {
+  const userId = req.user?.id || "anonymous";
+  const isOwner = sessionUserId === userId;
+  const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
+  return isOwner || isAdmin;
+}
 
 // POST /api/chat - send a message and get RAG answer
 router.post("/chat", async (req: Request, res: Response, next: NextFunction) => {
@@ -287,6 +295,64 @@ router.get("/chat/sessions/:id/messages", async (req: Request, res: Response, ne
     const messages = listMessagesBySession(sessionId).map(formatMessage);
 
     sendSuccess(res, { items: messages }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/messages/:id/sources - list source details for one assistant message
+router.get("/chat/messages/:id/sources", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const existing = getMessageById(messageId);
+    if (!existing) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    const session = getSessionById(existing.session_id);
+    if (!session) {
+      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+    }
+    if (!canReadSession(req, session.user_id)) {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限查看该消息引用。", 403);
+    }
+    if (existing.role !== "assistant") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只有回答消息包含引用详情。", 400);
+    }
+
+    sendSuccess(res, { items: listMessageSourceDetails(messageId) }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/messages/:id/sources/:sourceId - read-only source detail
+router.get("/chat/messages/:id/sources/:sourceId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const sourceId = req.params.sourceId as string;
+    const existing = getMessageById(messageId);
+    if (!existing) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    const session = getSessionById(existing.session_id);
+    if (!session) {
+      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+    }
+    if (!canReadSession(req, session.user_id)) {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限查看该消息引用。", 403);
+    }
+    if (existing.role !== "assistant") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只有回答消息包含引用详情。", 400);
+    }
+
+    const source = getMessageSourceDetail(messageId, sourceId);
+    if (!source) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "引用来源不存在。", 404);
+    }
+
+    sendSuccess(res, source, req.requestId);
   } catch (err) {
     next(err);
   }

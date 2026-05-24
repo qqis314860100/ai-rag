@@ -14,9 +14,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-API_DIR="${SCRIPT_DIR}/api"
+API_DIR="${SCRIPT_DIR}"
 BASE_URL="${API_BASE_URL:-http://localhost:3001}"
 export API_BASE_URL="${BASE_URL}"
+TEST_COUNT=8
 
 echo "============================================"
 echo "  RAG Knowledge Base API Integration Tests"
@@ -27,7 +28,7 @@ echo "============================================"
 echo ""
 
 # 检查 API 是否可达
-echo "[0/6] Checking API availability..."
+echo "[0/${TEST_COUNT}] Checking API availability..."
 if ! curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${BASE_URL}/api/admin/health" > /dev/null 2>&1; then
   echo ""
   echo "ERROR: API at ${BASE_URL} is not reachable."
@@ -51,7 +52,7 @@ run_test() {
   TOTAL=$((TOTAL + 1))
 
   echo "----------------------------------------"
-  echo "[${TOTAL}/6] Running: ${name}"
+  echo "[${TOTAL}/${TEST_COUNT}] Running: ${name}"
   echo "----------------------------------------"
 
   if bash "${script}" 2>&1; then
@@ -71,6 +72,7 @@ run_test "Health Check"           "${API_DIR}/test-health.sh"        || true
 run_test "Search Request"         "${API_DIR}/test-search.sh"        || true
 run_test "Chat / Q&A Request"     "${API_DIR}/test-chat.sh"          || true
 run_test "Chat Branch Guards"     "${API_DIR}/test-chat-branch-guards.sh" || true
+run_test "Source Detail Contract" "${API_DIR}/test-source-detail.sh" || true
 run_test "Document Upload"        "${API_DIR}/test-upload.sh"        || true
 run_test "Debug Search"           "${API_DIR}/test-debug-search.sh"  || true
 run_test "Out-of-Scope Refusal"   "${API_DIR}/test-refusal.sh"       || true
