@@ -408,7 +408,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
 
         return (
-          <div key={msg.id}
+          <div
+            key={msg.id}
+            id={`chat-message-${msg.id}`}
             className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
           >
             {/* Message body */}

@@ -3,8 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "../components/chat/ChatThread";
 import { SessionList } from "../components/chat/SessionList";
 import ChatInput from "../components/chat/ChatInput";
-import SourcePanel from "../components/chat/SourcePanel";
 import DocPreview from "../components/chat/DocPreview";
+import ConversationNavigator from "../components/chat/ConversationNavigator";
 import { api } from "../services/api";
 import { useStreamChat } from "../hooks/useStreamChat";
 import { useChatHistory } from "../hooks/useChatHistory";
@@ -12,7 +12,7 @@ import { useChatDrafts } from "../hooks/useChatDrafts";
 import { showToast } from "../components/ui/Toast";
 import { track } from "../services/tracking";
 import type { ChatMessage, Source } from "../types";
-import { Menu, X, Plus, FileSearch } from "lucide-react";
+import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {
   return (
@@ -98,13 +98,15 @@ export default function ChatPage() {
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(() =>
+    typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches
+  );
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const lastSourcesRef = useRef<Source[] | null>(null);
   const pendingScrollSessionRef = useRef<string | null>(null);
   const sawLoadingForPendingSessionRef = useRef(false);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
@@ -136,7 +138,7 @@ export default function ChatPage() {
     const handler = (e: globalThis.KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
-      // ESC: priority — DocPreview → SourcePanel → cancel stream
+      // ESC: priority — DocPreview → evidence detail → cancel stream
       if (e.key === "Escape") {
         if (previewSource) { setPreviewSource(null); return; }
         if (selectedSources) { setSelectedSources(null); return; }
@@ -232,7 +234,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (selectedSources && selectedSources.length > 0) {
-      lastSourcesRef.current = selectedSources;
+      setRightPanelOpen(true);
     }
   }, [selectedSources]);
 
@@ -386,26 +388,15 @@ export default function ChatPage() {
     navigate("/chat", { replace: true });
   }, [activeSessionId, cancelStream, isSending, navigate, saveDraft, saveScrollPosition, setActiveSessionId, setMessages]);
 
-  const handleToggleSources = useCallback(() => {
-    if (selectedSources && selectedSources.length > 0) {
-      setSelectedSources(null);
-      return;
-    }
+  const handleToggleRightPanel = useCallback(() => {
+    setRightPanelOpen((open) => !open);
+  }, []);
 
-    const latestSources = [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant" && message.sources && message.sources.length > 0)
-      ?.sources;
-
-    if (latestSources && latestSources.length > 0) {
-      setSelectedSources(latestSources);
-      return;
-    }
-
-    if (lastSourcesRef.current && lastSourcesRef.current.length > 0) {
-      setSelectedSources(lastSourcesRef.current);
-    }
-  }, [messages, selectedSources]);
+  const handleInspectSources = useCallback((sources: Source[], index = 0) => {
+    setSelectedSources(sources);
+    setHighlightSourceIdx(index);
+    setRightPanelOpen(true);
+  }, []);
 
   const handleToggleHistory = useCallback(() => {
     if (window.matchMedia("(min-width: 1024px)").matches) {
@@ -583,12 +574,7 @@ export default function ChatPage() {
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
     : "";
 
-  const showSourcePanel = selectedSources && selectedSources.length > 0;
-  const hasAvailableSources = !!(
-    showSourcePanel ||
-    lastSourcesRef.current?.length ||
-    messages.some((message) => message.role === "assistant" && message.sources && message.sources.length > 0)
-  );
+  const hasSelectedSources = !!(selectedSources && selectedSources.length > 0);
   const chatContentClass = `w-full mx-auto px-4 transition-[max-width] duration-slow ease-out ${
     historyCollapsed ? "max-w-5xl xl:max-w-6xl" : "max-w-3xl"
   }`;
@@ -657,18 +643,15 @@ export default function ChatPage() {
           </span>
 
           <button
-            onClick={handleToggleSources}
-            disabled={!hasAvailableSources}
+            onClick={handleToggleRightPanel}
             className={`p-1.5 rounded-lg transition-colors shrink-0 ${
-              showSourcePanel
+              rightPanelOpen
                 ? "text-accent bg-accent-soft"
-                : hasAvailableSources
-                  ? "text-text-muted hover:text-text hover:bg-surface-hover"
-                  : "text-text-muted/35 cursor-not-allowed"
+                : "text-text-muted hover:text-text hover:bg-surface-hover"
             }`}
-            title={showSourcePanel ? "关闭来源面板" : hasAvailableSources ? "打开最近引用来源" : "当前会话暂无引用来源"}
+            title={rightPanelOpen ? "关闭会话导航" : "打开会话导航"}
           >
-            <FileSearch className="h-5 w-5" />
+            <PanelRightOpen className="h-5 w-5" />
           </button>
         </header>
 
@@ -685,14 +668,19 @@ export default function ChatPage() {
                 streamError={stream.error}
                 streamStopped={stream.stopped}
                 selectedSources={selectedSources}
-                onSelectSources={setSelectedSources}
+                onSelectSources={(sources) => {
+                  setSelectedSources(sources);
+                  if (sources && sources.length > 0) {
+                    setRightPanelOpen(true);
+                  }
+                }}
                 onFollowUp={handleFollowUp}
                 onCancelStream={cancelStream}
                 onInitialQuestion={handleInitialQuestion}
                 onRetry={handleRetry}
                 onEditUser={handleEditUser}
                 onDeleteMessage={handleDeleteMessage}
-                onSourceAnchor={(sources, idx) => { setSelectedSources(sources); setHighlightSourceIdx(idx); }}
+                onSourceAnchor={handleInspectSources}
                 scrollToBottomSignal={scrollToBottomSignal}
               />
             )}
@@ -714,22 +702,31 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* ── Source Panel (320px) ── */}
+      {/* ── Conversation Navigator (336px) ── */}
+      {rightPanelOpen && (
+        <div className="fixed inset-0 z-40 bg-black/20 xl:hidden" onClick={() => setRightPanelOpen(false)} />
+      )}
       <aside
-        className="shrink-0 overflow-hidden transition-all duration-slow ease-out border-l border-divider bg-surface"
+        className={`shrink-0 overflow-hidden border-l bg-surface transition-all duration-slow ease-out
+          max-xl:fixed max-xl:inset-y-0 max-xl:right-0 max-xl:z-50 max-xl:shadow-xl-soft
+          ${hasSelectedSources ? "border-accent/25" : "border-divider"}`}
         style={{
-          width: showSourcePanel ? 320 : 0,
-          opacity: showSourcePanel ? 1 : 0,
+          width: rightPanelOpen ? 336 : 0,
+          opacity: rightPanelOpen ? 1 : 0,
         }}
       >
-        <div className="h-full min-h-0" style={{ width: 320 }}>
-          {showSourcePanel && (
-            <SourcePanel
-              sources={selectedSources!}
-              onClose={() => { setSelectedSources(null); setHighlightSourceIdx(null); }}
+        <div className="h-full min-h-0" style={{ width: 336 }}>
+          {rightPanelOpen && (
+            <ConversationNavigator
+              messages={messages}
+              activeTitle={activeTitle}
+              selectedSources={selectedSources}
+              highlightSourceIdx={highlightSourceIdx}
+              onClose={() => setRightPanelOpen(false)}
+              onClearSources={() => { setSelectedSources(null); setHighlightSourceIdx(null); }}
               onFollowUp={handleFollowUp}
-              onPreview={setPreviewSource}
-              highlightIdx={highlightSourceIdx}
+              onPreviewSource={setPreviewSource}
+              onInspectSources={handleInspectSources}
               onHighlightDone={() => setHighlightSourceIdx(null)}
             />
           )}
