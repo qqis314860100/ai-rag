@@ -18,7 +18,7 @@
 - 根启动脚本已从错误的 `pnpm run --parallel dev:web dev:api` 调整为 workspace filter 方式；`dev:rag` 已改为使用 `rag/.venv` 内 Python。
 - 聊天主流程已完成一次完整端到端回归，覆盖登录、真实 RAG 流式生成、中断、重试、删除确认、收藏/反馈、引用详情、长会话滚动恢复；文档原文预览遇到缺失 raw 内容时会显示既有空态。
 - 右侧栏和统一文档预览的壳已经搭好，但真实当前线程目录、近期证据、笔记持久化、结构化输出、PDF、HTML、代码块预览、AI 整理结果仍在等待 API / RAG / 前端同步完成。
-- API 侧的消息分支截断、source detail 契约、文档预览契约和笔记能力归属契约已完成；RAG 已补全来源元数据契约、检索结果上下文字段、多格式来源信息与图谱中间表示。
+- API 与 RAG 侧此前标记为完成的契约/能力，按页面真实能力重新判定为未完成；必须和前端真实联调、验证后才能重新勾选。
 
 最终状态：
 
@@ -64,18 +64,18 @@
 
 ### API
 
-- [x] `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
-- [x] `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
-- [x] `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API；如果足够，定义只读详情接口；如果不足，在 `progress.txt` 记录缺失字段。
-- [x] `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
-- [x] `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；本轮只产出 API 契约或最小后端切片。
+- [ ] `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- [ ] `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- [ ] `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API；如果足够，定义只读详情接口；如果不足，在 `progress.txt` 记录缺失字段。
+- [ ] `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
+- [ ] `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；本轮只产出 API 契约或最小后端切片。
 
 ### RAG
 
-- [x] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
-- [x] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
-- [x] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
-- [x] `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+- [ ] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
+- [ ] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
+- [ ] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
+- [ ] `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
 
 ### 仓库与 Ralph
 
