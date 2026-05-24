@@ -6,7 +6,7 @@ if [ -z "${1:-}" ]; then
   exit 1
 fi
 
-LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.ralph-loop.last.md}"
+LAST_MESSAGE_FILE="${RALPH_LAST_MESSAGE_FILE:-.git/ralph-loop.last.md}"
 MODE="${1}"
 
 is_positive_integer() {
