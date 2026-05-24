@@ -18,7 +18,7 @@
 - 根启动脚本已从错误的 `pnpm run --parallel dev:web dev:api` 调整为 workspace filter 方式；`dev:rag` 已改为使用 `rag/.venv` 内 Python。
 - 聊天主流程已完成一次完整端到端回归，覆盖登录、真实 RAG 流式生成、中断、重试、删除确认、收藏/反馈、引用详情、长会话滚动恢复；文档原文预览遇到缺失 raw 内容时会显示既有空态。
 - 右侧栏已改造成“当前会话导航器”壳，包含当前线程目录、近期证据、会话笔记占位、AI 整理占位和结构化输出入口；统一文档预览壳已支持文本、Markdown、原文切换，PDF、HTML、代码块仍是禁用占位；真实图谱生成和笔记持久化仍处于待实现状态。
-- API 侧的消息分支截断、source detail 契约、文档预览契约和笔记能力归属契约已完成；仍需补齐 RAG metadata 增强。
+- API 侧的消息分支截断、source detail 契约、文档预览契约和笔记能力归属契约已完成；RAG 已补充来源元数据契约，仍需继续扩展检索结果上下文字段和多格式来源信息。
 
 最终状态：
 
@@ -72,7 +72,7 @@
 
 ### RAG
 
-- [ ] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
+- [x] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
 - [ ] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
 - [ ] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
 - [ ] `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
@@ -87,8 +87,8 @@
 
 ## 推荐执行顺序
 
-1. 先做 `rag` metadata 扩展，让引用详情和多格式预览有真实数据支撑。
-2. 然后补齐前端笔记入口到 API 的真实读写接入。
+1. 继续为 `rag` 检索结果补充 source detail 所需上下文字段。
+2. 然后为 Markdown、PDF、HTML、代码块等内容格式补齐来源格式信息。
 
 ## 每轮验收模板
 
