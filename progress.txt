@@ -15,7 +15,8 @@
 - 最新完成 `api`: 加固消息编辑/删除的分支截断语义，用户消息编辑/删除会按稳定消息顺序截断后续分支，并拒绝直接编辑/删除 assistant 消息。
 - 最新完成 `api`: 补充分支守卫测试脚本，定点覆盖 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
 - 最新完成 `api`: 定义并实现回答消息引用只读详情接口，合并 `message_sources`、`sources_json` 和文档元数据，补充 source detail 合同烟雾测试。
-- 下一轮建议优先处理 `api`: 为文档预览能力明确 MIME/文件类型返回契约。
+- 最新完成 `api`: 明确文档预览 MIME / 文件类型返回契约，覆盖 Markdown、纯文本、PDF、HTML、代码块来源，并接入文档详情和 source detail 预览字段。
+- 下一轮建议优先处理 `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表。
 
 ## 已完成
 
@@ -267,22 +268,39 @@
 - Blockers: 无。说明：当前 API 会在 `missing_fields` 中显式暴露缺失的 `page_number` / `offset` 等字段，后续仍需 RAG metadata 扩展来补齐更精确定位。
 - Next: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源。
 
+### 2026-05-24 - 明确文档预览类型契约
+
+- Service: api
+- Task: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
+- Changed:
+  - 新增统一预览契约工具，按文件名、file_type、MIME 和 source metadata 推导 `content_kind`、`preferred_view`、`supported_views`、`capabilities`、`endpoints` 和禁用原因。
+  - `GET /api/documents/preview-contract` 返回 Markdown、纯文本、PDF、HTML、代码块来源的格式注册表。
+  - 文档列表 / 详情返回 `preview` 字段；文本类文档继续返回内容，PDF 等二进制来源的 `/raw` 明确返回 415 并附带预览契约。
+  - source detail 的 `preview` 字段合并相同契约，同时保留既有 `chunk_endpoint`、`raw_endpoint`、`file_endpoint`、`comments_endpoint` 兼容字段。
+  - 新增 `api/tests/test-document-preview-contract.sh` 并接入 API 集成测试 runner。
+- Verification:
+  - `pnpm run build:api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-document-preview-contract.sh`
+- Commit: `6c4d9d8`
+- Blockers: 无。说明：HTML 预览仍显式标记 `html_sanitizer_not_available`，API 只明确契约，不在本轮实现 HTML 清洗渲染。
+- Next: `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；或转入 `rag` metadata 扩展。
+
 ## 当前待提交
 
-- `progress.txt` 已记录 `7b6155e` 的执行结果，按单服务提交约束未并入 api commit。
+- `progress.txt` 已记录 `6c4d9d8` 的执行结果，按单服务提交约束未并入 api commit。
 
 ## 下一轮建议
 
 - Service: api
-- Task: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
+- Task: `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；本轮只产出 API 契约或最小后端切片。
 
 - Required verification:
   - `pnpm run build:api`
   - `pnpm run lint:api`
-  - 相关 API 烟雾或集成测试，至少覆盖 Markdown、纯文本、PDF/HTML/代码块禁用或返回契约。
+  - 相关 API 烟雾或集成测试，至少覆盖笔记归属契约或最小切片的读写路径。
 
 - Follow-up:
-  - 下一轮完成后，再做 `api`: 评估笔记能力的数据归属，或转入 `rag` metadata 扩展。
+  - 下一轮完成后，再转入 `rag` metadata 扩展。
 
 ## 执行提醒
 
