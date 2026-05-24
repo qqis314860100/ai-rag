@@ -1,13 +1,17 @@
-# Project Agent Guide
+# Claude 项目入口
 
-## What This Is
-Enterprise battery-line RAG with three services:
-- `web` for the UI and interaction layer
-- `api` for auth, documents, chat orchestration, and persistence
-- `rag` for ingest, retrieval, embeddings, and prompt/LLM logic
+## 项目是什么
 
-## Start Here
-Read these before editing anything:
+这是面向电池产线的企业级 RAG 知识库，包含三个服务：
+
+- `web`：前端 UI 和交互层
+- `api`：认证、文档、会话、聊天编排和持久化
+- `rag`：文档导入、检索、embedding、prompt 和 LLM 逻辑
+
+## 先读这里
+
+开始改代码前先读：
+
 - [AGENTS.md](AGENTS.md)
 - [README.md](README.md)
 - [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
@@ -15,38 +19,43 @@ Read these before editing anything:
 - [docs/架构标准.md](docs/架构标准.md)
 - [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
-## Rule Source
-- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md) is the detailed workflow source of truth.
-- This file and [AGENTS.md](AGENTS.md) are short entry summaries; if they drift from the execution rules, follow the execution rules.
-- The project standard is light by default, strict only for architecture boundaries, high-risk flows, release work, and AFK automation.
+## 规则来源
 
-## Hard Rules
-- Keep commits single-topic; cross-service changes are allowed only when they serve the same topic.
-- Keep the architecture boundaries below intact.
-- Use the smallest verification that covers the risk; real browser/API/RAG flow validation is for high-risk paths.
-- Use Conventional Commits, write Chinese descriptions, and do not include AI-related footer text.
-- New human-readable docs created from project discussion must use Chinese filenames and Chinese titles.
+- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md) 是详细执行规则的唯一细则来源。
+- 本文件和 [AGENTS.md](AGENTS.md) 只是短入口摘要；如果和执行规则有偏差，以执行规则为准。
+- 项目标准是：日常开发轻，架构边界硬，高风险才重，AFK 自动化单独管。
 
-## Architecture Boundaries
-- `web` should only handle presentation, routing, and client state.
-- `web` talks to backend services through HTTP APIs only.
-- `api` owns auth, sessions, documents, feedback, favorites, stats, and request logging.
-- `api` may call `rag` through the service client, but should not embed retrieval logic itself.
-- `rag` owns ingestion, chunking, embedding, retrieval, and prompt assembly.
-- Human-readable project docs live in `docs/`; new discussion-driven docs should use Chinese filenames and titles.
+## 硬规则
 
-## Common Commands
-- Install: `pnpm install`
-- Start web + api: `pnpm dev`
-- Start rag: `pnpm dev:rag`
-- Lint: `pnpm run lint`
-- Build: `pnpm run build`
-- Verify: `pnpm run verify`
-- Audit harness: `pnpm run audit:harness`
-- API integration tests: `pnpm run test:api`
+- commit 保持单主题；同一主题允许跨服务，不能混无关改动。
+- 必须遵守下面的架构边界。
+- 普通改动跑最小验证；真实浏览器/API/RAG 链路验证只用于高风险路径。
+- 使用 Conventional Commits，描述写中文，不加 AI 相关 footer。
+- 从项目讨论沉淀的新建人类阅读型文档，文件名和标题都用中文。
 
-## Before Finishing
-- Run the smallest verification that covers the change risk.
-- Verify the real user or service flow only for high-risk paths.
-- Keep the diff to one topic when preparing a commit.
-- If the change crosses services, confirm it is one coherent topic before committing.
+## 架构边界
+
+- `web` 只负责页面、交互、路由、视觉状态和客户端缓存。
+- `web` 只通过 HTTP 调用后端，不直连数据库，不直连 `rag`。
+- `api` 负责认证、会话、文档、反馈、收藏、统计和请求日志。
+- `api` 可以通过服务客户端调用 `rag`，但不内嵌检索逻辑。
+- `rag` 负责导入、切分、embedding、检索、prompt 组装和模型调用。
+- 人类阅读型项目文档放在 `docs/`；新建讨论型文档使用中文文件名和中文标题。
+
+## 常用命令
+
+- 安装：`pnpm install`
+- 启动 web + api：`pnpm dev`
+- 启动 rag：`pnpm dev:rag`
+- Lint：`pnpm run lint`
+- Build：`pnpm run build`
+- Verify：`pnpm run verify`
+- Harness 自检：`pnpm run audit:harness`
+- API 集成测试：`pnpm run test:api`
+
+## 完成前
+
+- 跑能覆盖本次风险的最小验证。
+- 只有高风险路径才需要验证真实用户或服务链路。
+- 提交前确认 diff 是单主题。
+- 如果跨服务，确认跨服务改动服务于同一个主题。
