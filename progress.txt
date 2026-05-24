@@ -17,8 +17,8 @@
 - 最新完成 `api`: 定义并实现回答消息引用只读详情接口，合并 `message_sources`、`sources_json` 和文档元数据，补充 source detail 合同烟雾测试。
 - 最新完成 `api`: 明确文档预览 MIME / 文件类型返回契约，覆盖 Markdown、纯文本、PDF、HTML、代码块来源，并接入文档详情和 source detail 预览字段。
 - 最新完成 `api`: 明确笔记能力归属，采用 API 拥有的单表多 scope 模型，并补充会话笔记最小读写接口与契约烟雾测试。
-- 最新完成 `rag`: 补全来源元数据契约，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略，并保持旧字段兼容。
-- 下一轮建议优先处理 `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
+- 最新完成 `rag`: 补全来源元数据契约、检索结果上下文字段、多格式来源信息和图谱中间表示。
+- 下一轮建议：无剩余任务。
 
 ## 已完成
 
@@ -323,23 +323,30 @@
   - `curl -sS http://127.0.0.1:8011/rag/health`
 - Commit: `aa5c1c5`
 - Blockers: `pytest` 未安装在 `rag/.venv`，本轮改用直接 Python 断言执行新增测试函数。
-- Next: `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
+- Next: `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+
+### 2026-05-24 - 增加图谱中间表示
+
+- Service: rag
+- Task: `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+- Changed:
+  - 新增 `DiagramNode`、`DiagramEdge` 和 `DiagramIR`，定义与具体前端图库无关的图谱中间表示。
+  - 提供 `build_placeholder_diagram_ir()`，按步骤顺序生成节点与边，便于后续从检索/推理结果拼出思维导图或流程图。
+  - 补充 `rag/tests/test_diagram_ir.py` 锁定节点、边和元信息结构。
+- Verification:
+  - `python3 -m compileall rag/app`
+  - `cd rag && .venv/bin/python - <<'PY' ...` 手动构造并断言 `DiagramIR`。
+- Commit: `96a04ec`
+- Blockers: 无。
+- Next: 无剩余任务。
 
 ## 当前待提交
 
-- 待提交 `PRD.md` 和 `progress.txt` 对 `aa5c1c5` 的状态记录。
+- 无。
 
 ## 下一轮建议
 
-- Service: rag
-- Task: `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
-
-- Required verification:
-  - `python3 -m compileall rag/app`
-  - 检索或 chat 烟雾验证，确认旧版 flat source 字段仍存在，新版 source detail 上下文字段已补齐。
-
-- Follow-up:
-  - 下一轮完成后，再为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息。
+- 无剩余任务。
 
 ## 执行提醒
 
