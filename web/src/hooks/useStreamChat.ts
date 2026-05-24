@@ -34,6 +34,7 @@ export function useStreamChat() {
   const doneRef = useRef(false);            // stream done?
   const metaRef = useRef<{ sources?: Source[]; confidence?: number; followups?: string[] }>({});
   const savedRef = useRef<{ message_id?: string }>({});
+  const runIdRef = useRef(0);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current) {
@@ -48,7 +49,10 @@ export function useStreamChat() {
       sendingRef.current = true;
 
       abortRef.current?.abort();
-      abortRef.current = new AbortController();
+      const runId = runIdRef.current + 1;
+      runIdRef.current = runId;
+      const controller = new AbortController();
+      abortRef.current = controller;
       stopTimer();
 
       fullRef.current = "";
@@ -60,6 +64,8 @@ export function useStreamChat() {
 
       // Typewriter timer: independently drives the displayed content
       timerRef.current = setInterval(() => {
+        if (runIdRef.current !== runId) return;
+
         const full = fullRef.current;
         const done = doneRef.current;
 
@@ -98,7 +104,7 @@ export function useStreamChat() {
       try {
         const reader = await sseStream("/chat", {
           session_id: sessionId, message, top_k: topK, stream: true,
-        }, abortRef.current.signal);
+        }, controller.signal);
 
         const decoder = new TextDecoder();
         let buffer = "";
@@ -115,7 +121,7 @@ export function useStreamChat() {
             if (!line.startsWith("data: ")) continue;
             try {
               const parsed = JSON.parse(line.slice(6));
-              if (abortRef.current?.signal.aborted) return;
+              if (controller.signal.aborted || runIdRef.current !== runId) return;
 
               switch (parsed.type) {
                 case "token":
@@ -137,12 +143,14 @@ export function useStreamChat() {
         }
 
         // Mark stream as done — timer will finalize when caught up
+        if (runIdRef.current !== runId) return;
         doneRef.current = true;
 
       } catch (err) {
+        if (runIdRef.current !== runId) return;
         stopTimer();
         sendingRef.current = false;
-        const wasAborted = abortRef.current?.signal.aborted;
+        const wasAborted = controller.signal.aborted;
         setStream((prev) => ({
           ...prev,
           loading: false,
@@ -156,6 +164,7 @@ export function useStreamChat() {
   );
 
   const cancelStream = useCallback(() => {
+    runIdRef.current += 1;
     abortRef.current?.abort();
     stopTimer();
     sendingRef.current = false;
