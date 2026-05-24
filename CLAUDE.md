@@ -10,14 +10,13 @@
 
 ## 先读这里
 
-开始改代码前先读：
+日常改动优先读最少上下文：
 
-- [AGENTS.md](AGENTS.md)
-- [README.md](README.md)
-- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
-- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
-- [docs/架构标准.md](docs/架构标准.md)
-- [docs/Codex架构配置.md](docs/Codex架构配置.md)
+- 不熟悉项目：先读 [AGENTS.md](AGENTS.md) 和 [README.md](README.md)
+- 每次执行规则：读 [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
+- 准备提交：必要时读 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- 涉及服务边界：必要时读 [docs/架构标准.md](docs/架构标准.md)
+- 涉及 Codex/Ralph 配置：必要时读 [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
 ## 规则来源
 
@@ -28,8 +27,10 @@
 ## 硬规则
 
 - commit 保持单主题；同一主题允许跨服务，不能混无关改动。
+- 主题判断看用户意图、接口契约、服务链路或流程规则；不确定就拆。
 - 必须遵守下面的架构边界。
 - 普通改动跑最小验证；真实浏览器/API/RAG 链路验证只用于高风险路径。
+- AFK、发布或高风险提交用 `pnpm run audit:diff -- --strict`，并传主题/验证/harness 证据。
 - 使用 Conventional Commits，描述写中文，不加 AI 相关 footer。
 - 从项目讨论沉淀的新建人类阅读型文档，文件名和标题都用中文。
 
@@ -59,3 +60,4 @@
 - 只有高风险路径才需要验证真实用户或服务链路。
 - 提交前确认 diff 是单主题。
 - 如果跨服务，确认跨服务改动服务于同一个主题。
+- 可运行 `pnpm run audit:diff` 获取变更区域、风险和验证建议；它只提示，不阻塞。

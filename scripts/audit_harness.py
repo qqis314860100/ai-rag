@@ -33,7 +33,8 @@ def main() -> int:
 
     print("## Harness Summary")
 
-    check("Root guide", ROOT / "CLAUDE.md", missing)
+    check("Agent guide", ROOT / "AGENTS.md", missing)
+    check("Claude guide", ROOT / "CLAUDE.md", missing)
     check("README", ROOT / "README.md", missing)
     check("Execution rules", ROOT / "docs/EXECUTION_RULES.md", missing)
     check("Contribution rules", ROOT / "docs/CONTRIBUTING.md", missing)
@@ -65,9 +66,9 @@ def main() -> int:
             missing.append(f"package.json script: {name}")
 
     print("## Guidance")
-    print("- Current maturity: workable")
-    print("- Main risk: rules exist in docs but are not yet enforced everywhere")
-    print("- Best next improvement: add service-specific smoke checks to CI after this baseline")
+    print("- Current maturity: strong lightweight")
+    print("- Main risk: topic intent is partly semantic; use audit:diff and split uncertain diffs")
+    print("- Best next improvement: add hard gates only for repeated mistakes, AFK, release, or high-risk paths")
 
     if missing:
         print("## Missing")
