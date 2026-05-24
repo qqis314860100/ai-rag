@@ -15,16 +15,17 @@ Read these before editing anything:
 - [docs/架构标准.md](docs/架构标准.md)
 - [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
+## Rule Source
+- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md) is the detailed workflow source of truth.
+- This file and [AGENTS.md](AGENTS.md) are short entry summaries; if they drift from the execution rules, follow the execution rules.
+- The project standard is light by default, strict only for architecture boundaries, high-risk flows, release work, and AFK automation.
+
 ## Hard Rules
-- One commit should express one topic: one feature, one fix, one refactor, or one workflow/doc update.
-- Cross-service changes are allowed when they are the same topic and preserve the architecture boundaries.
-- Never mix unrelated changes in one commit.
-- Never commit before the matching normal or high-risk verification is complete.
-- Use Conventional Commits: `type(scope): description`.
-- Prefer `web`, `api`, or `rag` scopes for single-service changes; use `repo` or omit scope for coherent cross-service or repository-level changes.
-- Do not include AI-related footer text in commit messages.
-- Treat single-topic commits as the unit for future rollback.
-- New human-readable documentation files created from project discussion must use Chinese filenames and Chinese titles, such as requirements, design, architecture, technical notes, and plans. Do not force rename historical English docs, and do not apply this rule to code, config, scripts, tests, assets, or identifiers.
+- Keep commits single-topic; cross-service changes are allowed only when they serve the same topic.
+- Keep the architecture boundaries below intact.
+- Use the smallest verification that covers the risk; real browser/API/RAG flow validation is for high-risk paths.
+- Use Conventional Commits, write Chinese descriptions, and do not include AI-related footer text.
+- New human-readable docs created from project discussion must use Chinese filenames and Chinese titles.
 
 ## Architecture Boundaries
 - `web` should only handle presentation, routing, and client state.

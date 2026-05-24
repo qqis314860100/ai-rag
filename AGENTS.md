@@ -21,22 +21,18 @@ Read these before editing anything:
 - [docs/架构标准.md](docs/架构标准.md)
 - [docs/Codex架构配置.md](docs/Codex架构配置.md)
 
+## Rule Source
+- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md) is the detailed workflow source of truth.
+- This file and [CLAUDE.md](CLAUDE.md) are short entry summaries; if they drift from the execution rules, follow the execution rules.
+- The project standard is light by default, strict only for architecture boundaries, high-risk flows, release work, and AFK automation.
+
 ## Hard Rules
-- One commit should express one topic: one feature, one fix, one refactor, or one workflow/doc update.
-- Cross-service changes are allowed when they are the same topic and preserve the architecture boundaries.
-- Never mix unrelated changes in one commit.
-- Never commit before the matching normal or high-risk verification is complete.
-- Use Conventional Commits: `type(scope): description`.
-- Prefer `web`, `api`, or `rag` scopes for single-service changes; use `repo` or omit scope for coherent cross-service or repository-level changes.
-- Do not include AI-related footer text in commit messages.
-- Treat single-topic commits as the unit for future rollback.
-- Manual development does not need to maintain a Ralph-style task ledger.
-- If you run a Ralph loop or any other autonomous coding loop, it must obey one queued task per iteration, clean-worktree start, smallest useful verification, and stop-on-failure rules.
-- Do not start an autonomous loop on a dirty worktree unless the user explicitly accepts the risk.
-- Use lightweight verification for normal changes. Full browser/API/RAG flow validation is required only for high-risk changes.
-- `progress.txt` is a stage summary, not a per-task ledger. Update it only when a milestone finishes, a blocker appears, scope changes, the user asks, or an AFK loop ends.
-- Ralph tasks may update the matching `PRD.md` checkbox in the same functional commit so the queue can advance without adding a separate state-only commit.
-- New human-readable documentation files created from project discussion must use Chinese filenames and Chinese titles, such as requirements, design, architecture, technical notes, and plans. Do not force rename historical English docs, and do not apply this rule to code, config, scripts, tests, assets, or identifiers.
+- Keep commits single-topic; cross-service changes are allowed only when they serve the same topic.
+- Keep the architecture boundaries below intact.
+- Use the smallest verification that covers the risk; real browser/API/RAG flow validation is for high-risk paths.
+- Use Conventional Commits, write Chinese descriptions, and do not include AI-related footer text.
+- Manual development does not need a Ralph-style ledger; AFK automation must use a clean worktree, one queued task per iteration, and stop on failure.
+- New human-readable docs created from project discussion must use Chinese filenames and Chinese titles.
 
 ## Architecture Boundaries
 - `web` should only handle presentation, routing, and client state.
@@ -56,6 +52,7 @@ Read these before editing anything:
 - Audit harness: `pnpm run audit:harness`
 - API integration tests: `pnpm run test:api`
 
+## Before Finishing
 - Run the smallest verification that covers the change risk.
 - Verify the real user or service flow only for high-risk paths.
 - Keep the diff to one topic when preparing a commit.
