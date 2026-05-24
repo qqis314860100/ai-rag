@@ -9,11 +9,12 @@
 - 最新完成 `web`: 增加 AI 整理入口占位，思维导图 / 流程图只触发本地待接入提示，不调用后端 API。
 - 最新完成 `web`: 聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
 - 最新完成 `web`: 进一步隔离流式轮次状态，发送/重试不会被旧定时器污染，标题、输入框、消息列表保持稳定。
+- 最新完成 `web`: 右侧栏已接入真实当前线程目录、近期证据、会话笔记 CRUD 和结构化输出数据；流式 RAG meta 会经 API 持久化到回答 metadata trace。
 - 本轮 `web` 回归已最终提交（`02e4ed6`），修复中断后立即重试时的 stale abort 竞态。
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
 - 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
 - 注意：此前记录的 `api` / `rag` 完成项仅代表阶段性尝试或局部契约，不能再作为产品完成依据；后续必须按 PRD 未完成队列重新执行和验收。
-- 下一轮建议：继续收敛当前已启动但被中断的 `web` 右侧栏真实数据同步任务；完成后再接统一文档预览真实预览、AI 整理真实生成，以及 API/RAG 的真实能力补齐。
+- 下一轮建议：继续执行 `web` 统一文档预览真实预览；再接 AI 整理真实生成，以及 API/RAG 的真实能力补齐。
 
 ## 已完成
 
@@ -213,7 +214,28 @@
   - Playwright 几何回归：发送前、发送中、完成后，标题、输入框、消息滚动区的 `x/y/width/height` 保持一致；重试前、重试中、重试后同样保持一致。
 - Commit: `02e4ed6`
 - Blockers: 无。
-- Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+
+### 2026-05-25 - 接入右侧栏真实数据
+
+- Service: web/api
+- Task: `web`: 将右侧栏接入真实当前线程目录、近期证据、笔记和结构化输出数据；现有导航壳已完成，但还需要和 API / RAG 同步成真实可用能力。
+- Changed:
+  - 右侧栏线程目录和近期证据继续读取当前会话真实消息与 sources。
+  - 会话笔记接入 `GET/POST/PATCH/DELETE /api/chat/notes`，支持新增、编辑、删除和会话切换加载。
+  - 结构化输出读取回答 sources、confidence、followups、latency 和 metadata trace。
+  - API 流式聊天保存 RAG `meta` 事件里的检索耗时和命中数到回答 metadata trace。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有 Fast Refresh warning。
+  - `pnpm run lint:api`
+  - `pnpm run build:web`
+  - `pnpm run build:api`
+  - `bash api/tests/test-chat-notes-contract.sh`
+  - Browser smoke：右侧栏真实线程/证据/结构化输出可见；笔记创建后删除成功。
+- Commit: `4340794`
+- Blockers: 无。
+- Next: `web`: 将统一文档预览接入真实 PDF、HTML、代码块预览；现有预览壳已完成，但还需要和 API / RAG 的来源格式、文件流、清洗规则同步。
+
+> 以下 API / RAG 历史记录只保留执行痕迹，不再代表当前产品完成状态；当前状态以 PRD 未完成队列为准。
 
 ### 2026-05-24 - 加固消息分支截断语义
 
