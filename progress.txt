@@ -10,7 +10,8 @@
 - 最新完成 `web`: 聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
 - 本轮 `web` 回归已完成；记录随本轮提交保存。
-- 下一轮建议优先处理 `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- 最新完成 `api`: 加固消息编辑/删除的分支截断语义，用户消息编辑/删除会按稳定消息顺序截断后续分支，并拒绝直接编辑/删除 assistant 消息。
+- 下一轮建议优先处理 `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
 
 ## 已完成
 
@@ -186,21 +187,39 @@
 - Blockers: 无。备注：浏览器 console 仅出现 favicon 404 和缺失 raw 文档内容 404，后者已由预览空态处理。
 - Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
 
+### 2026-05-24 - 加固消息分支截断语义
+
+- Service: api
+- Task: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- Changed:
+  - `chat_messages` 读取顺序与截断顺序统一为 `created_at ASC, rowid ASC`，避免同时间戳消息在读取和截断时顺序不一致。
+  - 消息编辑/删除分支截断改为 SQLite transaction，避免只更新消息但未完整删除后续分支的中间状态。
+  - `PATCH /api/chat/messages/:id` 和 `DELETE /api/chat/messages/:id` 只允许处理 `user` 消息，直接拒绝 assistant 消息编辑/删除，保留回答不可随意删除的语义。
+  - 修复 `documents` 上传文件过滤回调的 TypeScript 签名，以解除 API build 阻塞。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - 临时 API 服务 `API_PORT=3101 DATABASE_URL=file:/tmp/ai-rag-api-smoke.db pnpm --dir api exec tsx src/server.ts`
+  - 临时数据库 API 烟雾：用户消息编辑后仅保留编辑后的用户消息；删除用户消息后分支消息清空；assistant 消息 PATCH/DELETE 均返回 400 且消息仍保留。
+- Commit: `6821b26`
+- Blockers: `node api/dist/server.js` 仍存在既有 ESM 目录导入运行问题，构建产物无法直接作为烟雾服务启动；本轮运行时烟雾改用 API dev runner。
+- Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+
 ## 当前待提交
 
-- 无业务代码待提交；本轮仅保存 `web` 聊天端到端回归记录。
+- 无。
 
 ## 下一轮建议
 
 - Service: api
-- Task: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- Task: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
 
 - Required verification:
   - `pnpm run build:api`
-  - 相关 API 烟雾或集成测试，至少覆盖本人会话的编辑/删除分支截断行为。
+  - 相关 API 烟雾或集成测试，至少覆盖非本人会话、缺失消息、正常删除、正常编辑。
 
 - Follow-up:
-  - 下一轮完成后，再做 `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+  - 下一轮完成后，再做 `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API。
 
 ## 执行提醒
 
