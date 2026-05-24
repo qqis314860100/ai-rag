@@ -14,7 +14,8 @@
 - 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
 - 最新完成 `api`: 加固消息编辑/删除的分支截断语义，用户消息编辑/删除会按稳定消息顺序截断后续分支，并拒绝直接编辑/删除 assistant 消息。
 - 最新完成 `api`: 补充分支守卫测试脚本，定点覆盖 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
-- 下一轮建议优先处理 `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- 最新完成 `api`: 定义并实现回答消息引用只读详情接口，合并 `message_sources`、`sources_json` 和文档元数据，补充 source detail 合同烟雾测试。
+- 下一轮建议优先处理 `api`: 为文档预览能力明确 MIME/文件类型返回契约。
 
 ## 已完成
 
@@ -246,21 +247,42 @@
 - Blockers: 无。
 - Next: `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API。
 
+### 2026-05-24 - 定义回答引用详情接口
+
+- Service: api
+- Task: `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API；如果足够，定义只读详情接口；如果不足，在 `progress.txt` 记录缺失字段。
+- Changed:
+  - 新增 `GET /api/chat/messages/:id/sources` 和 `GET /api/chat/messages/:id/sources/:sourceId`，只读返回回答消息的引用详情。
+  - 合并 `message_sources`、`chat_messages.sources_json` 与 `documents` 元数据，返回 chunk、文档、预览端点、metadata、missing_fields 等合同字段；兼容没有 `message_sources` 行的历史 `sources_json` 数据。
+  - 引用详情读取增加会话 owner / knowledge_admin / system_admin 权限校验，拒绝非本人读取和用户消息读取。
+  - 新增 `api/tests/test-source-detail.sh` 并接入 `api/tests/run-tests.sh`，同时修复 runner 脚本路径与测试计数。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - `bash -n api/tests/run-tests.sh api/tests/test-source-detail.sh`
+  - `git diff --check -- api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-source-detail.sh`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/run-tests.sh`（8/8 通过）
+- Commit: `7b6155e`
+- Blockers: 无。说明：当前 API 会在 `missing_fields` 中显式暴露缺失的 `page_number` / `offset` 等字段，后续仍需 RAG metadata 扩展来补齐更精确定位。
+- Next: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源。
+
 ## 当前待提交
 
-- 无。
+- `progress.txt` 已记录 `7b6155e` 的执行结果，按单服务提交约束未并入 api commit。
 
 ## 下一轮建议
 
 - Service: api
-- Task: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- Task: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
 
 - Required verification:
   - `pnpm run build:api`
-  - 相关 API 烟雾或集成测试，至少覆盖非本人会话、缺失消息、正常删除、正常编辑。
+  - `pnpm run lint:api`
+  - 相关 API 烟雾或集成测试，至少覆盖 Markdown、纯文本、PDF/HTML/代码块禁用或返回契约。
 
 - Follow-up:
-  - 下一轮完成后，再做 `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API。
+  - 下一轮完成后，再做 `api`: 评估笔记能力的数据归属，或转入 `rag` metadata 扩展。
 
 ## 执行提醒
 
