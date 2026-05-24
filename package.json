@@ -16,6 +16,7 @@
     "lint": "pnpm run lint:web && pnpm run lint:api",
     "check:rag": "python3 -m compileall rag/app",
     "test:api": "bash api/tests/run-tests.sh",
+    "audit:diff": "python3 scripts/audit_diff.py",
     "audit:harness": "python3 scripts/audit_harness.py",
     "verify": "pnpm run lint && pnpm run build && pnpm run check:rag && pnpm run audit:harness"
   },

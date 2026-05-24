@@ -54,6 +54,7 @@ def main() -> int:
         "audit:harness",
         "verify",
         "test:api",
+        "audit:diff",
     ]
 
     print("## Scripts")
