@@ -264,6 +264,23 @@ function createTablesV2(database: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS chat_notes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL CHECK(scope IN ('session','message','source')),
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      message_id TEXT REFERENCES chat_messages(id) ON DELETE CASCADE,
+      source_id TEXT,
+      document_id TEXT,
+      chunk_id TEXT,
+      content TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','deleted')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       operator_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -360,6 +377,8 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_doc_comments_doc ON doc_comments(document_id, chunk_id);
     CREATE INDEX IF NOT EXISTS idx_doc_comments_parent ON doc_comments(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_notes_target ON chat_notes(scope, session_id, message_id, source_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_notes_user ON chat_notes(user_id, status, updated_at);
   `);
 }
 

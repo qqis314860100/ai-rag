@@ -7,6 +7,8 @@ import { auditFromRequest } from "../services/auditService";
 import { listSessions, getSessionById, createSession, updateSession } from "../db/chatSessions";
 import { listMessagesBySession, createMessage, formatMessage, deleteMessageAndTruncateSession, getMessageById, updateMessageAndTruncateSession } from "../db/chatMessages";
 import { getMessageSourceDetail, listMessageSourceDetails } from "../db/messageSources";
+import { NOTE_OWNERSHIP_CONTRACT, createNote, formatNote, isNoteScope, listNotes, softDeleteNote, updateNote } from "../db/chatNotes";
+import type { NoteTarget } from "../db/chatNotes";
 import { getDb } from "../db/index";
 
 const router = Router();
@@ -16,6 +18,80 @@ function canReadSession(req: Request, sessionUserId: string): boolean {
   const isOwner = sessionUserId === userId;
   const isAdmin = req.user?.role === "system_admin" || req.user?.role === "knowledge_admin";
   return isOwner || isAdmin;
+}
+
+function currentUser(req: Request): { id: string; name: string } {
+  return {
+    id: req.user?.id || "anonymous",
+    name: req.user?.name || "匿名",
+  };
+}
+
+function requireReadableSession(req: Request, sessionId: string): ReturnType<typeof getSessionById> {
+  const session = getSessionById(sessionId);
+  if (!session) {
+    throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+  }
+  if (!canReadSession(req, session.user_id)) {
+    throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限访问该会话。", 403);
+  }
+  return session;
+}
+
+function normalizeNoteTarget(req: Request, input: Record<string, unknown>): NoteTarget {
+  const scope = input.scope;
+  if (!isNoteScope(scope)) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "笔记 scope 必须是 session、message 或 source。", 400);
+  }
+
+  const sessionId = typeof input.session_id === "string" ? input.session_id.trim() : "";
+  if (!sessionId) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "笔记必须指定 session_id。", 400);
+  }
+  requireReadableSession(req, sessionId);
+
+  if (scope === "session") {
+    return { scope, sessionId };
+  }
+
+  const messageId = typeof input.message_id === "string" ? input.message_id.trim() : "";
+  if (!messageId) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "回答或引用笔记必须指定 message_id。", 400);
+  }
+
+  const message = getMessageById(messageId);
+  if (!message) {
+    throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+  }
+  if (message.session_id !== sessionId) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "message_id 不属于指定会话。", 400);
+  }
+  if (message.role !== "assistant") {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "回答笔记只能关联 assistant 消息。", 400);
+  }
+
+  if (scope === "message") {
+    return { scope, sessionId, messageId };
+  }
+
+  const sourceId = typeof input.source_id === "string" ? input.source_id.trim() : "";
+  if (!sourceId) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "引用笔记必须指定 source_id。", 400);
+  }
+
+  const source = getMessageSourceDetail(messageId, sourceId);
+  if (!source) {
+    throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "引用来源不存在。", 404);
+  }
+
+  return {
+    scope,
+    sessionId,
+    messageId,
+    sourceId: source.id,
+    documentId: source.document_id,
+    chunkId: source.chunk_id,
+  };
 }
 
 // POST /api/chat - send a message and get RAG answer
@@ -295,6 +371,99 @@ router.get("/chat/sessions/:id/messages", async (req: Request, res: Response, ne
     const messages = listMessagesBySession(sessionId).map(formatMessage);
 
     sendSuccess(res, { items: messages }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/notes/contract - note ownership and API contract
+router.get("/chat/notes/contract", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(
+      res,
+      {
+        version: "2026-05-24",
+        ...NOTE_OWNERSHIP_CONTRACT,
+        endpoints: {
+          list: "GET /api/chat/notes?scope=session|message|source&session_id=...&message_id=...&source_id=...",
+          create: "POST /api/chat/notes",
+          update: "PATCH /api/chat/notes/:id",
+          delete: "DELETE /api/chat/notes/:id",
+        },
+      },
+      req.requestId
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/notes - list current user's notes for one target
+router.get("/chat/notes", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const target = normalizeNoteTarget(req, req.query as Record<string, unknown>);
+    const user = currentUser(req);
+    const items = listNotes(target, user.id).map(formatNote);
+    sendSuccess(res, { items }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/chat/notes - create a personal note for session/message/source
+router.post("/chat/notes", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content, metadata } = req.body;
+    if (!content || typeof content !== "string" || content.trim().length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "笔记内容不能为空。", 400);
+    }
+
+    const target = normalizeNoteTarget(req, req.body as Record<string, unknown>);
+    const user = currentUser(req);
+    const note = createNote({
+      ...target,
+      userId: user.id,
+      userName: user.name,
+      content: content.trim(),
+      metadata: metadata && typeof metadata === "object" ? metadata as Record<string, unknown> : {},
+    });
+
+    sendSuccess(res, formatNote(note), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/chat/notes/:id - update current user's note
+router.patch("/chat/notes/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { content } = req.body;
+    if (!content || typeof content !== "string" || content.trim().length === 0) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "笔记内容不能为空。", 400);
+    }
+
+    const user = currentUser(req);
+    const updated = updateNote(req.params.id as string, user.id, content.trim());
+    if (!updated) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "笔记不存在或无权编辑。", 404);
+    }
+
+    sendSuccess(res, formatNote(updated), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/chat/notes/:id - soft-delete current user's note
+router.delete("/chat/notes/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = currentUser(req);
+    const deleted = softDeleteNote(req.params.id as string, user.id);
+    if (!deleted) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "笔记不存在或无权删除。", 404);
+    }
+
+    sendSuccess(res, { deleted: true }, req.requestId);
   } catch (err) {
     next(err);
   }
