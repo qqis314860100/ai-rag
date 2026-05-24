@@ -12,6 +12,7 @@
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
 - 本轮 `web` 回归已完成；记录随本轮提交保存。
 - 最新完成 `api`: 加固消息编辑/删除的分支截断语义，用户消息编辑/删除会按稳定消息顺序截断后续分支，并拒绝直接编辑/删除 assistant 消息。
+- 最新完成 `api`: 补充分支守卫测试脚本，定点覆盖 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
 - 下一轮建议优先处理 `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
 
 ## 已完成
@@ -218,6 +219,18 @@
 - Commit: `6821b26`
 - Blockers: `node api/dist/server.js` 仍存在既有 ESM 目录导入运行问题，构建产物无法直接作为烟雾服务启动；本轮运行时烟雾改用 API dev runner。
 - Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+
+### 2026-05-24 - 补充分支守卫测试
+
+- Service: api
+- Task: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- Changed: 新增 `api/tests/test-chat-branch-guards.sh`，并接入 `api/tests/run-tests.sh`，定点验证 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
+- Verification:
+  - `pnpm run build:api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-chat-branch-guards.sh`
+- Commit: pending
+- Blockers: 无。
+- Next: `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API。
 
 ## 当前待提交
 
