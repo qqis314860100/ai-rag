@@ -4,8 +4,10 @@
 
 - Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
 - 当前 PRD 已按 Ralph 要求重整为单任务、单服务、可验证、可提交的任务队列。
-- 最新完成 `web`: 验证并收紧问答卡片动作语义。
-- 下一轮应优先处理 `web`: 输入框发送按钮在生成中切换为中断按钮，并验证中断后不会生成可收藏/可反馈的临时消息。
+- 最新完成 `web`: 修复发送/重试时聊天标题、输入框、消息列表闪跳与布局跳动。
+- 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
+- 更新前工作区干净；当前仅 `PRD.md` 和 `progress.txt` 有待提交文档改动。
+- 下一轮建议优先处理 `web`: 右侧栏改造成当前会话导航壳；随后做聊天端到端回归。
 
 ## 已完成
 
@@ -84,20 +86,64 @@
 - Blockers: 无。
 - Next: `web`: 将右侧栏改造成当前会话导航壳，包括当前线程目录、近期证据、笔记占位、结构化输出入口，不依赖新增后端 API。
 
+### 2026-05-24 - 修复 workspace 启动配置
+
+- Service: chore
+- Task: 修复根 `pnpm dev` workspace 编排，避免 `dev:web` 被当作子包脚本解析。
+- Changed: 根 `dev` 脚本改为 `pnpm --parallel --filter web --filter api dev`；删除 `.npmrc` 中 npm 不识别的 `onlyBuiltDependencies` 重复配置；记录 `.ralph-loop.last.md`。
+- Verification:
+  - `npm run dev` 不再报 `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`。
+  - npm 不再输出 `Unknown project config "onlyBuiltDependencies"` 警告。
+- Commit: `a59e8ca`
+- Blockers: 该提交为根级配置提交，不属于单一 `web/api/rag` 服务 commit；后续如需严格回滚，应按 root chore 单独处理。
+- Next: 修复聊天发送/重试引发的可见闪跳。
+
+### 2026-05-24 - 修复聊天发送和重试闪跳
+
+- Service: web
+- Task: `web`: 修复发送消息和点击重试时聊天标题、输入框、消息列表闪跳或布局跳动；新增消息应无感插入，流式结束只静默合并后端 ID。
+- Changed:
+  - 流式完成后从整组消息替换改为静默合并后端持久化 ID，保留本地 DOM key。
+  - 新会话第一次发送时跳过自动空消息加载，避免乐观消息被覆盖。
+  - 头部 `生成中...` 改为常驻占位并只切透明度，避免标题被挤动。
+  - 发送后 textarea 保持发送前高度，生成中使用 `readOnly` 而不是 `disabled`。
+  - 去掉消息逐条 `fadeInUp` 位移动画，滚动到底部改为更轻的按帧跟随，并关闭 `.chat-scroll-area` 的 `overflow-anchor`。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - 浏览器几何探针：发送前、发送中、完成后，输入区 `top/height`、滚动区高度、标题位置保持一致。
+- Commit: `10c906f`
+- Blockers: 浏览器验证中的 `/api/chat` 流式响应使用 Playwright route mock；真实 RAG 端到端流式回归仍需在后续专门执行。
+- Next: `web`: 将右侧栏改造成当前会话导航壳；随后做聊天端到端回归。
+
+### 2026-05-24 - 修复 RAG 本地启动命令
+
+- Service: chore
+- Task: 修复 `pnpm dev:rag` 本地启动命令。
+- Changed: 根 `dev:rag` 脚本改为使用 `rag/.venv/bin/python -m uvicorn`，避免当前 macOS shell 中 `python` 不存在或未安装 uvicorn 的问题。
+- Verification:
+  - 手动用 `cd rag && .venv/bin/python -m uvicorn app.main:app --reload --port 8000` 启动通过，健康检查请求成功。
+- Commit: `eb7b14f`
+- Blockers: commit message 未使用推荐 scope；后续提交应恢复 Conventional Commits 规范。
+- Next: 更新 PRD/progress，使下一轮任务从真实状态继续。
+
 ## 当前待提交
 
-- 无服务代码待提交。
-- 本文件包含本轮进度记录，未并入 `ff85043`，避免 web 服务 commit 混入根级进度文件。
+- `PRD.md` 和 `progress.txt` 已按当前实际状态更新，待单独提交。
+- 无未提交服务代码。
 
 ## 下一轮建议
 
 - Service: web
-- Task: `web`: 输入框发送按钮在生成中切换为中断按钮，需验证中断后不会生成可收藏/可反馈的临时消息。
+- Task: `web`: 将右侧栏改造成当前会话导航壳，包括当前线程目录、近期证据、笔记占位、结构化输出入口，不依赖新增后端 API。
 
 - Required verification:
   - `pnpm run lint:web`
   - `pnpm run build:web`
-  - 浏览器验证：发送问题后按钮切换为中断；中断后临时回答不出现收藏/反馈动作；可继续重新提问。
+  - 浏览器验证：打开长会话、切换会话、打开/关闭证据详情、展开/收起右侧栏，确认标题、输入框、消息列表不闪跳。
+
+- Follow-up:
+  - 完成右侧栏后，执行一次完整聊天端到端回归：登录、发送、真实 RAG 流式生成、中断、重试、编辑、删除确认、滚动恢复、引用详情、收藏/反馈。
 
 ## 执行提醒
 
