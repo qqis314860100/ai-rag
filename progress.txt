@@ -9,8 +9,9 @@
 - 最新完成 `web`: 增加 AI 整理入口占位，思维导图 / 流程图只触发本地待接入提示，不调用后端 API。
 - 最新完成 `web`: 聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
 - 最新完成 `web`: 进一步隔离流式轮次状态，发送/重试不会被旧定时器污染，标题、输入框、消息列表保持稳定。
+- 本轮 `web` 回归已最终提交（`02e4ed6`），修复中断后立即重试时的 stale abort 竞态。
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
-- 本轮 `web` 回归已完成；记录随本轮提交保存。
+- 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
 - 最新完成 `api`: 加固消息编辑/删除的分支截断语义，用户消息编辑/删除会按稳定消息顺序截断后续分支，并拒绝直接编辑/删除 assistant 消息。
 - 最新完成 `api`: 补充分支守卫测试脚本，定点覆盖 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
 - 下一轮建议优先处理 `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
@@ -51,6 +52,19 @@
 - Commit: `ba87c41`
 - Blockers: 无。
 - Next: 修复 Ralph runner。
+
+### 2026-05-24 - 修复流式聊天 stale abort 竞态
+
+- Service: web
+- Task: `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
+- Changed: 在 `useStreamChat` 中给每次流式请求引入独立 run id 和本地 AbortController，忽略已过期请求的 catch / done 回写，避免中断后立刻重新发送时旧流把新流状态误判为失败。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 Fast Refresh warning。
+  - `pnpm run build:web` 通过。
+  - Playwright smoke: 登录、发送、中断、重新发送、复制、收藏、点赞、点踩、重试、引用详情、原文预览、会话切换后的滚动恢复、删除确认均通过；截图已落在 `/tmp/ai-rag-chat-complete-2026-05-24T05-14-11-825Z.png` 和 `/tmp/ai-rag-source-detail-2026-05-24T05-14-11-825Z.png`。
+- Commit: `02e4ed6`
+- Blockers: 无。
+- Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
 
 ### 2026-05-24 - 固定 Codex Ralph runner
 
