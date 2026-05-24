@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { X, FileText, MessageSquare, Send, Trash2, Pencil, FileCode, Globe, Loader2, ExternalLink, CornerDownRight } from "lucide-react";
-import type { Source, DocComment } from "../../types";
+import type { Source, DocComment, DocumentPreviewContract, PreviewView } from "../../types";
 import { api } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { showToast } from "../ui/Toast";
@@ -13,39 +13,186 @@ interface Props {
 }
 
 type PreviewMode = "text" | "markdown" | "raw" | "pdf" | "html" | "code";
+type PreviewKind = DocumentPreviewContract["content_kind"];
 
 const PREVIEW_MODES: Array<{
   mode: PreviewMode;
   label: string;
   icon: typeof FileText;
-  enabled: boolean;
   note?: string;
 }> = [
-  { mode: "text", label: "文本", icon: FileText, enabled: true },
-  { mode: "markdown", label: "Markdown", icon: MessageSquare, enabled: true },
-  { mode: "raw", label: "原文", icon: FileCode, enabled: true },
-  { mode: "pdf", label: "PDF", icon: FileText, enabled: false, note: "待接入 PDF 预览" },
-  { mode: "html", label: "HTML", icon: Globe, enabled: false, note: "待接入 HTML 清洗预览" },
-  { mode: "code", label: "代码", icon: FileCode, enabled: false, note: "待接入代码高亮预览" },
+  { mode: "text", label: "文本", icon: FileText, note: "片段文本" },
+  { mode: "markdown", label: "Markdown", icon: MessageSquare, note: "结构化排版" },
+  { mode: "raw", label: "原文", icon: FileCode, note: "原始文本" },
+  { mode: "pdf", label: "PDF", icon: FileText, note: "文件流预览" },
+  { mode: "html", label: "HTML", icon: Globe, note: "沙箱清洗预览" },
+  { mode: "code", label: "代码", icon: FileCode, note: "代码块视图" },
 ];
+
+const CODE_TYPES = new Set(["code", "json", "js", "jsx", "ts", "tsx", "css", "csv", "xml", "yaml", "yml", "py", "sh", "sql"]);
 
 function looksLikeMarkdown(text: string) {
   return /(^#{1,6}\s)|(```)|(^[-*]\s)|(^\d+[.)]\s)|(\|.+\|)|(\[[^\]]+\]\([^)]+\))/m.test(text);
 }
 
-function detectInitialMode(documentType: string | undefined, category: string | undefined, body: string): PreviewMode {
-  const sourceType = `${documentType || ""} ${category || ""}`.toLowerCase();
-  if (sourceType.includes("markdown") || sourceType.includes("md") || looksLikeMarkdown(body)) {
+function looksLikeHtml(text: string) {
+  return /<\/?(html|body|main|article|section|div|p|table|thead|tbody|tr|td|th|h[1-6]|ul|ol|li|pre|code|img|a)\b/i.test(text);
+}
+
+function normalizeType(value: unknown) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return "";
+  if (trimmed.includes("/")) return trimmed.split("/").pop()?.replace(/x-/, "") || "";
+  return trimmed.replace(/^\./, "");
+}
+
+function pickString(...values: unknown[]) {
+  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+}
+
+function getMetadataString(source: Source, key: string) {
+  const value = source.metadata?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function inferSourceType(source: Source, contract?: DocumentPreviewContract | null) {
+  return normalizeType(pickString(
+    contract?.file_type,
+    source.preview?.file_type,
+    source.file_type,
+    source.source_format,
+    source.format,
+    source.document_type,
+    getMetadataString(source, "file_type"),
+    getMetadataString(source, "source_format"),
+    getMetadataString(source, "format"),
+    getMetadataString(source, "source_type"),
+    source.source_metadata?.document?.file_type,
+    source.source_metadata?.format?.name
+  ));
+}
+
+function inferMimeType(source: Source, contract?: DocumentPreviewContract | null) {
+  return pickString(
+    contract?.mime_type,
+    source.preview?.mime_type,
+    source.mime_type,
+    getMetadataString(source, "mime_type"),
+    source.source_metadata?.document?.mime_type,
+    source.source_metadata?.format?.mime_type
+  )?.toLowerCase() || "";
+}
+
+function inferContentKind(source: Source, body: string, contract?: DocumentPreviewContract | null): PreviewKind {
+  const explicitKind = normalizeType(pickString(
+    contract?.content_kind,
+    source.preview?.content_kind,
+    source.content_kind,
+    getMetadataString(source, "content_kind"),
+    source.source_metadata?.content_kind
+  ));
+  if (explicitKind) return explicitKind as PreviewKind;
+
+  const sourceType = inferSourceType(source, contract);
+  const mimeType = inferMimeType(source, contract);
+  const chunkType = normalizeType(source.source_metadata?.chunk?.type || getMetadataString(source, "chunk_type"));
+
+  if (sourceType === "pdf" || mimeType === "application/pdf") return "pdf";
+  if (sourceType === "html" || sourceType === "htm" || mimeType.includes("html") || looksLikeHtml(body)) return "html";
+  if (sourceType === "md" || sourceType === "markdown" || mimeType.includes("markdown")) return "markdown";
+  if (CODE_TYPES.has(sourceType) || CODE_TYPES.has(chunkType) || /```[\s\S]*?```/.test(body)) return "code";
+  if (sourceType === "txt" || sourceType === "text" || mimeType.startsWith("text/")) return "text";
+  if (looksLikeMarkdown(body)) return "markdown";
+  return "text";
+}
+
+function detectInitialMode(source: Source, body: string, contract?: DocumentPreviewContract | null): PreviewMode {
+  const kind = inferContentKind(source, body, contract);
+  if (kind === "pdf") return "pdf";
+  if (kind === "html") return "html";
+  if (kind === "code") return "code";
+  if (kind === "markdown") {
     return "markdown";
   }
   return "text";
 }
 
-function getDocumentFormatLabel(documentTypeValue?: string, pageNumber?: number) {
-  const documentType = documentTypeValue?.trim();
+function getDocumentFormatLabel(source: Source, contract?: DocumentPreviewContract | null) {
+  const documentType = pickString(inferSourceType(source, contract), source.document_type);
   if (documentType) return documentType;
-  if (pageNumber) return "page";
+  if (source.page_number) return "page";
   return "文本";
+}
+
+function stripApiPrefix(endpoint: string) {
+  return endpoint.startsWith("/api/") ? endpoint.slice(4) : endpoint;
+}
+
+function getPreviewEndpoint(source: Source, contract: DocumentPreviewContract | null, view: "raw" | "file" | "chunk") {
+  if (view === "raw") {
+    return source.preview?.raw_endpoint || source.preview?.endpoints?.raw || contract?.raw_endpoint || contract?.endpoints?.raw ||
+      (source.document_id ? `/api/documents/${encodeURIComponent(source.document_id)}/raw?section_path=${encodeURIComponent(source.section_path || "")}` : null);
+  }
+  if (view === "file") {
+    return source.preview?.file_endpoint || source.preview?.endpoints?.file || contract?.file_endpoint || contract?.endpoints?.file ||
+      (source.document_id ? `/api/documents/${encodeURIComponent(source.document_id)}/file` : null);
+  }
+  return source.preview?.chunk_endpoint || source.preview?.endpoints?.chunk || contract?.chunk_endpoint || contract?.endpoints?.chunk ||
+    (source.chunk_id ? `/api/documents/chunks/${encodeURIComponent(source.chunk_id)}` : null);
+}
+
+function sanitizeHtmlDocument(html: string) {
+  if (typeof DOMParser === "undefined") return html;
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  parsed.querySelectorAll("script, iframe, object, embed, base, meta[http-equiv]").forEach((node) => node.remove());
+  parsed.querySelectorAll("*").forEach((node) => {
+    [...node.attributes].forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim().toLowerCase();
+      if (name.startsWith("on") || value.startsWith("javascript:")) node.removeAttribute(attr.name);
+    });
+  });
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body { margin: 0; padding: 16px; color: #1c1917; background: #fff; font: 14px/1.7 system-ui, -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #e7e5e4; padding: 6px 8px; vertical-align: top; }
+  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { overflow: auto; background: #f5f5f0; border: 1px solid #e7e5e4; border-radius: 8px; padding: 12px; }
+  img { max-width: 100%; height: auto; }
+  a { color: #8a5a2b; }
+</style>
+</head>
+<body>${parsed.body.innerHTML}</body>
+</html>`;
+}
+
+function extractCodePreview(text: string, source: Source, contract?: DocumentPreviewContract | null) {
+  const matches = [...text.matchAll(/```([a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)```/g)];
+  const sourceType = inferSourceType(source, contract);
+  if (matches.length > 0) {
+    return {
+      language: matches[0][1] || sourceType || "text",
+      code: matches.map((match) => match[2].trim()).join("\n\n"),
+    };
+  }
+  return {
+    language: sourceType && CODE_TYPES.has(sourceType) ? sourceType : "text",
+    code: text,
+  };
+}
+
+async function fetchEndpointText(endpoint: string) {
+  const token = localStorage.getItem("kb_token");
+  const response = await fetch(endpoint, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!response.ok) throw new Error(response.statusText);
+  return response.text();
 }
 
 function renderTextBody(text: string) {
@@ -60,6 +207,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   const { user } = useAuth();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previewContract, setPreviewContract] = useState<DocumentPreviewContract | null>(source.preview ?? null);
   const [comments, setComments] = useState<DocComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
@@ -67,12 +215,37 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<PreviewMode>(() => detectInitialMode(source.document_type, source.category, source.content || source.snippet || ""));
+  const [activeTab, setActiveTab] = useState<PreviewMode>(() => detectInitialMode(source, source.content || source.snippet || "", source.preview));
   const [originalContent, setOriginalContent] = useState<string | null>(null);
   const [originalLoading, setOriginalLoading] = useState(false);
+  const [htmlContent, setHtmlContent] = useState<string | null>(null);
+  const [htmlLoading, setHtmlLoading] = useState(false);
 
   const supportedContent = useMemo(() => content || source.content || source.snippet || "", [content, source.content, source.snippet]);
-  const formatLabel = useMemo(() => getDocumentFormatLabel(source.document_type, source.page_number), [source.document_type, source.page_number]);
+  const formatLabel = useMemo(() => getDocumentFormatLabel(source, previewContract), [previewContract, source]);
+  const contentKind = useMemo(() => inferContentKind(source, supportedContent, previewContract), [previewContract, source, supportedContent]);
+  const fileEndpoint = useMemo(() => getPreviewEndpoint(source, previewContract, "file"), [previewContract, source]);
+  const rawEndpoint = useMemo(() => getPreviewEndpoint(source, previewContract, "raw"), [previewContract, source]);
+  const previewModes = useMemo(() => {
+    const hasFile = Boolean(fileEndpoint);
+    const hasRaw = Boolean(rawEndpoint) && !["pdf", "docx", "binary"].includes(contentKind);
+    const hasText = Boolean(supportedContent) || Boolean(getPreviewEndpoint(source, previewContract, "chunk"));
+    const canMarkdown = contentKind === "markdown" || looksLikeMarkdown(supportedContent);
+    const canHtml = contentKind === "html" || looksLikeHtml(supportedContent);
+    const canCode = contentKind === "code" || /```[\s\S]*?```/.test(supportedContent);
+    const contractViews = new Set<PreviewView>(previewContract?.supported_views || source.preview?.supported_views || []);
+
+    return PREVIEW_MODES.map((mode) => ({
+      ...mode,
+      enabled:
+        (mode.mode === "text" && (hasText || contractViews.has("text"))) ||
+        (mode.mode === "markdown" && (canMarkdown || contractViews.has("markdown"))) ||
+        (mode.mode === "raw" && (hasRaw || contractViews.has("raw"))) ||
+        (mode.mode === "pdf" && contentKind === "pdf" && hasFile) ||
+        (mode.mode === "html" && canHtml && (hasRaw || hasFile || Boolean(supportedContent))) ||
+        (mode.mode === "code" && canCode),
+    }));
+  }, [contentKind, fileEndpoint, previewContract, rawEndpoint, source, supportedContent]);
 
   const loadComments = useCallback(() => {
     api
@@ -83,9 +256,10 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   }, [source.document_id, source.chunk_id]);
 
   useEffect(() => {
-    setActiveTab(detectInitialMode(source.document_type, source.category, source.content || source.snippet || ""));
+    setActiveTab(detectInitialMode(source, source.content || source.snippet || "", source.preview));
     setContent(null);
     setLoading(true);
+    setPreviewContract(source.preview ?? null);
     setComments([]);
     setCommentsLoading(true);
     setCommentText("");
@@ -94,6 +268,8 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
     setEditText("");
     setOriginalContent(null);
     setOriginalLoading(false);
+    setHtmlContent(null);
+    setHtmlLoading(false);
 
     api.post("/stats/browse", {
       event_type: "source_view",
@@ -116,28 +292,90 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
       .catch(() => {})
       .finally(() => setLoading(false));
 
+    if (source.document_id) {
+      api
+        .get<{ data: { content?: string; preview?: DocumentPreviewContract } }>(`/documents/${source.document_id}`)
+        .then((res) => {
+          if (res.data?.preview) {
+            setPreviewContract(res.data.preview);
+            setActiveTab((current) => {
+              if (!["text", "markdown"].includes(current)) return current;
+              return detectInitialMode(source, res.data?.content || immediateContent, res.data.preview);
+            });
+          }
+          if (!immediateContent && res.data?.content) setContent(res.data.content);
+        })
+        .catch(() => {});
+    }
+
     loadComments();
   }, [
     loadComments,
-    source.category,
     source.chunk_id,
     source.content,
+    source.document_id,
     source.document_title,
     source.document_type,
+    source.file_type,
+    source.format,
+    source.mime_type,
+    source.preview,
     source.score,
     source.snippet,
+    source.source_format,
   ]);
 
   const loadOriginalFile = useCallback(() => {
     if (originalContent !== null) return;
     setOriginalLoading(true);
-    const sectionPath = encodeURIComponent(source.section_path || "");
+    const endpoint = rawEndpoint || `/api/documents/${encodeURIComponent(source.document_id)}/raw?section_path=${encodeURIComponent(source.section_path || "")}`;
     api
-      .get<{ data: { content: string } }>(`/documents/${source.document_id}/raw?section_path=${sectionPath}`)
+      .get<{ data: { content: string } }>(stripApiPrefix(endpoint))
       .then((res) => setOriginalContent(res.data?.content || ""))
       .catch(() => setOriginalContent(""))
       .finally(() => setOriginalLoading(false));
-  }, [originalContent, source.document_id, source.section_path]);
+  }, [originalContent, rawEndpoint, source.document_id, source.section_path]);
+
+  const loadHtmlPreview = useCallback(() => {
+    if (htmlContent !== null || htmlLoading) return;
+    if (looksLikeHtml(supportedContent)) {
+      setHtmlContent(supportedContent);
+      return;
+    }
+
+    const endpoint = rawEndpoint || fileEndpoint;
+    if (!endpoint) {
+      setHtmlContent("");
+      return;
+    }
+
+    setHtmlLoading(true);
+    if (endpoint.includes("/raw")) {
+      api
+        .get<{ data: { content: string } }>(stripApiPrefix(endpoint))
+        .then((res) => setHtmlContent(res.data?.content || ""))
+        .catch(() => setHtmlContent(""))
+        .finally(() => setHtmlLoading(false));
+      return;
+    }
+
+    fetchEndpointText(endpoint)
+      .then((text) => setHtmlContent(text))
+      .catch(() => setHtmlContent(""))
+      .finally(() => setHtmlLoading(false));
+  }, [fileEndpoint, htmlContent, htmlLoading, rawEndpoint, supportedContent]);
+
+  useEffect(() => {
+    const currentMode = previewModes.find((mode) => mode.mode === activeTab);
+    if (currentMode?.enabled) return;
+    const fallback = previewModes.find((mode) => mode.enabled);
+    if (fallback) setActiveTab(fallback.mode);
+  }, [activeTab, previewModes]);
+
+  useEffect(() => {
+    if (activeTab === "raw") loadOriginalFile();
+    if (activeTab === "html") loadHtmlPreview();
+  }, [activeTab, loadHtmlPreview, loadOriginalFile]);
 
   const handleSubmit = async (parentId?: string) => {
     const text = commentText;
@@ -196,18 +434,114 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
   const replies = (parentId: string) => comments.filter((c) => c.parent_id === parentId);
 
   const renderPreviewBody = () => {
-    if (activeTab === "pdf" || activeTab === "html" || activeTab === "code") {
-      const disabledTab = PREVIEW_MODES.find((item) => item.mode === activeTab);
-      const DisabledIcon = disabledTab?.icon;
-      return (
-        <div className="flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-text-muted shadow-sm-soft">
-            {DisabledIcon ? <DisabledIcon className="h-5 w-5" /> : null}
+    if (activeTab === "pdf") {
+      if (!fileEndpoint) {
+        return (
+          <div className="rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+            <FileText className="mx-auto h-8 w-8 text-text-muted/30" />
+            <p className="mt-3 text-sm text-text-muted">无法加载 PDF 文件流</p>
           </div>
-          <p className="mt-3 text-sm font-semibold text-text">{disabledTab?.label} 预览待接入</p>
-          <p className="mt-1 max-w-[20rem] text-xs leading-relaxed text-text-muted">
-            {disabledTab?.note || "当前仅支持文本、Markdown 和原文切换。"}
-          </p>
+        );
+      }
+
+      return (
+        <div className="overflow-hidden rounded-2xl border border-border bg-surface-page">
+          <div className="flex items-center justify-between border-b border-divider bg-white px-3 py-2">
+            <span className="text-xs font-semibold text-text">PDF 文件预览</span>
+            <a
+              href={fileEndpoint}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg bg-surface-page px-2 py-1 text-[11px] font-medium text-text-muted transition-colors hover:text-accent"
+            >
+              <ExternalLink className="h-3 w-3" />
+              新窗口
+            </a>
+          </div>
+          <iframe
+            title={`${source.document_title} PDF 预览`}
+            src={fileEndpoint}
+            className="h-[520px] w-full bg-white"
+          />
+        </div>
+      );
+    }
+
+    if (activeTab === "html") {
+      const html = htmlContent ?? (looksLikeHtml(supportedContent) ? supportedContent : "");
+      if (htmlLoading) {
+        return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-text-muted" /></div>;
+      }
+      if (!html) {
+        return (
+          <div className="rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+            <Globe className="mx-auto h-8 w-8 text-text-muted/30" />
+            <p className="mt-3 text-sm text-text-muted">无法加载 HTML 原文</p>
+          </div>
+        );
+      }
+      return (
+        <div className="overflow-hidden rounded-2xl border border-border bg-white">
+          <div className="flex items-center justify-between border-b border-divider bg-surface-page px-3 py-2">
+            <span className="text-xs font-semibold text-text">HTML 沙箱预览</span>
+            {fileEndpoint && (
+              <a
+                href={fileEndpoint}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-medium text-text-muted transition-colors hover:text-accent"
+              >
+                <ExternalLink className="h-3 w-3" />
+                原文件
+              </a>
+            )}
+          </div>
+          <iframe
+            title={`${source.document_title} HTML 预览`}
+            sandbox=""
+            srcDoc={sanitizeHtmlDocument(html)}
+            className="h-[520px] w-full bg-white"
+          />
+        </div>
+      );
+    }
+
+    if (activeTab === "code") {
+      if (loading && !supportedContent) {
+        return <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-text-muted" /></div>;
+      }
+      const codePreview = extractCodePreview(supportedContent, source, previewContract);
+      if (!codePreview.code) {
+        return (
+          <div className="rounded-2xl border border-dashed border-border bg-surface-page px-4 py-10 text-center">
+            <FileCode className="mx-auto h-8 w-8 text-text-muted/30" />
+            <p className="mt-3 text-sm text-text-muted">未找到可预览的代码块</p>
+          </div>
+        );
+      }
+
+      const lines = codePreview.code.split("\n");
+      return (
+        <div className="overflow-hidden rounded-2xl border border-[#292524] bg-[#1e1e2e] text-[#f4f4f5] shadow-sm-soft">
+          <div className="flex items-center justify-between border-b border-white/10 bg-black/20 px-3 py-2">
+            <span className="text-xs font-semibold text-[#f4f4f5]">{codePreview.language}</span>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(codePreview.code)}
+              className="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] font-medium text-white/70 transition-colors hover:bg-white/15 hover:text-white"
+            >
+              <FileCode className="h-3 w-3" />
+              复制
+            </button>
+          </div>
+          <pre className="max-h-[520px] overflow-auto p-0 text-[12px] leading-6">
+            {lines.map((line, index) => (
+              <div key={`${index}-${line}`} className="grid grid-cols-[2.75rem_minmax(0,1fr)]">
+                <span className="select-none border-r border-white/10 pr-2 text-right font-mono text-white/35">{index + 1}</span>
+                <code className="whitespace-pre px-3 font-mono text-[#e4e4e7]">{line || " "}</code>
+              </div>
+            ))}
+          </pre>
         </div>
       );
     }
@@ -300,7 +634,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
       <div className="flex-1 overflow-y-auto">
         <div className="border-b border-divider bg-surface-page/30 px-4 py-3">
           <div className="grid grid-cols-3 gap-2">
-            {PREVIEW_MODES.map((mode) => {
+            {previewModes.map((mode) => {
               const Icon = mode.icon;
               const selected = activeTab === mode.mode;
               return (
@@ -312,6 +646,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
                     if (!mode.enabled) return;
                     setActiveTab(mode.mode);
                     if (mode.mode === "raw") loadOriginalFile();
+                    if (mode.mode === "html") loadHtmlPreview();
                   }}
                   title={mode.enabled ? `切换到${mode.label}` : mode.note}
                   className={`rounded-xl border px-2.5 py-2 text-left transition-colors ${
@@ -327,7 +662,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
                     <span className="text-xs font-medium">{mode.label}</span>
                   </div>
                   <p className="mt-1 text-[10px] leading-tight text-text-muted">
-                    {mode.enabled ? (mode.mode === "raw" ? "原始文件视图" : "当前可用") : (mode.note || "待接入")}
+                    {mode.enabled ? (mode.note || "当前可用") : "当前来源不支持"}
                   </p>
                 </button>
               );

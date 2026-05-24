@@ -16,6 +16,43 @@ export interface Document {
   updated_at: string;
 }
 
+export type PreviewView = "text" | "markdown" | "raw" | "file" | "pdf" | "html" | "code" | "download";
+
+export interface DocumentPreviewContract {
+  file_type: string;
+  mime_type: string;
+  content_kind: "markdown" | "text" | "pdf" | "html" | "code" | "docx" | "binary" | "unknown";
+  preferred_view: PreviewView;
+  supported_views: PreviewView[];
+  capabilities: Partial<Record<PreviewView, boolean>>;
+  endpoints: {
+    raw: string | null;
+    file: string | null;
+    chunk: string | null;
+    comments: string | null;
+  };
+  disabled_reasons?: Partial<Record<PreviewView, string>>;
+  chunk_endpoint?: string;
+  raw_endpoint?: string | null;
+  file_endpoint?: string | null;
+  comments_endpoint?: string | null;
+}
+
+export interface SourceMetadataContract {
+  document?: {
+    file_type?: string;
+    mime_type?: string;
+  };
+  chunk?: {
+    type?: string;
+  };
+  format?: {
+    name?: string;
+    mime_type?: string;
+  };
+  content_kind?: string;
+}
+
 export interface Source {
   chunk_id: string;
   document_id: string;
@@ -26,7 +63,15 @@ export interface Source {
   snippet: string; content?: string;
   version?: string;
   document_type?: string;
+  source_format?: string;
+  file_type?: string;
+  mime_type?: string;
+  format?: string;
+  content_kind?: string;
   category?: string;
+  metadata?: Record<string, unknown>;
+  source_metadata?: SourceMetadataContract;
+  preview?: DocumentPreviewContract;
 }
 
 export interface ChatMessageTrace {
