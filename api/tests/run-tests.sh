@@ -70,6 +70,7 @@ run_test() {
 run_test "Health Check"           "${API_DIR}/test-health.sh"        || true
 run_test "Search Request"         "${API_DIR}/test-search.sh"        || true
 run_test "Chat / Q&A Request"     "${API_DIR}/test-chat.sh"          || true
+run_test "Chat Branch Guards"     "${API_DIR}/test-chat-branch-guards.sh" || true
 run_test "Document Upload"        "${API_DIR}/test-upload.sh"        || true
 run_test "Debug Search"           "${API_DIR}/test-debug-search.sh"  || true
 run_test "Out-of-Scope Refusal"   "${API_DIR}/test-refusal.sh"       || true
