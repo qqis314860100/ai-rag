@@ -11,7 +11,7 @@ import { useChatHistory } from "../hooks/useChatHistory";
 import { useChatDrafts } from "../hooks/useChatDrafts";
 import { showToast } from "../components/ui/Toast";
 import { track } from "../services/tracking";
-import type { ChatMessage, Source } from "../types";
+import type { ChatMessage, ChatNote, Source } from "../types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {
@@ -97,6 +97,8 @@ export default function ChatPage() {
   const [selectedSources, setSelectedSources] = useState<Source[] | null>(null);
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
+  const [sessionNotes, setSessionNotes] = useState<ChatNote[]>([]);
+  const [sessionNotesLoading, setSessionNotesLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches
@@ -237,6 +239,37 @@ export default function ChatPage() {
       setRightPanelOpen(true);
     }
   }, [selectedSources]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!activeSessionId) {
+      setSessionNotes([]);
+      setSessionNotesLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setSessionNotesLoading(true);
+    api.get<{ data: { items: ChatNote[] } }>(`/chat/notes?scope=session&session_id=${encodeURIComponent(activeSessionId)}`)
+      .then((res) => {
+        if (!active) return;
+        setSessionNotes(res.data.items || []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSessionNotes([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setSessionNotesLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeSessionId]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -570,6 +603,52 @@ export default function ChatPage() {
       });
   }, [messages, setMessages]);
 
+  const handleCreateNote = useCallback(async (content: string) => {
+    if (!activeSessionId || !content.trim()) return false;
+
+    try {
+      const res = await api.post<{ data: ChatNote }>("/chat/notes", {
+        scope: "session",
+        session_id: activeSessionId,
+        content: content.trim(),
+      });
+      setSessionNotes((prev) => [res.data, ...prev]);
+      showToast("success", "笔记已保存");
+      return true;
+    } catch {
+      showToast("error", "添加笔记失败");
+      return false;
+    }
+  }, [activeSessionId]);
+
+  const handleUpdateNote = useCallback(async (noteId: string, content: string) => {
+    if (!content.trim()) return false;
+
+    try {
+      const res = await api.patch<{ data: ChatNote }>(`/chat/notes/${encodeURIComponent(noteId)}`, {
+        content: content.trim(),
+      });
+      setSessionNotes((prev) => prev.map((note) => (note.id === noteId ? res.data : note)));
+      showToast("success", "笔记已更新");
+      return true;
+    } catch {
+      showToast("error", "更新笔记失败");
+      return false;
+    }
+  }, []);
+
+  const handleDeleteNote = useCallback(async (noteId: string) => {
+    try {
+      await api.delete(`/chat/notes/${encodeURIComponent(noteId)}`);
+      setSessionNotes((prev) => prev.filter((note) => note.id !== noteId));
+      showToast("success", "笔记已删除");
+      return true;
+    } catch {
+      showToast("error", "删除笔记失败");
+      return false;
+    }
+  }, []);
+
   const activeTitle = activeSessionId
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
     : "";
@@ -722,12 +801,18 @@ export default function ChatPage() {
               activeTitle={activeTitle}
               selectedSources={selectedSources}
               highlightSourceIdx={highlightSourceIdx}
+              notes={sessionNotes}
+              notesLoading={sessionNotesLoading}
+              notesWritable={!!activeSessionId}
               onClose={() => setRightPanelOpen(false)}
               onClearSources={() => { setSelectedSources(null); setHighlightSourceIdx(null); }}
               onFollowUp={handleFollowUp}
               onPreviewSource={setPreviewSource}
               onInspectSources={handleInspectSources}
               onHighlightDone={() => setHighlightSourceIdx(null)}
+              onCreateNote={handleCreateNote}
+              onUpdateNote={handleUpdateNote}
+              onDeleteNote={handleDeleteNote}
             />
           )}
         </div>

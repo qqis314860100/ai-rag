@@ -29,6 +29,13 @@ export interface Source {
   category?: string;
 }
 
+export interface ChatMessageTrace {
+  retrieval_ms?: number;
+  llm_ms?: number;
+  total_ms?: number;
+  hit_count?: number;
+}
+
 export interface ChatMessage {
   id: string;
   persistedId?: string;
@@ -38,6 +45,8 @@ export interface ChatMessage {
   sources?: Source[];
   confidence?: number;
   followups?: string[];
+  metadata?: Record<string, unknown> & { trace?: ChatMessageTrace };
+  latency_ms?: number | null;
   created_at: string;
   streaming?: boolean;
 }
@@ -45,6 +54,20 @@ export interface ChatMessage {
 export interface ChatSession {
   id: string;
   title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatNote {
+  id: string;
+  scope: "session" | "message" | "source";
+  session_id: string;
+  message_id: string | null;
+  source_id: string | null;
+  document_id: string | null;
+  chunk_id: string | null;
+  content: string;
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

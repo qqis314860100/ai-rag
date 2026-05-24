@@ -151,7 +151,12 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       });
 
       let fullAnswer = "";
-      let meta: { sources?: unknown[]; confidence?: number; followups?: string[]; trace?: unknown } = {};
+      let meta: {
+        sources?: unknown[];
+        confidence?: number;
+        followups?: string[];
+        trace?: { retrieval_ms?: number; hit_count?: number };
+      } = {};
       let streamFailed = false;
 
       const reader = ragStream.body?.getReader();
@@ -179,8 +184,17 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                 const parsed = JSON.parse(data);
                 if (parsed.type === "token") {
                   fullAnswer += parsed.content;
+                } else if (parsed.type === "meta") {
+                  meta = {
+                    ...meta,
+                    trace: {
+                      retrieval_ms: parsed.retrieval_ms,
+                      hit_count: parsed.hit_count,
+                    },
+                  };
                 } else if (parsed.type === "done") {
                   meta = {
+                    ...meta,
                     sources: parsed.sources,
                     confidence: parsed.confidence,
                     followups: parsed.followups,
@@ -213,6 +227,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         metadata: {
           confidence: meta.confidence,
           followups: meta.followups,
+          trace: meta.trace,
         },
         latencyMs: 0,
       });
