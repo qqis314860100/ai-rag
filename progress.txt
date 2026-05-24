@@ -5,6 +5,7 @@
 - Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
 - 当前 PRD 已按页面真实能力重新校准：需要与 API / RAG 同步的前端任务已重开，API 与 RAG 侧此前标记完成的任务也全部重开，只有真实联调验收后才可再次勾选。
 - 最新完成 `web` / `rag`: AI 整理入口已接入真实 Diagram IR 链路，前端按钮会调用 API，再由 RAG 生成 mindmap / flowchart 中间表示并回显节点。
+- 最新完成 `api`: 消息编辑/删除的分支截断语义已加固，branch guards 测试已扩成两轮分支，能验证后续分支会一起被清掉。
 - 最新完成 `web`: 将右侧栏改造成当前会话导航壳，包含线程目录、近期证据、笔记占位和结构化输出入口。
 - 最新完成 `web`: 建立统一文档预览壳，支持文本 / Markdown / 原文切换，并为 PDF / HTML / 代码块保留禁用状态。
 - 最新完成 `web`: 增加 AI 整理入口真实接入，思维导图 / 流程图会调用后端 Diagram IR 接口并渲染返回结果。
@@ -192,7 +193,7 @@
   - `python3 -m compileall rag/app`
   - `curl -sS -X POST http://127.0.0.1:8000/rag/diagram/generate -H 'Content-Type: application/json' -d '{"title":"端点烟雾","content":"1. 检查温度窗口。2. 确认压力曲线。3. 记录恢复结果。","diagram_type":"flowchart","source_ids":["chunk-a"],"max_steps":4}'`
   - Playwright 页面烟雾：`/chat` 中点击“思维导图”后，接口返回 200，页面显示节点计数。
-- Commit: 待提交
+- Commit: `340684e` / `301931e`
 - Blockers: `rag/.venv` 未安装 pytest，改用 `compileall` + 端点烟雾验证。
 - Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
 
@@ -243,6 +244,19 @@
 - Commit: `4340794`
 - Blockers: 无。
 - Next: `web`: 将统一文档预览接入真实 PDF、HTML、代码块预览；现有预览壳已完成，但还需要和 API / RAG 的来源格式、文件流、清洗规则同步。
+
+### 2026-05-25 - 加固消息分支截断语义
+
+- Service: api
+- Task: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- Changed: 抽出分支截断 ID 计算助手，统一消息编辑/删除的截断语义；将消息修改权限收敛成统一助手；补强 `test-chat-branch-guards.sh`，把编辑/删除的验证扩成两轮分支，确认后续分支会一起清空。
+- Verification:
+  - `pnpm run lint:api`
+  - `pnpm run build:api`
+  - `bash api/tests/test-chat-branch-guards.sh`
+- Commit: 待提交
+- Blockers: 无。
+- Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
 
 > 以下 API / RAG 历史记录只保留执行痕迹，不再代表当前产品完成状态；当前状态以 PRD 未完成队列为准。
 
