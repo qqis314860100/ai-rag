@@ -6,7 +6,7 @@
   "scripts": {
     "dev:web": "pnpm --dir web dev",
     "dev:api": "pnpm --dir api dev",
-    "dev:rag": "cd rag && python -m uvicorn app.main:app --reload --port 8000",
+    "dev:rag": "cd rag && ./.venv/bin/python -m uvicorn app.main:app --reload --port 8000",
     "dev": "pnpm --parallel --filter web --filter api dev",
     "build:web": "pnpm --dir web build",
     "build:api": "pnpm --dir api build",
