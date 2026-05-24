@@ -25,6 +25,7 @@ export default function ChatInput({ onSend, onCancel, loading, disabled, inputRe
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const internalRef = useRef<HTMLTextAreaElement>(null);
   const textareaRef = inputRef || internalRef;
+  const skipNextDraftResizeRef = useRef(false);
 
   // Rotate placeholder every 3.5s
   useEffect(() => {
@@ -40,6 +41,10 @@ export default function ChatInput({ onSend, onCancel, loading, disabled, inputRe
 
     const ta = textareaRef.current;
     if (!ta) return;
+    if (skipNextDraftResizeRef.current) {
+      skipNextDraftResizeRef.current = false;
+      return;
+    }
 
     requestAnimationFrame(() => {
       ta.style.height = "auto";
@@ -82,12 +87,14 @@ export default function ChatInput({ onSend, onCancel, loading, disabled, inputRe
     }
     const trimmed = message.trim();
     if (!trimmed || loading || disabled) return;
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = `${ta.getBoundingClientRect().height}px`;
+      skipNextDraftResizeRef.current = true;
+    }
     onSend(trimmed);
     setMessage("");
     onDraftChange?.("");
-    // Reset height
-    const ta = textareaRef.current;
-    if (ta) ta.style.height = "auto";
     textareaRef.current?.focus();
   }, [message, loading, disabled, onSend, onCancel, onDraftChange, textareaRef]);
 
@@ -137,9 +144,11 @@ export default function ChatInput({ onSend, onCancel, loading, disabled, inputRe
             onKeyDown={handleKeyDown}
             placeholder={placeholders[placeholderIdx]}
             rows={1}
-            disabled={disabled || loading}
+            readOnly={loading}
+            disabled={disabled}
+            aria-disabled={loading || disabled}
             className="w-full min-h-[48px] max-h-[160px] resize-none bg-transparent px-4 py-3.5 text-[15px] text-text placeholder:text-text-muted/50 focus:outline-none leading-relaxed"
-            style={{ transition: "opacity 150ms ease-out" }}
+            style={{ transition: "height 180ms var(--ease-out), opacity 150ms ease-out" }}
           />
         </div>
 

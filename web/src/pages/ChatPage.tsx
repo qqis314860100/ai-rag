@@ -45,12 +45,26 @@ function MessagesSkeleton() {
 
 const CHAT_SCROLL_STORAGE_KEY = "chat-scroll-positions:v1";
 const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;
+const TEMP_PERSISTED_MESSAGE_ID_PREFIX = "pending-";
 
 type ChatScrollSnapshot = {
   top: number;
   distanceFromBottom: number;
   atBottom: boolean;
 };
+
+function getActionMessageId(message: ChatMessage) {
+  return message.persistedId || message.id;
+}
+
+function isTemporaryActionMessageId(messageId: string) {
+  return (
+    messageId.startsWith("user-") ||
+    messageId.startsWith("stream-") ||
+    messageId.startsWith("interrupted-") ||
+    messageId.startsWith(TEMP_PERSISTED_MESSAGE_ID_PREFIX)
+  );
+}
 
 function readChatScrollPositions(): Record<string, ChatScrollSnapshot> {
   try {
@@ -73,8 +87,8 @@ export default function ChatPage() {
     messagesLoading,
     setActiveSessionId,
     setMessages,
-    loadSessions,
     loadMessages,
+    markSessionOptimistic,
     createSession,
     deleteSession,
   } = useChatHistory(urlSessionId);
@@ -336,17 +350,15 @@ export default function ChatPage() {
             : m
         )
       );
-      loadSessions();
       const sessionId = activeSessionIdRef.current;
       if (sessionId) {
         window.setTimeout(() => {
-          void loadMessages(sessionId);
+          void loadMessages(sessionId, { silent: true, merge: true });
         }, 0);
       }
     }
   }, [
     loadMessages,
-    loadSessions,
     setMessages,
     stream.confidence,
     stream.content,
@@ -438,6 +450,27 @@ export default function ChatPage() {
     }
   }, [activeSessionId, saveDraft]);
 
+  const startOptimisticStream = useCallback(async (
+    sessionId: string,
+    message: string,
+    buildMessages: (prev: ChatMessage[], placeholder: ChatMessage) => ChatMessage[],
+    placeholderIdOverride?: string
+  ) => {
+    const placeholderId = placeholderIdOverride || `stream-${Date.now()}`;
+    placeholderIdRef.current = placeholderId;
+    const placeholderMsg: ChatMessage = {
+      id: placeholderId, session_id: sessionId, role: "assistant",
+      content: "", streaming: true, created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => buildMessages(prev, placeholderMsg));
+    setScrollToBottomSignal((n) => n + 1);
+    setSelectedSources(null);
+    removeDraft(sessionId);
+
+    await sendStream(sessionId, message, 5);
+  }, [removeDraft, sendStream, setMessages]);
+
   // ── Send message ──
   const handleSend = useCallback(async (message: string) => {
     if (!message.trim() || isSending) return;
@@ -447,27 +480,15 @@ export default function ChatPage() {
       if (!session) return;
       sid = session.id;
       activeSessionIdRef.current = sid;
+      markSessionOptimistic(sid);
       setActiveSessionId(sid);
     }
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`, session_id: sid, role: "user",
       content: message, created_at: new Date().toISOString(),
     };
-    const placeholderId = `stream-${Date.now()}`;
-    placeholderIdRef.current = placeholderId;
-    const placeholderMsg: ChatMessage = {
-      id: placeholderId, session_id: sid, role: "assistant",
-      content: "", streaming: true, created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg, placeholderMsg]);
-    setScrollToBottomSignal((n) => n + 1);
-    setSelectedSources(null);
-
-    // Clear draft for this session since message is sent
-    removeDraft(sid);
-
-    await sendStream(sid, message, 5);
-  }, [activeSessionId, createSession, sendStream, isSending, removeDraft, setActiveSessionId, setMessages]);
+    await startOptimisticStream(sid, message, (prev, placeholderMsg) => [...prev, userMsg, placeholderMsg]);
+  }, [activeSessionId, createSession, isSending, markSessionOptimistic, setActiveSessionId, startOptimisticStream]);
 
   const handleFollowUp = useCallback((query: string) => {
     if (isSending) return;
@@ -481,19 +502,40 @@ export default function ChatPage() {
 
   const handleEditUser = useCallback(async (messageId: string, newContent: string) => {
     if (!newContent.trim() || isSending) return;
-    const idx = messages.findIndex((m) => m.id === messageId);
+    const idx = messages.findIndex((m) => m.id === messageId || m.persistedId === messageId);
     if (idx === -1) return;
-    if (messages[idx].role !== "user") return;
+    const message = messages[idx];
+    if (message.role !== "user") return;
+    const apiMessageId = getActionMessageId(message);
+    if (isTemporaryActionMessageId(apiMessageId)) return;
+    const nextContent = newContent.trim();
+    const pendingPersistedId = `${TEMP_PERSISTED_MESSAGE_ID_PREFIX}${Date.now()}`;
+    const nextAssistant = messages[idx + 1];
+    const reusablePlaceholderId = nextAssistant?.role === "assistant" ? nextAssistant.id : undefined;
 
     try {
-      await api.delete(`/chat/messages/${encodeURIComponent(messageId)}`);
-      setMessages((prev) => prev.slice(0, idx));
+      await api.delete(`/chat/messages/${encodeURIComponent(apiMessageId)}`);
       setSelectedSources(null);
-      await handleSend(newContent.trim());
+      await startOptimisticStream(message.session_id, nextContent, (prev, placeholderMsg) => {
+        const currentIdx = prev.findIndex((m) => m.id === messageId || m.persistedId === messageId);
+        if (currentIdx === -1) return prev;
+
+        const currentUser = prev[currentIdx];
+        return [
+          ...prev.slice(0, currentIdx),
+          {
+            ...currentUser,
+            content: nextContent,
+            persistedId: pendingPersistedId,
+            created_at: new Date().toISOString(),
+          },
+          placeholderMsg,
+        ];
+      }, reusablePlaceholderId);
     } catch {
       showToast("error", "编辑消息失败");
     }
-  }, [handleSend, isSending, messages, setMessages]);
+  }, [isSending, messages, startOptimisticStream]);
 
   const handleRetry = useCallback((messageId?: string) => {
     if (isSending) return;
@@ -512,19 +554,22 @@ export default function ChatPage() {
     lastUserMsg ||= [...messages].reverse().find((m) => m.role === "user");
     if (!lastUserMsg) return;
 
-    if (lastUserMsg.id.startsWith("user-")) {
+    const actionMessageId = getActionMessageId(lastUserMsg);
+    if (isTemporaryActionMessageId(actionMessageId)) {
       handleSend(lastUserMsg.content);
       return;
     }
 
-    void handleEditUser(lastUserMsg.id, lastUserMsg.content);
+    void handleEditUser(actionMessageId, lastUserMsg.content);
   }, [handleEditUser, handleSend, isSending, messages]);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
-    const idx = messages.findIndex((m) => m.id === messageId);
+    const idx = messages.findIndex((m) => m.id === messageId || m.persistedId === messageId);
     if (idx === -1) return;
+    const apiMessageId = getActionMessageId(messages[idx]);
+    if (isTemporaryActionMessageId(apiMessageId)) return;
 
-    api.delete(`/chat/messages/${encodeURIComponent(messageId)}`)
+    api.delete(`/chat/messages/${encodeURIComponent(apiMessageId)}`)
       .then(() => {
         setMessages((prev) => prev.slice(0, idx));
         showToast("success", "消息已删除");
@@ -602,9 +647,14 @@ export default function ChatPage() {
             )}
           </div>
 
-          {stream.loading && (
-            <span className="text-xs text-accent animate-pulse shrink-0">生成中...</span>
-          )}
+          <span
+            className={`w-14 shrink-0 text-right text-xs text-accent transition-opacity duration-fast ${
+              stream.loading ? "opacity-100" : "opacity-0"
+            }`}
+            aria-hidden={!stream.loading}
+          >
+            生成中...
+          </span>
 
           <button
             onClick={handleToggleSources}

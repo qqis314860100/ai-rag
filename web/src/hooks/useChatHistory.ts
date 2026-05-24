@@ -15,6 +15,49 @@ interface SessionDetailResponse {
   };
 }
 
+interface LoadMessagesOptions {
+  silent?: boolean;
+  merge?: boolean;
+}
+
+function isTemporaryPersistedId(id?: string) {
+  return !id || id.startsWith("user-") || id.startsWith("stream-") || id.startsWith("interrupted-") || id.startsWith("pending-");
+}
+
+function mergePersistedMessages(current: ChatMessage[], incoming: ChatMessage[]) {
+  if (current.length === 0) return incoming;
+
+  const used = new Set<number>();
+
+  const merged = current.map((message) => {
+    const persistedId = isTemporaryPersistedId(message.persistedId) ? undefined : message.persistedId;
+    const exactIndex = incoming.findIndex((candidate, index) => {
+      if (used.has(index)) return false;
+      return candidate.id === message.id || (!!persistedId && candidate.id === persistedId);
+    });
+    const contentIndex = exactIndex >= 0
+      ? exactIndex
+      : incoming.findIndex((candidate, index) => {
+          if (used.has(index)) return false;
+          return candidate.role === message.role && candidate.content.trim() === message.content.trim();
+        });
+
+    if (contentIndex < 0) return message;
+
+    used.add(contentIndex);
+    const persistedMessage = incoming[contentIndex];
+    return {
+      ...persistedMessage,
+      id: message.id,
+      persistedId: persistedMessage.id,
+      streaming: false,
+    };
+  });
+
+  const remaining = incoming.filter((_, index) => !used.has(index));
+  return remaining.length > 0 ? [...merged, ...remaining] : merged;
+}
+
 export function useChatHistory(initialSessionId?: string | null) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -23,6 +66,7 @@ export function useChatHistory(initialSessionId?: string | null) {
   const initialSessionIdRef = useRef(initialSessionId || null);
   const sessionsLoadingRef = useRef(false);
   const messagesAbortRef = useRef<AbortController | null>(null);
+  const optimisticSessionIdsRef = useRef(new Set<string>());
 
   // ── Load sessions ──
   const loadSessions = useCallback(async () => {
@@ -41,12 +85,14 @@ export function useChatHistory(initialSessionId?: string | null) {
   }, []);
 
   // ── Load messages for active session (with AbortController for race conditions) ──
-  const loadMessages = useCallback(async (sessionId: string) => {
+  const loadMessages = useCallback(async (sessionId: string, options: LoadMessagesOptions = {}) => {
     // Cancel any in-flight message request
     messagesAbortRef.current?.abort();
     messagesAbortRef.current = new AbortController();
 
-    setMessagesLoading(true);
+    if (!options.silent) {
+      setMessagesLoading(true);
+    }
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`, {
         headers: {
@@ -57,12 +103,17 @@ export function useChatHistory(initialSessionId?: string | null) {
       });
       if (!res.ok) throw new Error("Failed");
       const data: SessionDetailResponse = await res.json();
-      setMessages(data.data?.messages || []);
+      const nextMessages = data.data?.messages || [];
+      setMessages((prev) => options.merge ? mergePersistedMessages(prev, nextMessages) : nextMessages);
     } catch (err: any) {
       if (err?.name === "AbortError") return;
-      setMessages([]);
+      if (!options.silent) {
+        setMessages([]);
+      }
     } finally {
-      setMessagesLoading(false);
+      if (!options.silent) {
+        setMessagesLoading(false);
+      }
     }
   }, []);
 
@@ -87,6 +138,10 @@ export function useChatHistory(initialSessionId?: string | null) {
       messagesAbortRef.current?.abort();
       setMessages([]);
       setMessagesLoading(false);
+      return;
+    }
+    if (optimisticSessionIdsRef.current.has(activeSessionId)) {
+      optimisticSessionIdsRef.current.delete(activeSessionId);
       return;
     }
     loadMessages(activeSessionId);
@@ -119,6 +174,10 @@ export function useChatHistory(initialSessionId?: string | null) {
     } catch { return false; }
   }, []);
 
+  const markSessionOptimistic = useCallback((id: string) => {
+    optimisticSessionIdsRef.current.add(id);
+  }, []);
+
   return {
     sessions,
     activeSessionId,
@@ -128,6 +187,7 @@ export function useChatHistory(initialSessionId?: string | null) {
     setMessages,
     loadSessions,
     loadMessages,
+    markSessionOptimistic,
     createSession,
     deleteSession,
   };

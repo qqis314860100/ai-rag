@@ -34,7 +34,7 @@ function canUsePersistedAssistantActions(messageId: string) {
 }
 
 function canUsePersistedUserActions(messageId: string) {
-  return !messageId.startsWith("user-");
+  return !messageId.startsWith("user-") && !messageId.startsWith("pending-");
 }
 
 function getPersistedMessageId(message: ChatMessage) {
@@ -177,7 +177,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const lastFavoriteFetchKey = useRef("");
 
   const persistedAssistantMessageIds = messages
-    .filter((m) => m.role === "assistant" && canUsePersistedAssistantActions(getPersistedMessageId(m)))
+    .filter((m) => m.role === "assistant" && !m.streaming && canUsePersistedAssistantActions(getPersistedMessageId(m)))
     .map((m) => getPersistedMessageId(m));
   const persistedAssistantMessageKey = persistedAssistantMessageIds.join(",");
 
@@ -198,32 +198,29 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const c = containerRef.current;
     if (c) {
-      c.scrollTop = c.scrollHeight;
+      c.scrollTo({ top: c.scrollHeight, behavior });
       nearBottom.current = true;
       setShowScrollBtn(false);
       return;
     }
 
-    bottomRef.current?.scrollIntoView({ block: "end", behavior: "instant" });
+    bottomRef.current?.scrollIntoView({ block: "end", behavior });
   }, []);
 
   useEffect(() => {
     if (!scrollToBottomSignal) return;
 
-    let raf1 = 0;
-    let raf2 = 0;
-    const timer = window.setTimeout(() => scrollToBottom(), 120);
-    raf1 = requestAnimationFrame(() => {
-      scrollToBottom();
-      raf2 = requestAnimationFrame(scrollToBottom);
+    let raf = 0;
+    const timer = window.setTimeout(() => scrollToBottom("auto"), 180);
+    raf = requestAnimationFrame(() => {
+      scrollToBottom("smooth");
     });
 
     return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
+      cancelAnimationFrame(raf);
       window.clearTimeout(timer);
     };
   }, [scrollToBottom, scrollToBottomSignal]);
@@ -243,9 +240,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     } else if (wasLoading.current) {
       wasLoading.current = false;
       if (nearBottom.current) {
-        requestAnimationFrame(scrollToBottom);
-        setTimeout(scrollToBottom, 100);
-        setTimeout(scrollToBottom, 350);
+        requestAnimationFrame(() => scrollToBottom("auto"));
+        setTimeout(() => scrollToBottom("auto"), 100);
+        setTimeout(() => scrollToBottom("auto"), 350);
       }
     }
     prevContentLen.current = streamingContent.length;
@@ -402,7 +399,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
   return (
     <div className="py-6 space-y-10">
-      {messages.map((msg, i) => {
+      {messages.map((msg) => {
         const isUser = msg.role === "user";
         const persistedMessageId = getPersistedMessageId(msg);
         const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
@@ -413,7 +410,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         return (
           <div key={msg.id}
             className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
-            style={{ animation: `fadeInUp var(--duration-normal) var(--ease-out) both`, animationDelay: `${Math.min(i * 40, 300)}ms` }}
           >
             {/* Message body */}
             <div className={`max-w-[80%]`}>
@@ -632,7 +628,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       {/* Scroll-to-bottom floating button */}
       {showScrollBtn && (
         <button
-          onClick={scrollToBottom}
+          onClick={() => scrollToBottom("smooth")}
           className="sticky bottom-4 mx-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-white border border-border shadow-md-soft text-xs text-text-secondary hover:text-accent hover:border-accent/50 transition-all animate-fade-in-up z-10"
         >
           <ChevronDown className="h-3.5 w-3.5" />
