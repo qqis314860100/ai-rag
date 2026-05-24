@@ -4,9 +4,10 @@
 
 - Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
 - 当前 PRD 已按页面真实能力重新校准：需要与 API / RAG 同步的前端任务已重开，API 与 RAG 侧此前标记完成的任务也全部重开，只有真实联调验收后才可再次勾选。
+- 最新完成 `web` / `rag`: AI 整理入口已接入真实 Diagram IR 链路，前端按钮会调用 API，再由 RAG 生成 mindmap / flowchart 中间表示并回显节点。
 - 最新完成 `web`: 将右侧栏改造成当前会话导航壳，包含线程目录、近期证据、笔记占位和结构化输出入口。
 - 最新完成 `web`: 建立统一文档预览壳，支持文本 / Markdown / 原文切换，并为 PDF / HTML / 代码块保留禁用状态。
-- 最新完成 `web`: 增加 AI 整理入口占位，思维导图 / 流程图只触发本地待接入提示，不调用后端 API。
+- 最新完成 `web`: 增加 AI 整理入口真实接入，思维导图 / 流程图会调用后端 Diagram IR 接口并渲染返回结果。
 - 最新完成 `web`: 聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
 - 最新完成 `web`: 进一步隔离流式轮次状态，发送/重试不会被旧定时器污染，标题、输入框、消息列表保持稳定。
 - 最新完成 `web`: 右侧栏已接入真实当前线程目录、近期证据、会话笔记 CRUD 和结构化输出数据；流式 RAG meta 会经 API 持久化到回答 metadata trace。
@@ -14,7 +15,7 @@
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
 - 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
 - 注意：此前记录的 `api` / `rag` 完成项仅代表阶段性尝试或局部契约，不能再作为产品完成依据；后续必须按 PRD 未完成队列重新执行和验收。
-- 下一轮建议：继续执行 `web` 统一文档预览真实预览；再接 AI 整理真实生成，以及 API/RAG 的真实能力补齐。
+- 下一轮建议：继续执行 PRD 未完成队列中的 `api` 消息编辑/删除截断与测试补齐任务。
 
 ## 已完成
 
@@ -174,18 +175,26 @@
 - Blockers: 选中的样例证据 `raw` 接口返回空时会显示空态，属于当前后端数据现状。
 - Next: `web`: 增加 AI 整理入口占位，提供“思维导图 / 流程图待接入”的本地提示，不调用不存在的后端 API。
 
-### 2026-05-24 - 增加 AI 整理入口占位
+### 2026-05-24 - 接入 AI 整理图谱链路
 
-- Service: web
-- Task: `web`: 增加 AI 整理入口占位，可触发“思维导图/流程图待接入”的本地提示，不调用不存在的后端 API。
-- Changed: 在会话导航中增加 AI 整理入口占位；保留思维导图和流程图快捷入口，点击只触发本地 Toast 提示，不接入任何后端请求。
+- Service: repo
+- Task: `web`: 将 AI 整理入口接入真实思维导图/流程图生成结果；现有入口只是本地占位，还需要和 RAG 的结构化中间表示与后端契约同步。
+- Changed:
+  - `web` 的会话导航新增真实 AI 整理卡片，点击思维导图 / 流程图会调用 API。
+  - `api` 新增回答图谱代理端点，做会话权限校验后转发给 RAG。
+  - `rag` 新增 `DiagramIR` 与 `/rag/diagram/generate`，按回答内容生成 mindmap / flowchart 中间表示。
+  - `PRD.md` 和 `progress.txt` 同步勾选对应任务。
 - Verification:
-  - `pnpm run lint:web` 通过，仍有既有无关 Fast Refresh warning。
-  - `pnpm run build:web` 通过。
-  - Playwright `http://127.0.0.1:5174/chat?session=smoke-session` 烟雾验证：AI 整理、思维导图、流程图入口均可见；点击后出现 `AI 整理待接入`、`思维导图待接入`、`流程图待接入` 本地提示；点击期间新增 `/api` 请求数为 0。
-- Commit: `c520bcb`
-- Blockers: 无。
-- Next: `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - `pnpm run lint:api`
+  - `pnpm run build:api`
+  - `python3 -m compileall rag/app`
+  - `curl -sS -X POST http://127.0.0.1:8000/rag/diagram/generate -H 'Content-Type: application/json' -d '{"title":"端点烟雾","content":"1. 检查温度窗口。2. 确认压力曲线。3. 记录恢复结果。","diagram_type":"flowchart","source_ids":["chunk-a"],"max_steps":4}'`
+  - Playwright 页面烟雾：`/chat` 中点击“思维导图”后，接口返回 200，页面显示节点计数。
+- Commit: 待提交
+- Blockers: `rag/.venv` 未安装 pytest，改用 `compileall` + 端点烟雾验证。
+- Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
 
 ### 2026-05-24 - 聊天端到端回归
 

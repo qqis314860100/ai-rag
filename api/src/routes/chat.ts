@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { chatWithRag, chatWithRagStream } from "../services/ragClient";
+import { chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
@@ -537,6 +537,61 @@ router.get("/chat/messages/:id/sources/:sourceId", async (req: Request, res: Res
     }
 
     sendSuccess(res, source, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/chat/messages/:id/diagram - generate Diagram IR for one assistant answer
+router.post("/chat/messages/:id/diagram", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const existing = getMessageById(messageId);
+    if (!existing) {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+    }
+
+    const session = getSessionById(existing.session_id);
+    if (!session) {
+      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+    }
+    if (!canReadSession(req, session.user_id)) {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限整理该回答。", 403);
+    }
+    if (existing.role !== "assistant") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能整理回答消息。", 400);
+    }
+
+    const rawDiagramType = typeof req.body?.diagram_type === "string" ? req.body.diagram_type : "mindmap";
+    if (rawDiagramType !== "mindmap" && rawDiagramType !== "flowchart") {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "diagram_type 必须是 mindmap 或 flowchart。", 400);
+    }
+
+    const formatted = formatMessage(existing) as { sources?: Array<Record<string, unknown>> };
+    const sourceIds = (formatted.sources || [])
+      .map((source) => source.chunk_id)
+      .filter((chunkId): chunkId is string => typeof chunkId === "string" && chunkId.length > 0);
+
+    const title = typeof req.body?.title === "string" && req.body.title.trim()
+      ? req.body.title.trim()
+      : session.title || "AI 整理";
+    const diagram = await generateDiagramIR(
+      title,
+      existing.content,
+      rawDiagramType,
+      sourceIds,
+      req.requestId
+    );
+
+    auditFromRequest(req, "chat.diagram.generate", "chat_message", messageId, {
+      session_id: existing.session_id,
+      diagram_type: rawDiagramType,
+      node_count: diagram.nodes.length,
+      edge_count: diagram.edges.length,
+      source_count: sourceIds.length,
+    });
+
+    sendSuccess(res, diagram, req.requestId);
   } catch (err) {
     next(err);
   }

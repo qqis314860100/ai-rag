@@ -101,6 +101,36 @@ interface RagChatResponse {
   };
 }
 
+type DiagramType = "mindmap" | "flowchart";
+
+interface DiagramNode {
+  id: string;
+  label: string;
+  kind: string;
+  description?: string;
+  source_ids: string[];
+  metadata: Record<string, unknown>;
+}
+
+interface DiagramEdge {
+  source: string;
+  target: string;
+  relation: string;
+  label?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface DiagramIR {
+  title: string;
+  objective: string;
+  diagram_type: DiagramType | string;
+  layout_hint: string;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  notes: string[];
+  metadata: Record<string, unknown>;
+}
+
 async function ragFetch<T>(
   path: string,
   body: unknown,
@@ -251,6 +281,26 @@ export async function chatWithRag(
       allowed_security_levels: allowedSecurityLevels,
       filters: filters ?? {},
       history: history ?? [],
+    },
+    requestId
+  );
+}
+
+export async function generateDiagramIR(
+  title: string,
+  content: string,
+  diagramType: DiagramType,
+  sourceIds: string[],
+  requestId?: string
+): Promise<DiagramIR> {
+  return ragFetch<DiagramIR>(
+    "/rag/diagram/generate",
+    {
+      title,
+      content,
+      diagram_type: diagramType,
+      source_ids: sourceIds,
+      max_steps: 8,
     },
     requestId
   );

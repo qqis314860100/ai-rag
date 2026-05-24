@@ -272,6 +272,18 @@ class ChatResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Diagram IR
+# ---------------------------------------------------------------------------
+
+class DiagramGenerateRequest(BaseModel):
+    title: str = "AI 整理"
+    content: str
+    diagram_type: str = "mindmap"
+    source_ids: list[str] = Field(default_factory=list)
+    max_steps: int = Field(default=8, ge=2, le=12)
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 

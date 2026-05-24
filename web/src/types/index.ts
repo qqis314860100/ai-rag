@@ -117,6 +117,36 @@ export interface ChatNote {
   updated_at: string;
 }
 
+export type DiagramType = "mindmap" | "flowchart";
+
+export interface DiagramNode {
+  id: string;
+  label: string;
+  kind: string;
+  description?: string;
+  source_ids: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface DiagramEdge {
+  source: string;
+  target: string;
+  relation: string;
+  label?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface DiagramIR {
+  title: string;
+  objective: string;
+  diagram_type: DiagramType | string;
+  layout_hint: string;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  notes: string[];
+  metadata: Record<string, unknown>;
+}
+
 export interface SearchHit {
   chunk_id: string;
   document_id: string;

@@ -14,3 +14,17 @@ def test_build_placeholder_diagram_ir_keeps_structure() -> None:
     assert [node.id for node in ir.nodes] == ["step-1", "step-2", "step-3"]
     assert [edge.relation for edge in ir.edges] == ["sequence", "sequence"]
     assert ir.metadata["step_count"] == 3
+
+
+def test_build_placeholder_diagram_ir_supports_mindmap() -> None:
+    ir = build_placeholder_diagram_ir(
+        title="工艺风险整理",
+        steps=["温度窗口", "压力控制"],
+        source_ids=["source-a"],
+        diagram_type="mindmap",
+    )
+
+    assert ir.diagram_type == "mindmap"
+    assert ir.layout_hint == "radial"
+    assert ir.nodes[0].kind == "root"
+    assert [edge.relation for edge in ir.edges] == ["contains", "contains"]

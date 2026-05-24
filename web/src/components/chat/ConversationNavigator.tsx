@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BookOpenText,
+  Brain,
   ChevronRight,
   ClipboardList,
   Clock3,
   FileSearch,
   GitBranch,
+  Loader2,
   NotebookPen,
   Pencil,
   Plus,
   Sparkles,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import SourcePanel from "./SourcePanel";
-import type { ChatMessage, ChatNote, Source } from "../../types";
+import { api } from "../../services/api";
+import type { ApiResponse, ChatMessage, ChatNote, DiagramIR, DiagramNode, DiagramType, Source } from "../../types";
 
 type NavigatorView = "thread" | "evidence";
 
@@ -31,6 +35,12 @@ type StructuredSummary = {
   llmMs?: number;
   totalMs?: number;
   hitCount?: number;
+};
+
+type DiagramState = {
+  loading: boolean;
+  data?: DiagramIR;
+  error?: string;
 };
 
 interface ConversationNavigatorProps {
@@ -83,6 +93,58 @@ function formatDuration(ms?: number) {
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
 }
 
+function getDiagramKey(messageId: string, diagramType: DiagramType) {
+  return `${messageId}:${diagramType}`;
+}
+
+function DiagramNodePill({ node, tone = "default" }: { node: DiagramNode; tone?: "root" | "default" }) {
+  return (
+    <div
+      className={`min-w-0 rounded-lg border px-2.5 py-2 shadow-sm-soft ${
+        tone === "root"
+          ? "border-accent/35 bg-accent-soft text-accent"
+          : "border-border bg-white text-text-secondary"
+      }`}
+    >
+      <p className="break-words text-[11px] font-semibold leading-relaxed">{node.label}</p>
+    </div>
+  );
+}
+
+function DiagramPreview({ diagram }: { diagram: DiagramIR }) {
+  if (diagram.diagram_type === "mindmap") {
+    const root = diagram.nodes[0];
+    const branches = diagram.nodes.slice(1);
+    return (
+      <div className="rounded-lg border border-border bg-surface-page px-3 py-3">
+        {root && <DiagramNodePill node={root} tone="root" />}
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {branches.map((node) => (
+            <DiagramNodePill key={node.id} node={node} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-page px-3 py-3">
+      <div className="space-y-2">
+        {diagram.nodes.map((node, index) => (
+          <div key={node.id}>
+            <DiagramNodePill node={node} tone={index === 0 ? "root" : "default"} />
+            {index < diagram.nodes.length - 1 && (
+              <div className="flex h-4 items-center justify-center">
+                <span className="h-full w-px bg-border" />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ConversationNavigator({
   messages,
   activeTitle,
@@ -106,6 +168,8 @@ export default function ConversationNavigator({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [diagramType, setDiagramType] = useState<DiagramType>("mindmap");
+  const [diagramStates, setDiagramStates] = useState<Record<string, DiagramState>>({});
 
   useEffect(() => {
     if (selectedSources && selectedSources.length > 0) {
@@ -187,6 +251,8 @@ export default function ConversationNavigator({
   }, [messages]);
 
   const latestSummary = structuredSummaries[0];
+  const latestDiagramKey = latestSummary ? getDiagramKey(latestSummary.id, diagramType) : "";
+  const latestDiagramState = latestDiagramKey ? diagramStates[latestDiagramKey] : undefined;
   const assistantCount = messages.filter((message) => message.role === "assistant").length;
   const noteCount = notes.length;
 
@@ -235,6 +301,41 @@ export default function ConversationNavigator({
     const ok = await onDeleteNote(noteId);
     if (ok && editingNoteId === noteId) {
       closeNoteComposer();
+    }
+  };
+
+  const generateDiagram = async (nextType: DiagramType) => {
+    if (!latestSummary) return;
+    setDiagramType(nextType);
+    const key = getDiagramKey(latestSummary.id, nextType);
+    const existing = diagramStates[key];
+    if (existing?.data || existing?.loading) return;
+
+    setDiagramStates((prev) => ({
+      ...prev,
+      [key]: { loading: true },
+    }));
+
+    try {
+      const res = await api.post<ApiResponse<DiagramIR>>(
+        `/chat/messages/${encodeURIComponent(latestSummary.id)}/diagram`,
+        {
+          diagram_type: nextType,
+          title: latestSummary.question,
+        }
+      );
+      setDiagramStates((prev) => ({
+        ...prev,
+        [key]: { loading: false, data: res.data },
+      }));
+    } catch (error) {
+      setDiagramStates((prev) => ({
+        ...prev,
+        [key]: {
+          loading: false,
+          error: error instanceof Error ? error.message : "生成失败",
+        },
+      }));
     }
   };
 
@@ -542,6 +643,68 @@ export default function ConversationNavigator({
                     <span className="rounded-md bg-surface-page px-2 py-1">命中 {latestSummary.hitCount ?? "—"}</span>
                     <span className="rounded-md bg-surface-page px-2 py-1">更新时间 {formatTimeLabel(latestSummary.createdAt)}</span>
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-3.5 w-3.5 text-text-muted" />
+                      <span className="text-xs font-semibold text-text">AI 整理</span>
+                    </div>
+                    <span className="text-[10px] text-text-muted">
+                      {latestDiagramState?.data
+                        ? `${latestDiagramState.data.nodes.length} 节点`
+                        : "未生成"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void generateDiagram("mindmap")}
+                      disabled={latestDiagramState?.loading}
+                      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        diagramType === "mindmap"
+                          ? "border-accent/40 bg-accent-soft text-accent"
+                          : "border-border bg-white text-text-muted hover:border-accent/35 hover:text-text"
+                      }`}
+                    >
+                      {diagramType === "mindmap" && latestDiagramState?.loading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Brain className="h-3.5 w-3.5" />
+                      )}
+                      <span className="truncate">思维导图</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void generateDiagram("flowchart")}
+                      disabled={latestDiagramState?.loading}
+                      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                        diagramType === "flowchart"
+                          ? "border-accent/40 bg-accent-soft text-accent"
+                          : "border-border bg-white text-text-muted hover:border-accent/35 hover:text-text"
+                      }`}
+                    >
+                      {diagramType === "flowchart" && latestDiagramState?.loading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Workflow className="h-3.5 w-3.5" />
+                      )}
+                      <span className="truncate">流程图</span>
+                    </button>
+                  </div>
+
+                  {latestDiagramState?.error && (
+                    <div className="mt-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[11px] leading-relaxed text-warning">
+                      {latestDiagramState.error}
+                    </div>
+                  )}
+                  {latestDiagramState?.data && (
+                    <div className="mt-3">
+                      <DiagramPreview diagram={latestDiagramState.data} />
+                    </div>
+                  )}
                 </div>
 
                 {structuredSummaries.length > 1 && (

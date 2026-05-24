@@ -43,6 +43,51 @@ def build_placeholder_diagram_ir(
     nodes: list[DiagramNode] = []
     edges: list[DiagramEdge] = []
 
+    if diagram_type == "mindmap":
+        root_id = "root"
+        nodes.append(
+            DiagramNode(
+                id=root_id,
+                label=title,
+                kind="root",
+                source_ids=source_ids,
+            )
+        )
+        for index, step in enumerate(steps, 1):
+            node_id = f"topic-{index}"
+            nodes.append(
+                DiagramNode(
+                    id=node_id,
+                    label=step,
+                    kind="topic",
+                    source_ids=source_ids,
+                )
+            )
+            edges.append(
+                DiagramEdge(
+                    source=root_id,
+                    target=node_id,
+                    relation="contains",
+                )
+            )
+
+        return DiagramIR(
+            title=title,
+            objective="结构化中间表示，供后续渲染为思维导图或流程图。",
+            diagram_type=diagram_type,
+            layout_hint="radial",
+            nodes=nodes,
+            edges=edges,
+            notes=[
+                "先输出结构化 IR，再决定前端图库。",
+                "布局和样式由消费端选择，不在这里绑定。",
+            ],
+            metadata={
+                "source_count": len(source_ids),
+                "step_count": len(steps),
+            },
+        )
+
     previous_id = ""
     for index, step in enumerate(steps, 1):
         node_id = f"step-{index}"
