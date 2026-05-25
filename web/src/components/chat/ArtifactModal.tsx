@@ -26,6 +26,11 @@ function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
     nodes: nodes as DiagramIR["nodes"],
     edges: edges as DiagramIR["edges"],
     notes: Array.isArray(artifact.payload.notes) ? artifact.payload.notes as string[] : [],
+    renderer: typeof artifact.payload.renderer === "string" ? artifact.payload.renderer : undefined,
+    reason: typeof artifact.payload.reason === "string" ? artifact.payload.reason : undefined,
+    confidence: typeof artifact.payload.confidence === "number" ? artifact.payload.confidence : undefined,
+    source_evidence: Array.isArray(artifact.payload.source_evidence) ? artifact.payload.source_evidence as Record<string, unknown>[] : undefined,
+    excalidraw_scene: isRecord(artifact.payload.excalidraw_scene) ? artifact.payload.excalidraw_scene : null,
     metadata: isRecord(artifact.payload.metadata) ? artifact.payload.metadata : {},
   };
 }

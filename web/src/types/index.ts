@@ -145,6 +145,11 @@ export interface DiagramIR {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   notes: string[];
+  renderer?: string;
+  reason?: string;
+  confidence?: number;
+  source_evidence?: Record<string, unknown>[];
+  excalidraw_scene?: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
 }
 
