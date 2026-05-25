@@ -17,7 +17,19 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert any(node.kind == "action" for node in ir.nodes)
     assert any(edge.relation == "condition" for edge in ir.edges)
     assert any("设备报警现象" in keyword for keyword in ir.metadata["keywords"])
-    assert ir.metadata["renderer"] == "positioned-svg"
+    assert ir.renderer == "excalidraw"
+    assert ir.metadata["renderer"] == "excalidraw"
+    assert ir.metadata["legacy_renderer"] == "positioned-svg"
+    assert ir.confidence > 0
+    assert "4 个步骤" in ir.reason
+    assert ir.source_evidence == [{"source_id": "source-a", "title": "", "section": "", "snippet": ""}, {"source_id": "source-b", "title": "", "section": "", "snippet": ""}]
+    assert ir.excalidraw_scene is not None
+    assert ir.excalidraw_scene["type"] == "excalidraw"
+    assert ir.excalidraw_scene["metadata"]["diagram_type"] == "flowchart"
+    assert any(element["type"] == "arrow" for element in ir.excalidraw_scene["elements"])
+    assert any(element["type"] == "text" and element["containerId"] == "node-step-1" for element in ir.excalidraw_scene["elements"])
+    assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
+    assert ir.metadata["artifact_payload"]["element_count"] == len(ir.excalidraw_scene["elements"])
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)
@@ -45,7 +57,13 @@ def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
     assert any(node.kind == "evidence" and "安全注意事项" in node.label for node in ir.nodes)
     assert any(edge.relation == "supported_by" for edge in ir.edges)
     assert "risk" in ir.metadata["categories"]
-    assert ir.metadata["renderer"] == "positioned-svg"
+    assert ir.renderer == "excalidraw"
+    assert ir.metadata["renderer"] == "excalidraw"
+    assert ir.source_evidence[0]["source_id"] == "source-a"
+    assert ir.source_evidence[0]["section"] == "模组EOL测试 / 5. 安全注意事项"
+    assert "来源证据" in ir.reason
+    assert ir.excalidraw_scene is not None
+    assert any(element["type"] == "rectangle" for element in ir.excalidraw_scene["elements"])
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter
 from typing import Any
@@ -32,6 +33,11 @@ class DiagramIR(BaseModel):
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    renderer: str = "diagram-ir"
+    reason: str = ""
+    confidence: float = 0.0
+    source_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    excalidraw_scene: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -485,6 +491,264 @@ def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
     return ir
 
 
+def _stable_int(value: str, minimum: int = 1, maximum: int = 2_000_000_000) -> int:
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % (maximum - minimum) + minimum
+
+
+def _node_layout(node: DiagramNode, index: int) -> dict[str, int]:
+    layout = node.metadata.get("layout")
+    if isinstance(layout, dict):
+        return {
+            "x": int(layout.get("x", 80 + index * 30)),
+            "y": int(layout.get("y", 80 + index * 30)),
+            "width": int(layout.get("width", 160)),
+            "height": int(layout.get("height", 56)),
+        }
+    return {"x": 80 + index * 30, "y": 80 + index * 30, "width": 160, "height": 56}
+
+
+def _element_base(element_id: str, element_type: str, x: float, y: float, width: float, height: float) -> dict[str, Any]:
+    return {
+        "id": element_id,
+        "type": element_type,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "angle": 0,
+        "strokeColor": "#334155",
+        "backgroundColor": "transparent",
+        "fillStyle": "solid",
+        "strokeWidth": 1,
+        "strokeStyle": "solid",
+        "roughness": 0,
+        "opacity": 100,
+        "groupIds": [],
+        "frameId": None,
+        "roundness": None,
+        "seed": _stable_int(element_id),
+        "version": 1,
+        "versionNonce": _stable_int(f"{element_id}:nonce"),
+        "isDeleted": False,
+        "boundElements": None,
+        "updated": 1,
+        "link": None,
+        "locked": True,
+    }
+
+
+def _excalidraw_node_elements(node: DiagramNode, index: int) -> list[dict[str, Any]]:
+    layout = _node_layout(node, index)
+    render = node.metadata.get("render") if isinstance(node.metadata.get("render"), dict) else {}
+    shape = str(render.get("shape") or "rounded")
+    element_type = "diamond" if shape == "diamond" else "rectangle"
+    node_element_id = f"node-{node.id}"
+    text_element_id = f"text-{node.id}"
+
+    node_element = _element_base(
+        node_element_id,
+        element_type,
+        layout["x"],
+        layout["y"],
+        layout["width"],
+        layout["height"],
+    )
+    node_element.update(
+        {
+            "strokeColor": render.get("stroke", "#64748B"),
+            "backgroundColor": render.get("fill", "#FFFFFF"),
+            "strokeWidth": 2,
+            "roundness": None if element_type == "diamond" else {"type": 3, "value": int(render.get("radius", 12))},
+            "boundElements": [{"type": "text", "id": text_element_id}],
+            "customData": {
+                "diagram_node_id": node.id,
+                "kind": node.kind,
+                "source_ids": node.source_ids,
+                "description": node.description,
+            },
+        }
+    )
+
+    text_element = _element_base(
+        text_element_id,
+        "text",
+        layout["x"] + 8,
+        layout["y"] + 6,
+        max(layout["width"] - 16, 40),
+        max(layout["height"] - 12, 24),
+    )
+    text_element.update(
+        {
+            "strokeColor": render.get("text", "#1F2937"),
+            "backgroundColor": "transparent",
+            "strokeWidth": 0,
+            "fontSize": int(render.get("fontSize", 12)),
+            "fontFamily": 5,
+            "text": node.label,
+            "rawText": node.label,
+            "originalText": node.label,
+            "textAlign": "center",
+            "verticalAlign": "middle",
+            "containerId": node_element_id,
+            "lineHeight": 1.25,
+            "boundElements": [],
+            "customData": {"diagram_node_id": node.id, "kind": node.kind},
+        }
+    )
+    return [node_element, text_element]
+
+
+def _edge_points(source: DiagramNode, target: DiagramNode, source_index: int, target_index: int) -> tuple[float, float, float, float]:
+    source_layout = _node_layout(source, source_index)
+    target_layout = _node_layout(target, target_index)
+    source_x = source_layout["x"] + source_layout["width"] / 2
+    source_y = source_layout["y"] + source_layout["height"] / 2
+    target_x = target_layout["x"] + target_layout["width"] / 2
+    target_y = target_layout["y"] + target_layout["height"] / 2
+    return source_x, source_y, target_x, target_y
+
+
+def _excalidraw_edge_element(
+    edge: DiagramEdge,
+    source: DiagramNode,
+    target: DiagramNode,
+    source_index: int,
+    target_index: int,
+    index: int,
+) -> dict[str, Any]:
+    start_x, start_y, end_x, end_y = _edge_points(source, target, source_index, target_index)
+    element_id = f"edge-{edge.source}-{edge.target}-{index}"
+    render = edge.metadata.get("render") if isinstance(edge.metadata.get("render"), dict) else {}
+    element = _element_base(element_id, "arrow", start_x, start_y, end_x - start_x, end_y - start_y)
+    element.update(
+        {
+            "strokeColor": render.get("stroke", "#64748B"),
+            "strokeWidth": int(float(render.get("strokeWidth", 2))),
+            "strokeStyle": "dashed" if render.get("strokeDasharray") else "solid",
+            "points": [[0, 0], [end_x - start_x, end_y - start_y]],
+            "startBinding": {"elementId": f"node-{source.id}", "focus": 0, "gap": 10},
+            "endBinding": {"elementId": f"node-{target.id}", "focus": 0, "gap": 10},
+            "startArrowhead": None,
+            "endArrowhead": "arrow" if render.get("arrow", True) else None,
+            "elbowed": False,
+            "customData": {
+                "diagram_edge": {
+                    "source": edge.source,
+                    "target": edge.target,
+                    "relation": edge.relation,
+                    "label": edge.label,
+                }
+            },
+        }
+    )
+    return element
+
+
+def _build_source_evidence(content: str, source_ids: list[str]) -> list[dict[str, Any]]:
+    blocks = _extract_evidence_blocks(content, source_ids)
+    if blocks:
+        return [
+            {
+                "source_id": block["source_id"],
+                "title": block["title"],
+                "section": block["section"],
+                "snippet": block["snippet"],
+            }
+            for block in blocks
+        ]
+    return [{"source_id": source_id, "title": "", "section": "", "snippet": ""} for source_id in source_ids]
+
+
+def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) -> float:
+    node_score = min(len(ir.nodes), 10) * 0.025
+    edge_score = min(len(ir.edges), 8) * 0.02
+    evidence_score = min(len(evidence), 4) * 0.08
+    structure_score = 0.12 if ir.nodes and (ir.diagram_type == "mindmap" or ir.edges) else 0.0
+    confidence = 0.42 + node_score + edge_score + evidence_score + structure_score
+    return round(min(confidence, 0.92), 2)
+
+
+def _build_generation_reason(ir: DiagramIR, evidence: list[dict[str, Any]]) -> str:
+    if ir.diagram_type == "mindmap":
+        keyword_count = int(ir.metadata.get("keyword_count") or len([node for node in ir.nodes if node.kind == "keyword"]))
+        category_count = len(ir.metadata.get("categories", [])) if isinstance(ir.metadata.get("categories"), list) else 0
+        return f"基于回答正文提取 {keyword_count} 个关键词，并结合 {len(evidence)} 条来源证据归类为 {category_count} 组思维导图节点。"
+    step_count = int(ir.metadata.get("step_count") or len(ir.nodes))
+    decision_count = len([node for node in ir.nodes if node.kind == "decision"])
+    return f"基于回答中的 {step_count} 个步骤和 {len(evidence)} 条来源证据生成流程图，并标记 {decision_count} 个条件判断节点。"
+
+
+def _build_excalidraw_scene(ir: DiagramIR) -> dict[str, Any]:
+    node_indexes = {node.id: index for index, node in enumerate(ir.nodes)}
+    nodes = _node_by_id(ir.nodes)
+    elements: list[dict[str, Any]] = []
+    for index, node in enumerate(ir.nodes):
+        elements.extend(_excalidraw_node_elements(node, index))
+    for index, edge in enumerate(ir.edges):
+        source = nodes.get(edge.source)
+        target = nodes.get(edge.target)
+        if not source or not target:
+            continue
+        elements.append(
+            _excalidraw_edge_element(
+                edge,
+                source,
+                target,
+                node_indexes.get(source.id, 0),
+                node_indexes.get(target.id, 0),
+                index,
+            )
+        )
+
+    viewport = ir.metadata.get("viewport") if isinstance(ir.metadata.get("viewport"), dict) else {}
+    return {
+        "type": "excalidraw",
+        "version": 2,
+        "source": "ai-rag/rag/diagram_ir",
+        "elements": elements,
+        "appState": {
+            "viewBackgroundColor": "#FFFFFF",
+            "gridSize": None,
+            "theme": "light",
+            "scrollX": 0,
+            "scrollY": 0,
+            "zoom": {"value": 1},
+        },
+        "files": {},
+        "metadata": {
+            "diagram_type": ir.diagram_type,
+            "layout_hint": ir.layout_hint,
+            "viewport": viewport,
+        },
+    }
+
+
+def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str]) -> DiagramIR:
+    evidence = _build_source_evidence(content, source_ids)
+    reason = _build_generation_reason(ir, evidence)
+    confidence = _estimate_diagram_confidence(ir, evidence)
+    scene = _build_excalidraw_scene(ir)
+
+    ir.renderer = "excalidraw"
+    ir.reason = reason
+    ir.confidence = confidence
+    ir.source_evidence = evidence
+    ir.excalidraw_scene = scene
+    ir.metadata["renderer"] = "excalidraw"
+    ir.metadata["legacy_renderer"] = "positioned-svg"
+    ir.metadata["artifact_payload"] = {
+        "renderer": "excalidraw",
+        "scene_format": "excalidraw",
+        "scene_version": scene["version"],
+        "element_count": len(scene["elements"]),
+        "reason": reason,
+        "confidence": confidence,
+        "source_evidence": evidence,
+    }
+    return ir
+
+
 def build_keyword_diagram_ir(
     title: str,
     content: str,
@@ -578,7 +842,7 @@ def build_keyword_diagram_ir(
                     )
                 )
 
-        return _apply_mindmap_layout(DiagramIR(
+        return _attach_artifact_payload(_apply_mindmap_layout(DiagramIR(
             title=title,
             objective="基于回答和引用内容提取关键词，生成可渲染的思维导图 IR。",
             diagram_type=diagram_type,
@@ -595,7 +859,7 @@ def build_keyword_diagram_ir(
                 "categories": list(category_nodes.keys()),
                 "keyword_sources": {item["term"]: item.get("source_ids", []) for item in keyword_items},
             },
-        ))
+        )), content, source_ids)
 
     previous_id = ""
     for index, step in enumerate(steps, 1):
@@ -623,7 +887,7 @@ def build_keyword_diagram_ir(
             )
         previous_id = node_id
 
-    return _apply_flowchart_layout(DiagramIR(
+    return _attach_artifact_payload(_apply_flowchart_layout(DiagramIR(
         title=title,
         objective="基于回答步骤和关键词生成可渲染的流程图 IR。",
         diagram_type=diagram_type,
@@ -640,7 +904,7 @@ def build_keyword_diagram_ir(
             "keywords": keywords,
             "node_kinds": [node.kind for node in nodes],
         },
-    ))
+    )), content, source_ids)
 
 
 def build_placeholder_diagram_ir(
