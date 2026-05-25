@@ -3,7 +3,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from ..core.pipeline import RagPipeline, _estimate_confidence, _suggest_followups
+from ..core.pipeline import RagPipeline, _estimate_confidence, _keyword_rerank, _rewrite_query, _suggest_followups
 from ..evaluation import DiagramIR, build_keyword_diagram_ir
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
@@ -180,13 +180,16 @@ def chat_stream(request: ChatRequest):
     async def generate():
         try:
             # 1. Search
+            rewritten_query = _rewrite_query(request.query)
             search_result = pipeline.search(
-                query=request.query,
+                query=rewritten_query,
                 top_k=request.top_k,
                 allowed_security_levels=request.allowed_security_levels,
                 filters=request.filters,
             )
             hits = search_result["results"]
+            if rewritten_query != request.query:
+                hits = _keyword_rerank(request.query, hits, request.filters)
 
             # Send search metadata
             yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits)})}\n\n"
@@ -205,7 +208,7 @@ def chat_stream(request: ChatRequest):
                     done_data = {
                         "type": "done",
                         "sources": sources,
-                        "confidence": _estimate_confidence(hits),
+                        "confidence": _estimate_confidence(request.query, hits, request.filters),
                         "followups": _suggest_followups(request.query, hits),
                     }
                     yield f"data: {_sse_json(done_data)}\n\n"
