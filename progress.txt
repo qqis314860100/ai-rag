@@ -20,6 +20,19 @@
 
 ## 已完成
 
+### 2026-05-25 - 沉淀企业级知识工作台升级方案
+
+- Service: docs
+- Task: 输出完整方案文档，并将方向从学习型产品纠偏为企业级文档知识库智能工作台。
+- Changed:
+  - 新增 `docs/企业级文档知识库智能工作台升级方案.md`，明确产品定位、目标信息架构、数据模型、artifact 渲染器、Visual Planner、API/RAG/Web 职责和渐进式路线。
+  - `PRD.md` 追加下一阶段“企业级知识工作台”任务队列，第一轮从右侧栏瘦身为 `路线图 / 知识笔记` 开始。
+- Verification:
+  - `git diff --check`
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。
+
 ### 2026-05-24 - 初始化 Ralph loop
 
 - Service: chore

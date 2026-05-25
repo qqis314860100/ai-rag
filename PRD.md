@@ -94,10 +94,29 @@
 
 ## 推荐执行顺序
 
-1. 先做 `web`: 右侧栏真实数据同步。
-2. 再做 `web`: 统一文档预览真实预览接入。
-3. 再做 `web`: AI 整理入口真实生成接入。
-4. 如实现中发现契约缺口，再补对应 `api` 或 `rag` 任务，不反向挤压已有完成项。
+当前聊天体验第一阶段任务已基本收口。下一阶段进入“企业级文档知识库智能工作台”升级，详细方案见 [企业级文档知识库智能工作台升级方案](docs/企业级文档知识库智能工作台升级方案.md)。
+
+优先按以下顺序渐进式迭代：
+
+1. `web`: 右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab；路线图基于当前 messages 生成，节点可点击定位回答，知识笔记沿用现有 chat_notes。
+2. `api`: 新增 `chat_artifacts` 持久化契约，让图解从临时按钮结果升级为回答产物，刷新页面后仍可恢复。
+3. `web` / `rag`: 引入 Excalidraw 图解渲染，替换手写 SVG；RAG 输出 Excalidraw scene 或兼容转换结构，前端只负责渲染。
+4. `rag` / `api`: 增加 Visual Planner，在回答完成后自动判断是否需要流程图、架构图、思维导图、表格或图片 artifact。
+5. `api` / `web`: 增强知识笔记聚合，将回答笔记、引用评论、风险提示和人工补充按回答/source 汇总。
+6. `api` / `rag` / `web`: 受控接入图片生成能力，只在用户明确要求或培训/示意场景中生成 image artifact。
+
+## 下一阶段任务队列
+
+### 企业级知识工作台
+
+- [ ] `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。路线图展示当前会话关键问答节点、总结精髓、证据/artifact 状态，并支持点击定位到对应回答；知识笔记展示现有 session/message/source 笔记。
+- [ ] `api`: 新增 `chat_artifacts` 数据表和基础接口，支持按 message 保存、读取、重新生成和软删除 artifact；消息返回时携带 artifacts。
+- [ ] `web`: 新增通用 `ArtifactCard` / `ArtifactModal` 渲染层，将回答中的 artifacts 直接显示在对应回答下方，而不是放在右侧栏或只通过按钮触发。
+- [ ] `rag`: 将现有 Diagram IR 升级为可输出 Excalidraw scene 的 artifact payload，保留来源证据、生成理由和置信度。
+- [ ] `web`: 引入 `@excalidraw/excalidraw`，用只读白板图解替换当前手写 SVG 图谱弹窗。
+- [ ] `rag` / `api`: 增加 Visual Planner，基于问题、回答、引用和置信度判断是否自动生成流程图、架构图、思维导图、表格或图片 artifact。
+- [ ] `api` / `web`: 增强知识笔记聚合视图，将回答笔记、引用评论、风险提示和人工补充按回答与 source 组织。
+- [ ] `api` / `rag`: 设计受控 image artifact 生成链路，包含 prompt 脱敏、权限继承、异步生成和失败兜底；本阶段只做契约，不默认自动生成图片。
 
 ## 每轮验收模板
 
