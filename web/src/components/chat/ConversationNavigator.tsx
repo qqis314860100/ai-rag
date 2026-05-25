@@ -3,9 +3,9 @@ import {
   BookOpenText,
   ChevronRight,
   ClipboardList,
-  Clock3,
   FileSearch,
   GitBranch,
+  MessageSquare,
   NotebookPen,
   Pencil,
   Plus,
@@ -13,24 +13,20 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import SourcePanel from "./SourcePanel";
 import type { ChatMessage, ChatNote, Source } from "../../types";
 
-type NavigatorView = "thread" | "evidence";
+type NavigatorView = "roadmap" | "notes";
 
-type StructuredSummary = {
+type RoadmapItem = {
   id: string;
+  targetId: string;
   turn: number;
-  question: string;
-  answer: string;
-  createdAt?: string;
+  title: string;
+  essence: string;
+  status: "done" | "active" | "follow_up";
   sourceCount: number;
-  confidence?: number;
-  followups: string[];
-  retrievalMs?: number;
-  llmMs?: number;
-  totalMs?: number;
-  hitCount?: number;
+  artifactCount: number;
+  createdAt?: string;
 };
 
 interface ConversationNavigatorProps {
@@ -59,7 +55,7 @@ function getMessageElementId(messageId: string) {
 function truncateText(text: string, maxLength: number) {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
+  return `${normalized.slice(0, maxLength - 1)}...`;
 }
 
 function scoreLabel(score?: number) {
@@ -77,10 +73,47 @@ function formatTimeLabel(iso?: string) {
   });
 }
 
-function formatDuration(ms?: number) {
-  if (ms == null || Number.isNaN(ms)) return "未返回";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+function artifactCount(message?: ChatMessage) {
+  const withArtifacts = message as (ChatMessage & { artifacts?: unknown[] }) | undefined;
+  if (Array.isArray(withArtifacts?.artifacts)) return withArtifacts.artifacts.length;
+
+  const metadataArtifacts = message?.metadata?.artifacts;
+  return Array.isArray(metadataArtifacts) ? metadataArtifacts.length : 0;
+}
+
+function noteScopeLabel(scope: ChatNote["scope"]) {
+  if (scope === "source") return "引用";
+  if (scope === "message") return "回答";
+  return "会话";
+}
+
+function buildRoadmap(messages: ChatMessage[]): RoadmapItem[] {
+  let turn = 0;
+  return messages
+    .map((message, index) => {
+      if (message.role !== "user") return null;
+      turn += 1;
+
+      const answer = messages.slice(index + 1).find((item) => item.role === "assistant");
+      const sourceCount = answer?.sources?.length || 0;
+      const artifacts = artifactCount(answer);
+      const answerId = answer ? answer.persistedId || answer.id : "";
+
+      return {
+        id: message.id,
+        targetId: answerId || message.id,
+        turn,
+        title: truncateText(message.content || "未命名问题", 40),
+        essence: answer
+          ? truncateText(answer.content || "该轮回答尚无摘要", 78)
+          : "等待知识库回答生成后沉淀要点。",
+        status: answer ? "done" : "active",
+        sourceCount,
+        artifactCount: artifacts,
+        createdAt: answer?.created_at || message.created_at,
+      } satisfies RoadmapItem;
+    })
+    .filter(Boolean) as RoadmapItem[];
 }
 
 export default function ConversationNavigator({
@@ -101,7 +134,7 @@ export default function ConversationNavigator({
   onUpdateNote,
   onDeleteNote,
 }: ConversationNavigatorProps) {
-  const [view, setView] = useState<NavigatorView>("thread");
+  const [view, setView] = useState<NavigatorView>("roadmap");
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -109,9 +142,10 @@ export default function ConversationNavigator({
 
   useEffect(() => {
     if (selectedSources && selectedSources.length > 0) {
-      setView("evidence");
+      setView("notes");
+      window.setTimeout(() => onHighlightDone(), 320);
     }
-  }, [selectedSources]);
+  }, [onHighlightDone, selectedSources]);
 
   useEffect(() => {
     if (!notesWritable) {
@@ -121,74 +155,11 @@ export default function ConversationNavigator({
     }
   }, [notesWritable]);
 
-  const threadItems = useMemo(() => {
-    let turn = 0;
-    return messages
-      .map((message, index) => {
-        if (message.role !== "user") return null;
-        turn += 1;
-        const answer = messages.slice(index + 1).find((item) => item.role === "assistant");
-        return {
-          id: message.id,
-          turn,
-          title: truncateText(message.content || "未命名问题", 48),
-          hasAnswer: !!answer,
-          sourceCount: answer?.sources?.length || 0,
-        };
-      })
-      .filter(Boolean) as Array<{ id: string; turn: number; title: string; hasAnswer: boolean; sourceCount: number }>;
-  }, [messages]);
-
-  const structuredSummaries = useMemo<StructuredSummary[]>(() => {
-    let turn = 0;
-    return messages
-      .map((message, index) => {
-        if (message.role !== "user") return null;
-        turn += 1;
-        const answer = messages.slice(index + 1).find((item) => item.role === "assistant");
-        if (!answer) return null;
-
-        const trace = answer.metadata?.trace;
-        return {
-          id: answer.persistedId || answer.id,
-          turn,
-          question: truncateText(message.content || "未命名问题", 36),
-          answer: truncateText(answer.content || "暂无回答", 88),
-          createdAt: answer.created_at,
-          sourceCount: answer.sources?.length || 0,
-          confidence: answer.confidence,
-          followups: answer.followups || [],
-          retrievalMs: trace?.retrieval_ms,
-          llmMs: trace?.llm_ms,
-          totalMs: trace?.total_ms ?? answer.latency_ms ?? undefined,
-          hitCount: trace?.hit_count,
-        };
-      })
-      .filter(Boolean)
-      .slice(-3)
-      .reverse() as StructuredSummary[];
-  }, [messages]);
-
-  const recentEvidence = useMemo(() => {
-    const seen = new Set<string>();
-    const items: Array<{ source: Source; sources: Source[]; index: number }> = [];
-
-    [...messages].reverse().forEach((message) => {
-      if (message.role !== "assistant" || !message.sources?.length) return;
-      message.sources.forEach((source, index) => {
-        const key = source.chunk_id || `${source.document_id}-${source.section_path}-${index}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        items.push({ source, sources: message.sources!, index });
-      });
-    });
-
-    return items.slice(0, 6);
-  }, [messages]);
-
-  const latestSummary = structuredSummaries[0];
-  const assistantCount = messages.filter((message) => message.role === "assistant").length;
-  const noteCount = notes.length;
+  const roadmap = useMemo(() => buildRoadmap(messages), [messages]);
+  const currentSourceIndex = selectedSources?.[highlightSourceIdx ?? 0] ? highlightSourceIdx ?? 0 : 0;
+  const currentSource = selectedSources?.[currentSourceIndex];
+  const sourceCount = roadmap.reduce((total, item) => total + item.sourceCount, 0);
+  const artifactCountTotal = roadmap.reduce((total, item) => total + item.artifactCount, 0);
 
   const scrollToMessage = (messageId: string) => {
     document.getElementById(getMessageElementId(messageId))?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -224,18 +195,14 @@ export default function ConversationNavigator({
       : await onCreateNote(content);
     setSavingNote(false);
 
-    if (ok) {
-      closeNoteComposer();
-    }
+    if (ok) closeNoteComposer();
   };
 
   const removeNote = async (noteId: string) => {
     const confirmed = window.confirm("删除这条笔记？");
     if (!confirmed) return;
     const ok = await onDeleteNote(noteId);
-    if (ok && editingNoteId === noteId) {
-      closeNoteComposer();
-    }
+    if (ok && editingNoteId === noteId) closeNoteComposer();
   };
 
   return (
@@ -245,14 +212,14 @@ export default function ConversationNavigator({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <GitBranch className="h-4 w-4 text-accent" />
-              <h2 className="truncate text-sm font-semibold text-text">会话导航</h2>
+              <h2 className="truncate text-sm font-semibold text-text">知识工作台</h2>
             </div>
             <p className="mt-1 truncate text-[11px] text-text-muted">{activeTitle || "新会话"}</p>
           </div>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text"
-            title="关闭会话导航"
+            title="关闭知识工作台"
           >
             <X className="h-4 w-4" />
           </button>
@@ -260,138 +227,189 @@ export default function ConversationNavigator({
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg border border-border bg-white px-2 py-2">
-            <span className="block text-sm font-semibold text-text">{threadItems.length}</span>
-            <span className="text-[10px] text-text-muted">轮次</span>
+            <span className="block text-sm font-semibold text-text">{roadmap.length}</span>
+            <span className="text-[10px] text-text-muted">节点</span>
           </div>
           <div className="rounded-lg border border-border bg-white px-2 py-2">
-            <span className="block text-sm font-semibold text-text">{assistantCount}</span>
-            <span className="text-[10px] text-text-muted">回答</span>
-          </div>
-          <div className="rounded-lg border border-border bg-white px-2 py-2">
-            <span className="block text-sm font-semibold text-text">{recentEvidence.length}</span>
+            <span className="block text-sm font-semibold text-text">{sourceCount}</span>
             <span className="text-[10px] text-text-muted">证据</span>
+          </div>
+          <div className="rounded-lg border border-border bg-white px-2 py-2">
+            <span className="block text-sm font-semibold text-text">{notes.length}</span>
+            <span className="text-[10px] text-text-muted">笔记</span>
           </div>
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-surface-page p-1">
           <button
-            onClick={() => setView("thread")}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-              view === "thread" ? "bg-white text-text shadow-sm-soft" : "text-text-muted hover:text-text"
+            onClick={() => setView("roadmap")}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+              view === "roadmap" ? "bg-white text-text shadow-sm-soft" : "text-text-muted hover:text-text"
             }`}
           >
-            线程
+            路线图
           </button>
           <button
-            onClick={() => setView("evidence")}
-            disabled={!selectedSources?.length && recentEvidence.length === 0}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              view === "evidence" ? "bg-white text-text shadow-sm-soft" : "text-text-muted hover:text-text"
+            onClick={() => setView("notes")}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+              view === "notes" ? "bg-white text-text shadow-sm-soft" : "text-text-muted hover:text-text"
             }`}
           >
-            证据
+            知识笔记
           </button>
         </div>
       </header>
 
-      {view === "evidence" && selectedSources?.length ? (
-        <div className="min-h-0 flex-1">
-          <SourcePanel
-            sources={selectedSources}
-            onClose={() => {
-              onClearSources();
-              setView("thread");
-            }}
-            onFollowUp={onFollowUp}
-            onPreview={onPreviewSource}
-            highlightIdx={highlightSourceIdx}
-            onHighlightDone={onHighlightDone}
-          />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto chat-scroll-area px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto chat-scroll-area px-4 py-4">
+        {view === "roadmap" ? (
           <section>
-            <div className="mb-2 flex items-center gap-2">
-              <BookOpenText className="h-4 w-4 text-text-muted" />
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">当前线程目录</h3>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <BookOpenText className="h-4 w-4 text-text-muted" />
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">当前会话路线图</h3>
+              </div>
+              {artifactCountTotal > 0 && (
+                <span className="rounded-full bg-accent-soft px-2 py-1 text-[10px] font-semibold text-accent">
+                  {artifactCountTotal} 个图解
+                </span>
+              )}
             </div>
-            {threadItems.length > 0 ? (
-              <div className="space-y-1.5">
-                {threadItems.map((item) => (
+
+            {roadmap.length > 0 ? (
+              <div className="relative space-y-3">
+                <div className="absolute bottom-4 left-[13px] top-4 w-px bg-border" />
+                {roadmap.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => scrollToMessage(item.id)}
-                    className="group w-full rounded-lg border border-transparent px-2.5 py-2 text-left transition-colors hover:border-accent/30 hover:bg-accent-soft/40"
+                    onClick={() => scrollToMessage(item.targetId)}
+                    className="group relative grid w-full grid-cols-[1.75rem_1fr] gap-2 rounded-xl border border-transparent px-1.5 py-1.5 text-left transition-colors hover:border-accent/30 hover:bg-accent-soft/35"
                   >
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-page text-[10px] font-semibold text-text-muted group-hover:bg-white group-hover:text-accent">
-                        {item.turn}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium text-text">{item.title}</span>
-                        <span className="mt-0.5 flex items-center gap-1 text-[10px] text-text-muted">
-                          {item.hasAnswer ? "已回答" : "等待回答"}
-                          {item.sourceCount > 0 && (
-                            <>
-                              <span>·</span>
-                              <FileSearch className="h-3 w-3" />
-                              {item.sourceCount}
-                            </>
-                          )}
+                    <span
+                      className={`z-10 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
+                        item.status === "done"
+                          ? "border-success/30 bg-success-soft text-success"
+                          : "border-accent/30 bg-accent-soft text-accent"
+                      }`}
+                    >
+                      {item.turn}
+                    </span>
+                    <span className="min-w-0 rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft transition-shadow group-hover:shadow-md">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-semibold text-text">{item.title}</span>
+                          <span className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-text-secondary">{item.essence}</span>
                         </span>
+                        <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-text-muted opacity-0 transition-opacity group-hover:opacity-100" />
                       </span>
-                      <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-text-muted opacity-0 transition-opacity group-hover:opacity-100" />
-                    </div>
+                      <span className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-text-muted">
+                        <span className="rounded-full bg-surface-page px-1.5 py-0.5">{item.status === "done" ? "已处理" : "进行中"}</span>
+                        {item.sourceCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-surface-page px-1.5 py-0.5">
+                            <FileSearch className="h-3 w-3" />
+                            {item.sourceCount} 证据
+                          </span>
+                        )}
+                        {item.artifactCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent">
+                            <Sparkles className="h-3 w-3" />
+                            {item.artifactCount} 图解
+                          </span>
+                        )}
+                        <span>{formatTimeLabel(item.createdAt)}</span>
+                      </span>
+                    </span>
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
-                暂无线程
+              <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted">
+                暂无会话路线
               </div>
             )}
           </section>
-
-          <section className="mt-5">
-            <div className="mb-2 flex items-center gap-2">
-              <FileSearch className="h-4 w-4 text-text-muted" />
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">近期证据</h3>
-            </div>
-            {recentEvidence.length > 0 ? (
-              <div className="space-y-2">
-                {recentEvidence.map(({ source, sources, index }) => (
+        ) : (
+          <section>
+            {currentSource && selectedSources && (
+              <div className="mb-4 rounded-xl border border-accent/25 bg-accent-soft/25 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <FileSearch className="h-4 w-4 text-accent" />
+                      <h3 className="text-xs font-semibold text-text">当前引用资料</h3>
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-text-muted">
+                      {selectedSources.length} 条引用 · 当前第 {currentSourceIndex + 1} 条
+                    </p>
+                  </div>
                   <button
-                    key={`${source.chunk_id}-${index}`}
-                    onClick={() => onInspectSources(sources, index)}
-                    className="w-full rounded-lg border border-border bg-white px-3 py-2 text-left transition-all hover:border-accent/40 hover:shadow-sm-soft"
+                    onClick={onClearSources}
+                    className="rounded-lg p-1.5 text-text-muted hover:bg-white hover:text-text"
+                    title="关闭当前引用"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-semibold text-text">{source.document_title}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-text-muted">{source.section_path || "未标注章节"}</span>
-                      </span>
-                      <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
-                        {scoreLabel(source.score)}
-                      </span>
-                    </div>
+                    <X className="h-3.5 w-3.5" />
                   </button>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
-                暂无证据
+                </div>
+
+                <div className="mt-3 rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-text">{currentSource.document_title}</p>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-text-muted">
+                        {currentSource.section_path || "未标注章节"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+                      {scoreLabel(currentSource.score)}
+                    </span>
+                  </div>
+                  <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-text-secondary">
+                    {currentSource.content || currentSource.snippet || "暂无片段"}
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => onPreviewSource(currentSource)}
+                      className="rounded-lg border border-border bg-white px-2 py-1.5 text-[11px] font-medium text-text-secondary hover:border-accent/40 hover:text-accent"
+                    >
+                      原文
+                    </button>
+                    <button
+                      onClick={() => onFollowUp(`请详细介绍《${currentSource.document_title}》中"${currentSource.section_path}"的相关内容`)}
+                      className="rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-accent-hover"
+                    >
+                      追问
+                    </button>
+                  </div>
+                  {selectedSources.length > 1 && (
+                    <div className="mt-3 space-y-1">
+                      {selectedSources.slice(0, 6).map((source, index) => (
+                        <button
+                          key={`${source.chunk_id || source.document_id}-${index}`}
+                          onClick={() => onInspectSources(selectedSources, index)}
+                          className={`grid w-full grid-cols-[1.5rem_1fr_auto] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors ${
+                            index === currentSourceIndex ? "bg-accent-soft text-text" : "bg-surface-page text-text-muted hover:text-text"
+                          }`}
+                        >
+                          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-white text-[10px] font-semibold text-accent">
+                            {index + 1}
+                          </span>
+                          <span className="min-w-0 truncate">{source.document_title}</span>
+                          <span>{scoreLabel(source.score)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </section>
 
-          <section className="mt-5">
             <div className="mb-2 flex items-center gap-2">
               <NotebookPen className="h-4 w-4 text-text-muted" />
               <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">会话笔记</h3>
-                <span className="text-[10px] text-text-muted">{noteCount} 条</span>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">知识笔记</h3>
+                <span className="text-[10px] text-text-muted">{notes.length} 条</span>
               </div>
             </div>
+
             <button
               onClick={openNewNoteComposer}
               disabled={!notesWritable}
@@ -399,7 +417,7 @@ export default function ConversationNavigator({
             >
               <span className="flex min-w-0 items-center gap-2">
                 <ClipboardList className="h-4 w-4 shrink-0 text-text-muted" />
-                <span className="truncate text-xs font-medium text-text-secondary">添加本轮要点</span>
+                <span className="truncate text-xs font-medium text-text-secondary">沉淀本轮结论或资料评论</span>
               </span>
               <span className="text-[10px] text-text-muted">{notesWritable ? "可编辑" : "无会话"}</span>
             </button>
@@ -410,12 +428,12 @@ export default function ConversationNavigator({
                   value={noteDraft}
                   onChange={(event) => setNoteDraft(event.target.value)}
                   rows={4}
-                  placeholder="记录当前会话要点。"
+                  placeholder="记录当前会话结论、引用评论、风险提示或人工补充。"
                   className="w-full resize-none rounded-md border border-border bg-surface-page px-3 py-2 text-xs leading-relaxed text-text placeholder:text-text-muted focus:border-accent focus:outline-none"
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="text-[10px] text-text-muted">
-                    {editingNoteId ? "编辑现有笔记" : "新增会话笔记"}
+                    {editingNoteId ? "编辑现有笔记" : "新增知识笔记"}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
@@ -438,7 +456,7 @@ export default function ConversationNavigator({
               </div>
             )}
 
-            <div className="mt-2 space-y-2">
+            <div className="mt-3 space-y-2">
               {notesLoading ? (
                 <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
                   正在加载笔记
@@ -452,7 +470,10 @@ export default function ConversationNavigator({
                         <p className="line-clamp-4 text-xs leading-relaxed text-text-secondary">{note.content}</p>
                         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-text-muted">
                           <span>{formatTimeLabel(note.updated_at)}</span>
-                          <span className="rounded-full bg-surface-page px-1.5 py-0.5 text-[10px] font-medium text-text-muted">会话</span>
+                          <span className="rounded-full bg-surface-page px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                            {noteScopeLabel(note.scope)}
+                          </span>
+                          {note.document_id && <span className="truncate">文档 {truncateText(note.document_id, 18)}</span>}
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
@@ -475,97 +496,22 @@ export default function ConversationNavigator({
                   </div>
                 ))
               ) : (
-                <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
-                  还没有会话笔记
+                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted">
+                  还没有知识笔记
                 </div>
               )}
             </div>
-          </section>
 
-          <section className="mt-5">
-            <div className="mb-2 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-text-muted" />
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">结构化输出</h3>
-                {latestSummary && (
-                  <span className="text-[10px] text-text-muted">最新轮次 {latestSummary.turn}</span>
-                )}
+            <div className="mt-4 rounded-xl border border-border bg-white px-3 py-3 text-[11px] leading-relaxed text-text-muted">
+              <div className="mb-1 flex items-center gap-1.5 font-semibold text-text-secondary">
+                <MessageSquare className="h-3.5 w-3.5" />
+                使用建议
               </div>
+              将回答结论、引用资料评论、线下验证结果和风险提示沉淀在这里，后续会按回答和资料聚合。
             </div>
-            {latestSummary ? (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-border bg-white px-2.5 py-2">
-                    <span className="block text-[10px] text-text-muted">置信度</span>
-                    <span className="block text-sm font-semibold text-text">
-                      {latestSummary.confidence != null ? scoreLabel(latestSummary.confidence) : "未返回"}
-                    </span>
-                  </div>
-                  <div className="rounded-lg border border-border bg-white px-2.5 py-2">
-                    <span className="block text-[10px] text-text-muted">引用</span>
-                    <span className="block text-sm font-semibold text-text">{latestSummary.sourceCount}</span>
-                  </div>
-                  <div className="rounded-lg border border-border bg-white px-2.5 py-2">
-                    <span className="block text-[10px] text-text-muted">检索</span>
-                    <span className="block text-sm font-semibold text-text">{formatDuration(latestSummary.retrievalMs)}</span>
-                  </div>
-                  <div className="rounded-lg border border-border bg-white px-2.5 py-2">
-                    <span className="block text-[10px] text-text-muted">总耗时</span>
-                    <span className="block text-sm font-semibold text-text">{formatDuration(latestSummary.totalMs)}</span>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="h-3.5 w-3.5 text-text-muted" />
-                      <span className="text-xs font-semibold text-text">最新回答</span>
-                    </div>
-                    <span className="text-[10px] text-text-muted">{latestSummary.question}</span>
-                  </div>
-                  <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-text-secondary">{latestSummary.answer}</p>
-                  {latestSummary.followups.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {latestSummary.followups.slice(0, 3).map((question) => (
-                        <button
-                          key={question}
-                          onClick={() => onFollowUp(question)}
-                          className="rounded-full bg-accent-soft px-2.5 py-1 text-[10px] font-medium text-accent hover:bg-accent hover:text-white"
-                        >
-                          {question}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-[10px] text-text-muted">
-                    <span className="rounded-md bg-surface-page px-2 py-1">模型 {formatDuration(latestSummary.llmMs)}</span>
-                    <span className="rounded-md bg-surface-page px-2 py-1">命中 {latestSummary.hitCount ?? "—"}</span>
-                    <span className="rounded-md bg-surface-page px-2 py-1">更新时间 {formatTimeLabel(latestSummary.createdAt)}</span>
-                  </div>
-                </div>
-
-                {structuredSummaries.length > 1 && (
-                  <div className="space-y-1.5">
-                    {structuredSummaries.slice(1).map((item) => (
-                      <div key={item.id} className="rounded-lg border border-border bg-white px-3 py-2 text-xs shadow-sm-soft">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-text">第 {item.turn} 轮</span>
-                          <span className="text-[10px] text-text-muted">{item.sourceCount} 条引用</span>
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-text-secondary">{item.answer}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
-                当前还没有可展示的结构化输出
-              </div>
-            )}
           </section>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -20,6 +20,22 @@
 
 ## 已完成
 
+### 2026-05-26 - 右侧栏瘦身为知识工作台
+
+- Service: web
+- Task: `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。路线图展示当前会话关键问答节点、总结精髓、证据/artifact 状态，并支持点击定位到对应回答；知识笔记展示现有 session/message/source 笔记。
+- Changed:
+  - `ConversationNavigator` 从原来的线程/证据/近期证据/会话笔记/结构化输出混合面板，收敛为 `路线图` 和 `知识笔记` 两个 tab。
+  - 路线图基于当前 messages 推导问答节点、回答精髓、证据数量和 artifact 数量，并支持点击定位到对应回答。
+  - 知识笔记沿用现有 notes CRUD，并在选中引用时显示轻量引用资料上下文，不再新增独立证据 tab。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有既有 warning。
+  - 浏览器 smoke：右侧栏显示 `知识工作台`，只保留 `路线图 / 知识笔记`；旧 `线程 / 证据 / 结构化输出` 不再出现；路线图节点点击可滚动定位聊天消息。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `api`: 新增 `chat_artifacts` 数据表和基础接口，支持按 message 保存、读取、重新生成和软删除 artifact；消息返回时携带 artifacts。
+
 ### 2026-05-25 - 沉淀企业级知识工作台升级方案
 
 - Service: docs
