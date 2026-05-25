@@ -17,6 +17,10 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert any(node.kind == "action" for node in ir.nodes)
     assert any(edge.relation == "condition" for edge in ir.edges)
     assert any("设备报警现象" in keyword for keyword in ir.metadata["keywords"])
+    assert ir.metadata["renderer"] == "positioned-svg"
+    assert all("layout" in node.metadata for node in ir.nodes)
+    assert all("render" in node.metadata for node in ir.nodes)
+    assert all("render" in edge.metadata for edge in ir.edges)
 
 
 def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
@@ -41,6 +45,10 @@ def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
     assert any(node.kind == "evidence" and "安全注意事项" in node.label for node in ir.nodes)
     assert any(edge.relation == "supported_by" for edge in ir.edges)
     assert "risk" in ir.metadata["categories"]
+    assert ir.metadata["renderer"] == "positioned-svg"
+    assert all("layout" in node.metadata for node in ir.nodes)
+    assert all("render" in node.metadata for node in ir.nodes)
+    assert all("render" in edge.metadata for edge in ir.edges)
 
 
 def test_extract_diagram_keywords_prefers_repeated_domain_terms() -> None:

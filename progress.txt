@@ -439,6 +439,26 @@
 - Blockers: 无。
 - Next: 无。
 
+### 2026-05-25 - 调整图谱入口和弹窗渲染
+
+- Service: repo
+- Task: 将 AI 整理入口从右侧栏移到每条回答卡片下方，图谱用弹窗展示，并避免前端写死图结构规则。
+- Changed:
+  - RAG Diagram IR 为节点补充 `metadata.layout` 和 `metadata.render`，并为边补充渲染元数据，使前端按服务端布局和样式渲染。
+  - 前端新增通用 `DiagramModal`，只读取节点、边、viewport、layout 和 render 元数据绘制 SVG。
+  - `ChatThread` 在每条已保存回答下方提供思维导图 / 流程图生成按钮，生成后打开弹窗。
+  - `ConversationNavigator` 移除右侧栏 AI 整理按钮和内嵌图谱预览，右侧栏回归会话导航和结构化摘要。
+  - PRD 明确图谱入口、弹窗展示和“前端不写死图结构规则”的完成标准。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run build:api`
+  - `cd rag && ./.venv/bin/python -m compileall app tests`
+  - `diagram tests ok`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: 等待下一轮任务。
+
 ## 执行提醒
 
 - 每轮只做一个任务。

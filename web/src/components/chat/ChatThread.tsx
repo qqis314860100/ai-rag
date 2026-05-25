@@ -1,7 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil } from "lucide-react";
-import type { ChatMessage, Source } from "../../types";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2 } from "lucide-react";
+import type { ApiResponse, ChatMessage, DiagramIR, DiagramType, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
+import DiagramModal from "./DiagramModal";
 import { api } from "../../services/api";
 import { showToast } from "../ui/Toast";
 
@@ -40,6 +41,21 @@ function canUsePersistedUserActions(messageId: string) {
 function getPersistedMessageId(message: ChatMessage) {
   return message.persistedId || message.id;
 }
+
+function getDiagramKey(messageId: string, diagramType: DiagramType) {
+  return `${messageId}:${diagramType}`;
+}
+
+function getDiagramButtonLabel(diagramType: DiagramType, hasData: boolean) {
+  if (diagramType === "mindmap") return hasData ? "查看思维导图" : "生成思维导图";
+  return hasData ? "查看流程图" : "生成流程图";
+}
+
+type DiagramState = {
+  loading: boolean;
+  data?: DiagramIR;
+  error?: string;
+};
 
 // Empty welcome state with categorized prompt suggestions
 function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
@@ -166,6 +182,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [feedbackReason, setFeedbackReason] = useState<string | null>(null); // message id needing reason
   const [favoriteStatus, setFavoriteStatus] = useState<Record<string, boolean>>({});
   const [favoriting, setFavoriting] = useState<Record<string, boolean>>({});
+  const [diagramStates, setDiagramStates] = useState<Record<string, DiagramState>>({});
+  const [activeDiagram, setActiveDiagram] = useState<DiagramIR | null>(null);
 
   const prevContentLen = useRef(0);
   const scrollRaf = useRef<number>(0);
@@ -393,6 +411,48 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     }
   };
 
+  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType) => {
+    const messageId = getPersistedMessageId(message);
+    if (!canUsePersistedAssistantActions(messageId)) return;
+
+    const key = getDiagramKey(messageId, diagramType);
+    const existing = diagramStates[key];
+    if (existing?.data) {
+      setActiveDiagram(existing.data);
+      return;
+    }
+    if (existing?.loading) return;
+
+    setDiagramStates((prev) => ({
+      ...prev,
+      [key]: { loading: true },
+    }));
+
+    try {
+      const res = await api.post<ApiResponse<DiagramIR>>(
+        `/chat/messages/${encodeURIComponent(messageId)}/diagram`,
+        {
+          diagram_type: diagramType,
+          title: message.content.split("\n")[0]?.slice(0, 40) || "AI 整理",
+        }
+      );
+      setDiagramStates((prev) => ({
+        ...prev,
+        [key]: { loading: false, data: res.data },
+      }));
+      setActiveDiagram(res.data);
+    } catch (error) {
+      setDiagramStates((prev) => ({
+        ...prev,
+        [key]: {
+          loading: false,
+          error: error instanceof Error ? error.message : "生成图谱失败",
+        },
+      }));
+      showToast("error", "生成图谱失败");
+    }
+  };
+
   if (messages.length === 0 && !loading) {
     return <EmptyWelcome onQuestion={onInitialQuestion} />;
   }
@@ -543,6 +603,43 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     ))}
                   </div>
                 )}
+                {canPersistAssistantActions && (
+                  <div className="mt-3 rounded-xl border border-border bg-surface-page px-3 py-2.5">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                        <Sparkles className="h-3.5 w-3.5 text-accent" />
+                        AI 整理
+                      </span>
+                      <span className="text-[11px] text-text-muted">基于本条回答生成</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                    {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
+                      const state = diagramStates[getDiagramKey(persistedMessageId, type)];
+                      const Icon = type === "mindmap" ? Brain : Workflow;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => void generateDiagram(msg, type)}
+                          disabled={state?.loading}
+                          className="inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+                          {getDiagramButtonLabel(type, Boolean(state?.data))}
+                        </button>
+                      );
+                    })}
+                    {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
+                      const state = diagramStates[getDiagramKey(persistedMessageId, type)];
+                      return state?.error ? (
+                        <span key={`${type}-error`} className="text-[11px] text-warning">
+                          {state.error}
+                        </span>
+                      ) : null;
+                    })}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -666,6 +763,10 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             取消
           </button>
         </div>
+      )}
+
+      {activeDiagram && (
+        <DiagramModal diagram={activeDiagram} onClose={() => setActiveDiagram(null)} />
       )}
 
       <div ref={bottomRef} />

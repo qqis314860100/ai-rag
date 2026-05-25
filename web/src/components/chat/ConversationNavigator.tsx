@@ -1,24 +1,20 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BookOpenText,
-  Brain,
   ChevronRight,
   ClipboardList,
   Clock3,
   FileSearch,
   GitBranch,
-  Loader2,
   NotebookPen,
   Pencil,
   Plus,
   Sparkles,
   Trash2,
-  Workflow,
   X,
 } from "lucide-react";
 import SourcePanel from "./SourcePanel";
-import { api } from "../../services/api";
-import type { ApiResponse, ChatMessage, ChatNote, DiagramEdge, DiagramIR, DiagramNode, DiagramType, Source } from "../../types";
+import type { ChatMessage, ChatNote, Source } from "../../types";
 
 type NavigatorView = "thread" | "evidence";
 
@@ -35,12 +31,6 @@ type StructuredSummary = {
   llmMs?: number;
   totalMs?: number;
   hitCount?: number;
-};
-
-type DiagramState = {
-  loading: boolean;
-  data?: DiagramIR;
-  error?: string;
 };
 
 interface ConversationNavigatorProps {
@@ -93,196 +83,6 @@ function formatDuration(ms?: number) {
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
 }
 
-function getDiagramKey(messageId: string, diagramType: DiagramType) {
-  return `${messageId}:${diagramType}`;
-}
-
-function nodeLabel(node: DiagramNode, maxLength = 14) {
-  return truncateText(node.label, maxLength);
-}
-
-function childNodes(parentId: string, edges: DiagramEdge[], nodeById: Map<string, DiagramNode>) {
-  return edges
-    .filter((edge) => edge.source === parentId)
-    .map((edge) => nodeById.get(edge.target))
-    .filter(Boolean) as DiagramNode[];
-}
-
-function diagramTone(node: DiagramNode) {
-  if (node.kind === "root") return "fill-accent-soft stroke-accent/40";
-  if (node.kind === "category") return "fill-white stroke-accent/25";
-  if (node.kind === "decision") return "fill-warning/10 stroke-warning/50";
-  if (node.kind === "action") return "fill-success/10 stroke-success/40";
-  if (node.kind === "evidence") return "fill-surface-page stroke-border";
-  return "fill-white stroke-border";
-}
-
-function MindmapPreview({ diagram }: { diagram: DiagramIR }) {
-  const markerId = useId().replace(/:/g, "");
-  const root = diagram.nodes.find((node) => node.kind === "root") || diagram.nodes[0];
-  const categories = diagram.nodes.filter((node) => node.kind === "category");
-  const nodeById = new Map(diagram.nodes.map((node) => [node.id, node]));
-  const categoryGroups = categories.length > 0 ? categories : childNodes(root.id, diagram.edges, nodeById);
-  const height = Math.max(230, categoryGroups.length * 86 + 46);
-  const centerY = height / 2;
-
-  const layout = categoryGroups.map((category, index) => {
-    const side = index % 2 === 0 ? 1 : -1;
-    const row = Math.floor(index / 2);
-    const y = centerY + (row - Math.floor((categoryGroups.length - 1) / 2)) * 72 + (side < 0 ? 28 : 0);
-    return { category, side, y: Math.max(28, Math.min(height - 42, y)) };
-  });
-
-  return (
-    <div className="rounded-lg border border-border bg-surface-page p-2">
-      <svg viewBox={`0 0 340 ${height}`} className="h-auto w-full" role="img" aria-label={`${diagram.title} 思维导图`}>
-        <defs>
-          <marker id={`${markerId}-mindmap-arrow`} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L6,3 L0,6 Z" className="fill-accent/60" />
-          </marker>
-        </defs>
-        {root && (
-          <g>
-            <circle cx="170" cy={centerY} r="34" className="fill-accent-soft stroke-accent/40" />
-            <text x="170" y={centerY + 4} textAnchor="middle" className="fill-accent text-[10px] font-semibold">
-              {nodeLabel(root, 10)}
-            </text>
-          </g>
-        )}
-        {layout.map(({ category, side, y }) => {
-          const categoryX = side > 0 ? 242 : 98;
-          const keywordX = side > 0 ? 288 : 52;
-          const evidenceX = side > 0 ? 302 : 38;
-          const keywords = childNodes(category.id, diagram.edges, nodeById).filter((node) => node.kind !== "evidence").slice(0, 3);
-          return (
-            <g key={category.id}>
-              <path
-                d={`M${side > 0 ? 204 : 136} ${centerY} C${side > 0 ? 224 : 116} ${centerY}, ${side > 0 ? 220 : 120} ${y}, ${categoryX} ${y}`}
-                className="fill-none stroke-accent/35"
-                strokeWidth="1.5"
-                markerEnd={`url(#${markerId}-mindmap-arrow)`}
-              />
-              <rect x={categoryX - 30} y={y - 15} width="60" height="30" rx="8" className="fill-white stroke-accent/25" />
-              <text x={categoryX} y={y + 4} textAnchor="middle" className="fill-text text-[10px] font-semibold">
-                {nodeLabel(category, 6)}
-              </text>
-              {keywords.map((keyword, keywordIndex) => {
-                const keywordY = y + (keywordIndex - Math.floor((keywords.length - 1) / 2)) * 30;
-                const evidences = childNodes(keyword.id, diagram.edges, nodeById).filter((node) => node.kind === "evidence").slice(0, 1);
-                return (
-                  <g key={keyword.id}>
-                    <path
-                      d={`M${side > 0 ? categoryX + 30 : categoryX - 30} ${y} C${side > 0 ? categoryX + 44 : categoryX - 44} ${y}, ${side > 0 ? keywordX - 42 : keywordX + 42} ${keywordY}, ${side > 0 ? keywordX - 34 : keywordX + 34} ${keywordY}`}
-                      className="fill-none stroke-border"
-                      strokeWidth="1.25"
-                    />
-                    <rect x={keywordX - 34} y={keywordY - 13} width="68" height="26" rx="13" className="fill-white stroke-border" />
-                    <text x={keywordX} y={keywordY + 4} textAnchor="middle" className="fill-text-secondary text-[9px] font-medium">
-                      {nodeLabel(keyword, 9)}
-                    </text>
-                    {evidences.map((evidence) => (
-                      <g key={evidence.id}>
-                        <line
-                          x1={side > 0 ? keywordX + 34 : keywordX - 34}
-                          y1={keywordY}
-                          x2={side > 0 ? evidenceX - 18 : evidenceX + 18}
-                          y2={keywordY}
-                          className="stroke-border"
-                          strokeDasharray="2 3"
-                        />
-                        <circle cx={evidenceX} cy={keywordY} r="10" className="fill-surface-page stroke-border" />
-                      </g>
-                    ))}
-                  </g>
-                );
-              })}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="mt-1 flex flex-wrap gap-1.5">
-        {diagram.nodes.filter((node) => node.kind === "keyword").slice(0, 6).map((node) => (
-          <span key={node.id} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-text-muted">
-            {node.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FlowchartPreview({ diagram }: { diagram: DiagramIR }) {
-  const markerId = useId().replace(/:/g, "");
-  const nodes = diagram.nodes.filter((node) => ["step", "decision", "action"].includes(node.kind)).slice(0, 10);
-  const height = Math.max(170, nodes.length * 72 + 24);
-
-  return (
-    <div className="rounded-lg border border-border bg-surface-page p-2">
-      <svg viewBox={`0 0 340 ${height}`} className="h-auto w-full" role="img" aria-label={`${diagram.title} 流程图`}>
-        <defs>
-          <marker id={`${markerId}-flow-arrow`} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
-            <path d="M0,0 L7,3.5 L0,7 Z" className="fill-text-muted" />
-          </marker>
-        </defs>
-        {nodes.map((node, index) => {
-          const y = 18 + index * 68;
-          const isDecision = node.kind === "decision";
-          const isAction = node.kind === "action";
-          const nextY = y + 68;
-          return (
-            <g key={node.id}>
-              {index < nodes.length - 1 && (
-                <line
-                  x1="170"
-                  y1={isDecision ? y + 48 : y + 42}
-                  x2="170"
-                  y2={nextY - 6}
-                  className="stroke-text-muted"
-                  strokeWidth="1.5"
-                  markerEnd={`url(#${markerId}-flow-arrow)`}
-                />
-              )}
-              {isDecision ? (
-                <path d={`M170 ${y} L246 ${y + 26} L170 ${y + 52} L94 ${y + 26} Z`} className="fill-warning/10 stroke-warning/40" />
-              ) : (
-                <rect x="72" y={y} width="196" height="44" rx="9" className={diagramTone(node)} />
-              )}
-              <text
-                x="170"
-                y={y + (isDecision ? 30 : 26)}
-                textAnchor="middle"
-                className={`text-[10px] font-semibold ${isDecision ? "fill-warning" : isAction ? "fill-success" : "fill-text"}`}
-              >
-                {nodeLabel(node, isDecision ? 14 : 18)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      <div className="mt-1 grid grid-cols-2 gap-1.5 text-[10px] text-text-muted">
-        <span className="rounded-md bg-white px-2 py-1">步骤 {nodes.length}</span>
-        <span className="rounded-md bg-white px-2 py-1">判断 {nodes.filter((node) => node.kind === "decision").length}</span>
-      </div>
-    </div>
-  );
-}
-
-function DiagramPreview({ diagram }: { diagram: DiagramIR }) {
-  if (!diagram.nodes.length) {
-    return (
-      <div className="rounded-lg border border-dashed border-border bg-surface-page px-3 py-4 text-center text-xs text-text-muted">
-        暂无可视化节点
-      </div>
-    );
-  }
-
-  if (diagram.diagram_type === "mindmap") {
-    return <MindmapPreview diagram={diagram} />;
-  }
-
-  return <FlowchartPreview diagram={diagram} />;
-}
-
 export default function ConversationNavigator({
   messages,
   activeTitle,
@@ -306,8 +106,6 @@ export default function ConversationNavigator({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const [diagramType, setDiagramType] = useState<DiagramType>("mindmap");
-  const [diagramStates, setDiagramStates] = useState<Record<string, DiagramState>>({});
 
   useEffect(() => {
     if (selectedSources && selectedSources.length > 0) {
@@ -389,8 +187,6 @@ export default function ConversationNavigator({
   }, [messages]);
 
   const latestSummary = structuredSummaries[0];
-  const latestDiagramKey = latestSummary ? getDiagramKey(latestSummary.id, diagramType) : "";
-  const latestDiagramState = latestDiagramKey ? diagramStates[latestDiagramKey] : undefined;
   const assistantCount = messages.filter((message) => message.role === "assistant").length;
   const noteCount = notes.length;
 
@@ -439,41 +235,6 @@ export default function ConversationNavigator({
     const ok = await onDeleteNote(noteId);
     if (ok && editingNoteId === noteId) {
       closeNoteComposer();
-    }
-  };
-
-  const generateDiagram = async (nextType: DiagramType) => {
-    if (!latestSummary) return;
-    setDiagramType(nextType);
-    const key = getDiagramKey(latestSummary.id, nextType);
-    const existing = diagramStates[key];
-    if (existing?.data || existing?.loading) return;
-
-    setDiagramStates((prev) => ({
-      ...prev,
-      [key]: { loading: true },
-    }));
-
-    try {
-      const res = await api.post<ApiResponse<DiagramIR>>(
-        `/chat/messages/${encodeURIComponent(latestSummary.id)}/diagram`,
-        {
-          diagram_type: nextType,
-          title: latestSummary.question,
-        }
-      );
-      setDiagramStates((prev) => ({
-        ...prev,
-        [key]: { loading: false, data: res.data },
-      }));
-    } catch (error) {
-      setDiagramStates((prev) => ({
-        ...prev,
-        [key]: {
-          loading: false,
-          error: error instanceof Error ? error.message : "生成失败",
-        },
-      }));
     }
   };
 
@@ -781,68 +542,6 @@ export default function ConversationNavigator({
                     <span className="rounded-md bg-surface-page px-2 py-1">命中 {latestSummary.hitCount ?? "—"}</span>
                     <span className="rounded-md bg-surface-page px-2 py-1">更新时间 {formatTimeLabel(latestSummary.createdAt)}</span>
                   </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-3.5 w-3.5 text-text-muted" />
-                      <span className="text-xs font-semibold text-text">AI 整理</span>
-                    </div>
-                    <span className="text-[10px] text-text-muted">
-                      {latestDiagramState?.data
-                        ? `${latestDiagramState.data.nodes.length} 节点`
-                        : "未生成"}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void generateDiagram("mindmap")}
-                      disabled={latestDiagramState?.loading}
-                      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                        diagramType === "mindmap"
-                          ? "border-accent/40 bg-accent-soft text-accent"
-                          : "border-border bg-white text-text-muted hover:border-accent/35 hover:text-text"
-                      }`}
-                    >
-                      {diagramType === "mindmap" && latestDiagramState?.loading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Brain className="h-3.5 w-3.5" />
-                      )}
-                      <span className="truncate">思维导图</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void generateDiagram("flowchart")}
-                      disabled={latestDiagramState?.loading}
-                      className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                        diagramType === "flowchart"
-                          ? "border-accent/40 bg-accent-soft text-accent"
-                          : "border-border bg-white text-text-muted hover:border-accent/35 hover:text-text"
-                      }`}
-                    >
-                      {diagramType === "flowchart" && latestDiagramState?.loading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Workflow className="h-3.5 w-3.5" />
-                      )}
-                      <span className="truncate">流程图</span>
-                    </button>
-                  </div>
-
-                  {latestDiagramState?.error && (
-                    <div className="mt-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[11px] leading-relaxed text-warning">
-                      {latestDiagramState.error}
-                    </div>
-                  )}
-                  {latestDiagramState?.data && (
-                    <div className="mt-3">
-                      <DiagramPreview diagram={latestDiagramState.data} />
-                    </div>
-                  )}
                 </div>
 
                 {structuredSummaries.length > 1 && (

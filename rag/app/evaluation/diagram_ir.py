@@ -260,6 +260,231 @@ def _step_kind(step: str) -> str:
     return "step"
 
 
+def _children_by_source(edges: list[DiagramEdge]) -> dict[str, list[str]]:
+    children: dict[str, list[str]] = {}
+    for edge in edges:
+        children.setdefault(edge.source, []).append(edge.target)
+    return children
+
+
+def _node_by_id(nodes: list[DiagramNode]) -> dict[str, DiagramNode]:
+    return {node.id: node for node in nodes}
+
+
+_NODE_RENDER_STYLES: dict[str, dict[str, Any]] = {
+    "root": {
+        "shape": "rounded",
+        "fill": "#EEF2FF",
+        "stroke": "#4F46E5",
+        "text": "#3730A3",
+        "radius": 18,
+        "fontSize": 15,
+        "fontWeight": 700,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "category": {
+        "shape": "rounded",
+        "fill": "#FFFFFF",
+        "stroke": "#818CF8",
+        "text": "#1F2937",
+        "radius": 14,
+        "fontSize": 13,
+        "fontWeight": 700,
+        "labelMaxLength": 16,
+        "maxLines": 2,
+    },
+    "equipment": {
+        "shape": "rounded",
+        "fill": "#F8FAFC",
+        "stroke": "#64748B",
+        "text": "#334155",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "step": {
+        "shape": "rounded",
+        "fill": "#F0FDF4",
+        "stroke": "#22C55E",
+        "text": "#166534",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 20,
+        "maxLines": 2,
+    },
+    "parameter": {
+        "shape": "rounded",
+        "fill": "#ECFEFF",
+        "stroke": "#06B6D4",
+        "text": "#155E75",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "risk": {
+        "shape": "rounded",
+        "fill": "#FFF7ED",
+        "stroke": "#F97316",
+        "text": "#9A3412",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "action": {
+        "shape": "rounded",
+        "fill": "#F0FDF4",
+        "stroke": "#16A34A",
+        "text": "#166534",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 20,
+        "maxLines": 2,
+    },
+    "decision": {
+        "shape": "diamond",
+        "fill": "#FFFBEB",
+        "stroke": "#D97706",
+        "text": "#92400E",
+        "radius": 0,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "evidence": {
+        "shape": "rounded",
+        "fill": "#F8FAFC",
+        "stroke": "#CBD5E1",
+        "text": "#64748B",
+        "radius": 10,
+        "fontSize": 10,
+        "fontWeight": 500,
+        "labelMaxLength": 16,
+        "maxLines": 2,
+    },
+    "keyword": {
+        "shape": "rounded",
+        "fill": "#FFFFFF",
+        "stroke": "#CBD5E1",
+        "text": "#334155",
+        "radius": 14,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+}
+
+_EDGE_RENDER_STYLES: dict[str, dict[str, Any]] = {
+    "contains": {"stroke": "#94A3B8", "strokeWidth": 1.8, "curve": "horizontal", "arrow": True},
+    "supported_by": {"stroke": "#CBD5E1", "strokeWidth": 1.2, "strokeDasharray": "5 6", "curve": "horizontal", "arrow": False},
+    "sequence": {"stroke": "#64748B", "strokeWidth": 2.0, "curve": "vertical", "arrow": True},
+    "condition": {"stroke": "#D97706", "strokeWidth": 1.8, "curve": "vertical", "arrow": True},
+}
+
+
+def _render_style(tone: str) -> dict[str, Any]:
+    return dict(_NODE_RENDER_STYLES.get(tone) or _NODE_RENDER_STYLES["keyword"])
+
+
+def _set_layout(node: DiagramNode, x: int, y: int, width: int, height: int, tone: str = "") -> None:
+    resolved_tone = tone or node.metadata.get("category") or node.kind
+    node.metadata["layout"] = {"x": x, "y": y, "width": width, "height": height}
+    node.metadata["tone"] = resolved_tone
+    node.metadata["render"] = _render_style(str(resolved_tone))
+
+
+def _apply_edge_render(edges: list[DiagramEdge]) -> None:
+    for edge in edges:
+        edge.metadata["render"] = dict(_EDGE_RENDER_STYLES.get(edge.relation) or _EDGE_RENDER_STYLES["contains"])
+
+
+def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
+    nodes = _node_by_id(ir.nodes)
+    children = _children_by_source(ir.edges)
+    root = next((node for node in ir.nodes if node.kind == "root"), ir.nodes[0] if ir.nodes else None)
+    if not root:
+        return ir
+
+    categories = [nodes[node_id] for node_id in children.get(root.id, []) if node_id in nodes]
+    category_blocks: list[tuple[DiagramNode, list[str], int, int]] = []
+    for index, category in enumerate(categories):
+        keyword_ids = [
+            node_id
+            for node_id in children.get(category.id, [])
+            if nodes.get(node_id) and nodes[node_id].kind != "evidence"
+        ]
+        block_height = max(118, len(keyword_ids) * 56 + 34)
+        side = 1 if index % 2 == 0 else -1
+        category_blocks.append((category, keyword_ids, block_height, side))
+
+    left_height = sum(block_height for _, _, block_height, side in category_blocks if side < 0)
+    right_height = sum(block_height for _, _, block_height, side in category_blocks if side > 0)
+    viewport_height = max(620, max(left_height, right_height) + 180)
+    viewport_width = 980
+    center_x = viewport_width // 2
+    center_y = viewport_height // 2
+    _set_layout(root, center_x - 78, center_y - 34, 156, 68, "root")
+
+    cursors = {
+        1: max(70, (viewport_height - right_height) // 2),
+        -1: max(70, (viewport_height - left_height) // 2),
+    }
+    for category, keyword_ids, block_height, side in category_blocks:
+        y = cursors[side] + block_height // 2
+        cursors[side] += block_height
+        category_x = center_x + side * 230
+        _set_layout(category, category_x - 56, y - 24, 112, 48, "category")
+
+        for keyword_index, keyword_id in enumerate(keyword_ids):
+            keyword = nodes[keyword_id]
+            keyword_y = y + (keyword_index - (len(keyword_ids) - 1) / 2) * 56
+            keyword_x = category_x + side * 185
+            _set_layout(keyword, int(keyword_x - 68), int(keyword_y - 20), 136, 40, keyword.metadata.get("category", "keyword"))
+
+            evidence_ids = [node_id for node_id in children.get(keyword.id, []) if nodes.get(node_id) and nodes[node_id].kind == "evidence"]
+            for evidence_index, evidence_id in enumerate(evidence_ids[:2]):
+                evidence = nodes[evidence_id]
+                evidence_x = keyword_x + side * 140
+                evidence_y = keyword_y + (evidence_index * 30) - 15
+                _set_layout(evidence, int(evidence_x - 46), int(evidence_y - 14), 92, 28, "evidence")
+
+    _apply_edge_render(ir.edges)
+    ir.metadata["viewport"] = {"width": viewport_width, "height": viewport_height}
+    ir.metadata["renderer"] = "positioned-svg"
+    return ir
+
+
+def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
+    flow_nodes = [node for node in ir.nodes if node.kind in {"step", "decision", "action"}]
+    viewport_width = 980
+    viewport_height = max(520, len(flow_nodes) * 118 + 120)
+    center_x = viewport_width // 2
+
+    for index, node in enumerate(flow_nodes):
+        y = 70 + index * 118
+        if node.kind == "decision":
+            _set_layout(node, center_x - 110, y - 36, 220, 72, "decision")
+        elif node.kind == "action":
+            _set_layout(node, center_x - 150, y - 28, 300, 56, "action")
+        else:
+            _set_layout(node, center_x - 150, y - 28, 300, 56, "step")
+
+    _apply_edge_render(ir.edges)
+    ir.metadata["viewport"] = {"width": viewport_width, "height": viewport_height}
+    ir.metadata["renderer"] = "positioned-svg"
+    return ir
+
+
 def build_keyword_diagram_ir(
     title: str,
     content: str,
@@ -353,7 +578,7 @@ def build_keyword_diagram_ir(
                     )
                 )
 
-        return DiagramIR(
+        return _apply_mindmap_layout(DiagramIR(
             title=title,
             objective="基于回答和引用内容提取关键词，生成可渲染的思维导图 IR。",
             diagram_type=diagram_type,
@@ -370,7 +595,7 @@ def build_keyword_diagram_ir(
                 "categories": list(category_nodes.keys()),
                 "keyword_sources": {item["term"]: item.get("source_ids", []) for item in keyword_items},
             },
-        )
+        ))
 
     previous_id = ""
     for index, step in enumerate(steps, 1):
@@ -398,7 +623,7 @@ def build_keyword_diagram_ir(
             )
         previous_id = node_id
 
-    return DiagramIR(
+    return _apply_flowchart_layout(DiagramIR(
         title=title,
         objective="基于回答步骤和关键词生成可渲染的流程图 IR。",
         diagram_type=diagram_type,
@@ -415,7 +640,7 @@ def build_keyword_diagram_ir(
             "keywords": keywords,
             "node_kinds": [node.kind for node in nodes],
         },
-    )
+    ))
 
 
 def build_placeholder_diagram_ir(
