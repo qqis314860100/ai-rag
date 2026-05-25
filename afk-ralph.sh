@@ -96,6 +96,7 @@ build_status() {
     printf '%s\n' "6. 提交信息用 Conventional Commits，描述用中文。"
     printf '%s\n' "7. 如果自动任务队列为空，输出 <promise>COMPLETE</promise>。"
     printf '%s\n' "8. 控制上下文：不要读取整份 PRD、完整 progress、构建产物或长日志；需要证据时只截取关键片段。"
+    printf '%s\n' "9. 验证需要启动 dev server 时，必须复用现有服务，或后台启动并记录 PID / 设置 trap 清理；禁止把长驻服务以前台命令运行。"
     printf '\n%s\n' "请直接执行本轮要做的任务，不要只复述摘要。"
   } > "${STATUS_FILE}"
 }
