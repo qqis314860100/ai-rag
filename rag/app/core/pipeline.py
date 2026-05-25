@@ -1,14 +1,15 @@
 import time
 import logging
-import os
 from .config import config
 from ..parsers.base import ParserRegistry
 from ..parsers.markdown import MarkdownParser
 from ..parsers.text import TxtParser
 from ..parsers.pdf import PdfParser
 from ..parsers.docx import DocxParser
-from ..chunking.chunker import chunk_document, Chunk
+from ..parsers.html import HtmlParser
+from ..chunking.chunker import chunk_document
 from ..cleaning.cleaner import clean_parsed_document
+from ..core.source_metadata import infer_content_kind, infer_file_type, infer_mime_type, normalize_source_format
 from ..embedding.service import embed_query
 from ..retrieval.vector_store import search, upsert_chunks, delete_by_document
 from ..llm.client import chat as llm_chat
@@ -26,6 +27,10 @@ ParserRegistry.register(".markdown", MarkdownParser())
 ParserRegistry.register(".txt", TxtParser())
 ParserRegistry.register(".pdf", PdfParser())
 ParserRegistry.register(".docx", DocxParser())
+ParserRegistry.register(".html", HtmlParser())
+ParserRegistry.register(".htm", HtmlParser())
+for _code_ext in (".json", ".js", ".jsx", ".ts", ".tsx", ".css", ".csv", ".xml", ".yaml", ".yml", ".py", ".sh", ".sql"):
+    ParserRegistry.register(_code_ext, TxtParser())
 
 
 class RagPipeline:
@@ -36,7 +41,7 @@ class RagPipeline:
         self, document_id: str, file_path: str, metadata: dict | None = None
     ) -> dict:
         start = time.time()
-        meta = {**(metadata or {}), "source_format": _detect_source_format(file_path)}
+        meta = _build_ingest_metadata(file_path, metadata)
 
         # 1. Parse document
         parser = ParserRegistry.get(file_path)
@@ -59,6 +64,10 @@ class RagPipeline:
                 "station": meta.get("station", ""),
                 "version": meta.get("version", "v1.0"),
                 "source_format": meta.get("source_format", ""),
+                "file_type": meta.get("file_type", ""),
+                "mime_type": meta.get("mime_type", ""),
+                "content_kind": meta.get("content_kind", ""),
+                "preview_format": meta.get("preview_format", ""),
             })
 
         # 5. Delete old chunks + upsert new
@@ -233,19 +242,25 @@ def _rewrite_query(query: str) -> str:
     return " ".join(parts)
 
 
-def _detect_source_format(file_path: str) -> str:
-    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+def _build_ingest_metadata(file_path: str, metadata: dict | None = None) -> dict:
+    source = metadata or {}
+    file_type = infer_file_type(
+        source.get("file_type"),
+        source.get("source_format"),
+        source.get("mime_type"),
+        file_path=file_path,
+    )
+    mime_type = source.get("mime_type") or infer_mime_type(file_type)
+    content_kind = source.get("content_kind") or infer_content_kind(file_type, mime_type)
+    source_format = normalize_source_format(file_type)
     return {
-        "md": "markdown",
-        "markdown": "markdown",
-        "txt": "text",
-        "text": "text",
-        "pdf": "pdf",
-        "html": "html",
-        "htm": "html",
-        "docx": "docx",
-        "doc": "doc",
-    }.get(ext, ext)
+        **source,
+        "file_type": file_type,
+        "source_format": source_format,
+        "mime_type": mime_type,
+        "content_kind": content_kind,
+        "preview_format": content_kind,
+    }
 
 
 def _keyword_rerank(query: str, hits: list[dict]) -> list[dict]:

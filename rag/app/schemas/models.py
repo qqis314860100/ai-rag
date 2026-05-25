@@ -44,6 +44,7 @@ class SourceDocument(BaseModel):
     title: str = ""
     category: str = ""
     file_type: str = ""
+    source_format: str = ""
     mime_type: str = ""
     security_level: str = ""
     version: str = ""
@@ -148,6 +149,7 @@ class SourceMetadata(BaseModel):
                 title=str(normalized.get("document_title") or document.get("title") or ""),
                 category=str(document.get("category") or metadata.get("category") or ""),
                 file_type=str(document.get("file_type") or normalized.get("file_type") or ""),
+                source_format=str(document.get("source_format") or normalized.get("source_format") or ""),
                 mime_type=str(document.get("mime_type") or normalized.get("mime_type") or ""),
                 security_level=str(document.get("security_level") or metadata.get("security_level") or ""),
                 version=str(document.get("version") or metadata.get("version") or ""),

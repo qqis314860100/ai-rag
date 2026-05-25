@@ -1,5 +1,8 @@
 from app.llm.prompt_builder import extract_sources
 from app.core.source_metadata import build_source_metadata
+from app.core.pipeline import _build_ingest_metadata
+from app.chunking.chunker import chunk_document
+from app.parsers.html import HtmlParser
 from app.retrieval.vector_store import _build_source_context
 from app.schemas.models import SourceMetadata
 
@@ -34,6 +37,8 @@ def test_source_metadata_from_source_preserves_legacy_fields() -> None:
     assert metadata.document.id == "doc_1"
     assert metadata.document.title == "工艺说明"
     assert metadata.document.category == "安全规范"
+    assert metadata.document.file_type == "markdown"
+    assert metadata.document.source_format == "markdown"
     assert metadata.document.available is True
     assert metadata.section.path == "第1章 / 1.1 总则"
     assert metadata.section.title == "总则"
@@ -189,3 +194,44 @@ def test_source_metadata_marks_missing_sections_as_unavailable() -> None:
     assert metadata.offset.available is False
     assert metadata.format.available is False
     assert metadata.snippet_available is False
+
+
+def test_ingest_metadata_records_preview_source_format_for_standard_formats() -> None:
+    cases = [
+        ("guide.md", "md", "markdown", "text/markdown", "markdown"),
+        ("manual.pdf", "pdf", "pdf", "application/pdf", "pdf"),
+        ("page.html", "html", "html", "text/html", "html"),
+        ("snippet.ts", "ts", "ts", "text/typescript", "code"),
+    ]
+
+    for file_path, file_type, source_format, mime_type, content_kind in cases:
+        metadata = _build_ingest_metadata(file_path, {})
+
+        assert metadata["file_type"] == file_type
+        assert metadata["source_format"] == source_format
+        assert metadata["mime_type"] == mime_type
+        assert metadata["content_kind"] == content_kind
+        assert metadata["preview_format"] == content_kind
+
+
+def test_html_parser_and_chunks_keep_source_format_metadata(tmp_path) -> None:
+    html_file = tmp_path / "manual.html"
+    html_file.write_text(
+        "<!doctype html><html><head><title>工艺页面</title><style>body{}</style></head>"
+        "<body><h1>安全规范</h1><p>设备上料前需要确认夹具状态。" * 8
+        + "</p><script>alert(1)</script></body></html>",
+        encoding="utf-8",
+    )
+    metadata = _build_ingest_metadata(str(html_file), {})
+
+    parsed = HtmlParser().parse(str(html_file), "doc_html", metadata)
+    chunks = chunk_document(parsed)
+
+    assert parsed.title == "工艺页面"
+    assert parsed.sections[0]["section_path"] == "安全规范"
+    assert "alert" not in parsed.full_text
+    assert chunks
+    assert chunks[0].metadata["file_type"] == "html"
+    assert chunks[0].metadata["source_format"] == "html"
+    assert chunks[0].metadata["mime_type"] == "text/html"
+    assert chunks[0].metadata["content_kind"] == "html"

@@ -3,7 +3,7 @@ import logging
 import chromadb
 from chromadb.config import Settings
 from ..core.config import config
-from ..core.source_metadata import build_source_metadata, infer_content_kind, infer_mime_type
+from ..core.source_metadata import build_source_metadata, infer_content_kind, infer_mime_type, normalize_source_format
 from ..chunking.chunker import Chunk
 from ..schemas.models import SourceMetadata
 
@@ -61,8 +61,10 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
     for i, c in enumerate(chunks):
         ids.append(c.chunk_id)
         documents.append(c.content)
-        source_format = c.metadata.get("source_format", "")
-        mime_type = c.metadata.get("mime_type") or infer_mime_type(source_format)
+        file_type = c.metadata.get("file_type") or c.metadata.get("source_format", "")
+        source_format = normalize_source_format(c.metadata.get("source_format") or file_type)
+        mime_type = c.metadata.get("mime_type") or infer_mime_type(file_type)
+        content_kind = c.metadata.get("content_kind") or infer_content_kind(file_type, mime_type)
         md = {
             "document_id": c.document_id,
             "document_title": c.metadata.get("title") or c.title,
@@ -81,11 +83,12 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
             "chapter_num": c.metadata.get("chapter_num"),
             "chapter_title": c.metadata.get("chapter_title", ""),
             "source_format": source_format,
-            "file_type": source_format,
+            "file_type": file_type,
             "mime_type": mime_type,
             "document_type": source_format,
             "format": source_format,
-            "content_kind": c.metadata.get("content_kind") or infer_content_kind(source_format, mime_type),
+            "content_kind": content_kind,
+            "preview_format": c.metadata.get("preview_format") or content_kind,
             "offset_start": c.metadata.get("offset_start"),
             "offset_end": c.metadata.get("offset_end"),
             "offset_unit": c.metadata.get("offset_unit", "char"),
@@ -184,6 +187,7 @@ def search(
                 "file_type": metadata.get("file_type") or metadata.get("source_format", ""),
                 "mime_type": metadata.get("mime_type", ""),
                 "format": metadata.get("format") or metadata.get("source_format", ""),
+                "content_kind": metadata.get("content_kind", ""),
                 "category": metadata.get("category", ""),
                 "version": metadata.get("version", ""),
                 "offset_start": metadata.get("offset_start"),

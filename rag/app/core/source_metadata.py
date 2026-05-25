@@ -26,6 +26,7 @@ FILE_TYPE_TO_MIME: dict[str, str] = {
     "py": "text/x-python",
     "sh": "application/x-sh",
     "sql": "application/sql",
+    "code": "text/plain",
 }
 
 MIME_TO_FILE_TYPE: dict[str, str] = {
@@ -112,6 +113,16 @@ def infer_file_type(*values: Any, file_path: str | None = None) -> str:
     return "unknown"
 
 
+def normalize_source_format(file_type: str) -> str:
+    normalized = _trimmed_string(file_type).lower().lstrip(".")
+    return {
+        "md": "markdown",
+        "txt": "text",
+        "plain": "text",
+        "htm": "html",
+    }.get(normalized, normalized or "unknown")
+
+
 def infer_mime_type(file_type: str, fallback: str | None = None) -> str:
     normalized = _trimmed_string(file_type).lower().lstrip(".")
     if not normalized:
@@ -133,7 +144,7 @@ def infer_content_kind(file_type: str, mime_type: str) -> str:
         return "html"
     if normalized == "docx" or normalized_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return "docx"
-    if normalized in {"json", "js", "jsx", "ts", "tsx", "css", "csv", "xml", "yaml", "yml", "py", "sh", "sql"}:
+    if normalized in {"code", "json", "js", "jsx", "ts", "tsx", "css", "csv", "xml", "yaml", "yml", "py", "sh", "sql"}:
         return "code"
     if normalized_mime.startswith("text/"):
         return "text"
@@ -228,12 +239,12 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     offset = dict(payload.get("offset") or {})
 
     file_type = infer_file_type(
-        payload.get("source_format"),
         payload.get("file_type"),
+        payload.get("source_format"),
         payload.get("document_type"),
         payload.get("format"),
-        metadata.get("source_format"),
         metadata.get("file_type"),
+        metadata.get("source_format"),
         metadata.get("document_type"),
         metadata.get("format"),
         metadata.get("source_type"),
@@ -243,6 +254,7 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     mime_type = _trimmed_string(payload.get("mime_type")) or _trimmed_string(metadata.get("mime_type")) or infer_mime_type(file_type)
     content_kind = _trimmed_string(payload.get("content_kind")) or _trimmed_string(metadata.get("content_kind")) or infer_content_kind(file_type, mime_type)
+    source_format = normalize_source_format(file_type)
 
     page_number = _first_int(payload.get("page_number"), page.get("number"), metadata.get("page_number"))
     page_available = bool(page.get("available")) or page_number > 0
@@ -282,6 +294,7 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         "security_level": _trimmed_string(document.get("security_level")) or _trimmed_string(metadata.get("security_level")),
         "status": _trimmed_string(document.get("status")) or _trimmed_string(metadata.get("status")),
         "file_type": file_type,
+        "source_format": source_format,
         "mime_type": mime_type,
         "available": document_available,
     }
@@ -317,9 +330,10 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     normalized_metadata = {
         **metadata,
         "file_type": file_type,
+        "source_format": source_format,
         "mime_type": mime_type,
-        "format": file_type,
-        "document_type": file_type,
+        "format": source_format,
+        "document_type": source_format,
         "content_kind": content_kind,
         "format_available": format_available,
         "page_number": page_number,
@@ -349,10 +363,11 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
             "offset_end": offset_end,
             "snippet": snippet,
             "content": content,
-            "format": file_type,
+            "format": source_format,
             "file_type": file_type,
+            "source_format": source_format,
             "mime_type": mime_type,
-            "document_type": file_type,
+            "document_type": source_format,
             "content_kind": content_kind,
             "format_available": format_available,
             "page": page,

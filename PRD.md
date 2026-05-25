@@ -74,7 +74,7 @@
 
 - [x] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
 - [x] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
-- [ ] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
+- [x] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
 - [x] `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
 
 ### 仓库与 Ralph
