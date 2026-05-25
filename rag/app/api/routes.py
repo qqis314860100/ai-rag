@@ -1,11 +1,10 @@
 import time
 import json
 import logging
-import re
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from ..core.pipeline import RagPipeline, _estimate_confidence, _suggest_followups
-from ..evaluation import DiagramIR, build_placeholder_diagram_ir
+from ..evaluation import DiagramIR, build_keyword_diagram_ir
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
@@ -149,43 +148,6 @@ def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _extract_diagram_steps(content: str, max_steps: int) -> list[str]:
-    cleaned = content.strip()
-    candidates: list[str] = []
-
-    numbered_content = re.sub(
-        r"(^|[。；;.!?！？\s])(?:\d+[.)、]|[一二三四五六七八九十]+[、.])\s*",
-        lambda match: f"{match.group(1)}\n",
-        cleaned,
-    )
-
-    for block in re.split(r"[\r\n]+", numbered_content):
-        block = block.strip()
-        if not block:
-            continue
-        for part in re.split(r"[。；;.!?！？]+", block):
-            line = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)、]\s*|[一二三四五六七八九十]+[、.]\s*)", "", part).strip()
-            if line:
-                candidates.append(line)
-
-    steps: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        normalized = re.sub(r"\s+", " ", candidate).strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        steps.append(normalized[:80])
-        if len(steps) >= max_steps:
-            break
-
-    if len(steps) < 2 and cleaned:
-        compact = re.sub(r"\s+", " ", cleaned)
-        steps = [compact[index:index + 36] for index in range(0, min(len(compact), 36 * max_steps), 36)]
-
-    return steps[:max_steps] or ["整理回答要点", "检查关联证据"]
-
-
 @router.post("/diagram/generate", response_model=DiagramIR)
 def generate_diagram(request: DiagramGenerateRequest):
     try:
@@ -195,11 +157,12 @@ def generate_diagram(request: DiagramGenerateRequest):
         if not request.content.strip():
             raise HTTPException(status_code=400, detail="content is required")
 
-        return build_placeholder_diagram_ir(
+        return build_keyword_diagram_ir(
             title=request.title.strip() or "AI 整理",
-            steps=_extract_diagram_steps(request.content, request.max_steps),
+            content=request.content,
             source_ids=request.source_ids,
             diagram_type=diagram_type,
+            max_steps=request.max_steps,
         )
     except HTTPException:
         raise
