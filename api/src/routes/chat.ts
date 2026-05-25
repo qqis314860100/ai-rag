@@ -9,6 +9,7 @@ import { listMessagesBySession, createMessage, formatMessage, deleteMessageAndTr
 import { getMessageSourceDetail, listMessageSourceDetails } from "../db/messageSources";
 import { NOTE_OWNERSHIP_CONTRACT, createNote, formatNote, isNoteScope, listNotes, softDeleteNote, updateNote } from "../db/chatNotes";
 import type { NoteTarget } from "../db/chatNotes";
+import { createArtifact, formatArtifact, getArtifactById, listArtifactsByMessage, softDeleteArtifact, updateArtifact } from "../db/chatArtifacts";
 import { getDb } from "../db/index";
 
 const router = Router();
@@ -52,6 +53,114 @@ function buildDiagramContent(answer: string, sources: Array<Record<string, unkno
     );
   });
   return blocks.join("\n\n");
+}
+
+function normalizeDiagramType(value: unknown): "mindmap" | "flowchart" {
+  const rawDiagramType = typeof value === "string" ? value : "mindmap";
+  if (rawDiagramType !== "mindmap" && rawDiagramType !== "flowchart") {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "diagram_type 必须是 mindmap 或 flowchart。", 400);
+  }
+  return rawDiagramType;
+}
+
+function artifactRenderer(payload: { metadata?: Record<string, unknown> }): string {
+  const renderer = payload.metadata?.renderer;
+  return typeof renderer === "string" && renderer.trim() ? renderer : "diagram-ir";
+}
+
+function artifactSummary(payload: { nodes?: unknown[]; edges?: unknown[] }): string {
+  const nodeCount = Array.isArray(payload.nodes) ? payload.nodes.length : 0;
+  const edgeCount = Array.isArray(payload.edges) ? payload.edges.length : 0;
+  return `${nodeCount} 个节点，${edgeCount} 条连线`;
+}
+
+function requireReadableAssistantMessage(req: Request, messageId: string, action: string) {
+  const existing = getMessageById(messageId);
+  if (!existing) {
+    throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
+  }
+
+  const session = getSessionById(existing.session_id);
+  if (!session) {
+    throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
+  }
+  if (!canReadSession(req, session.user_id)) {
+    throw new AppError(ErrorCodes.FORBIDDEN, `当前用户无权限${action}该回答。`, 403);
+  }
+  if (existing.role !== "assistant") {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能处理回答消息。", 400);
+  }
+
+  return { existing, session };
+}
+
+async function buildDiagramForMessage(
+  req: Request,
+  messageId: string,
+  diagramType: "mindmap" | "flowchart",
+  titleInput?: unknown
+) {
+  const { existing, session } = requireReadableAssistantMessage(req, messageId, "整理");
+  const formatted = formatMessage(existing) as { sources?: Array<Record<string, unknown>>; confidence?: number };
+  const sourceIds = (formatted.sources || [])
+    .map((source) => source.chunk_id)
+    .filter((chunkId): chunkId is string => typeof chunkId === "string" && chunkId.length > 0);
+
+  const title = typeof titleInput === "string" && titleInput.trim()
+    ? titleInput.trim()
+    : session.title || "AI 整理";
+  const diagram = await generateDiagramIR(
+    title,
+    buildDiagramContent(existing.content, formatted.sources || []),
+    diagramType,
+    sourceIds,
+    req.requestId
+  );
+
+  return { diagram, existing, sourceIds, title, confidence: formatted.confidence ?? 0 };
+}
+
+async function generateDiagramArtifact(
+  req: Request,
+  messageId: string,
+  diagramType: "mindmap" | "flowchart",
+  titleInput?: unknown
+) {
+  const { diagram, existing, sourceIds, title, confidence } = await buildDiagramForMessage(
+    req,
+    messageId,
+    diagramType,
+    titleInput
+  );
+
+  const artifact = createArtifact({
+    sessionId: existing.session_id,
+    messageId,
+    type: diagramType,
+    renderer: artifactRenderer(diagram),
+    title,
+    summary: artifactSummary(diagram),
+    reason: "基于回答正文和引用证据生成结构化图解。",
+    confidence,
+    payload: diagram,
+    sourceIds,
+    metadata: {
+      diagram_type: diagramType,
+      objective: diagram.objective,
+      layout_hint: diagram.layout_hint,
+    },
+  });
+
+  auditFromRequest(req, "chat.artifact.generate", "chat_message", messageId, {
+    session_id: existing.session_id,
+    artifact_id: artifact.id,
+    artifact_type: diagramType,
+    node_count: diagram.nodes.length,
+    edge_count: diagram.edges.length,
+    source_count: sourceIds.length,
+  });
+
+  return { diagram, artifact, sourceIds, existing };
 }
 
 function requireReadableSession(req: Request, sessionId: string): ReturnType<typeof getSessionById> {
@@ -587,42 +696,8 @@ router.get("/chat/messages/:id/sources/:sourceId", async (req: Request, res: Res
 router.post("/chat/messages/:id/diagram", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const messageId = req.params.id as string;
-    const existing = getMessageById(messageId);
-    if (!existing) {
-      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
-    }
-
-    const session = getSessionById(existing.session_id);
-    if (!session) {
-      throw new AppError(ErrorCodes.SESSION_NOT_FOUND, "会话不存在。", 404);
-    }
-    if (!canReadSession(req, session.user_id)) {
-      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限整理该回答。", 403);
-    }
-    if (existing.role !== "assistant") {
-      throw new AppError(ErrorCodes.VALIDATION_ERROR, "只能整理回答消息。", 400);
-    }
-
-    const rawDiagramType = typeof req.body?.diagram_type === "string" ? req.body.diagram_type : "mindmap";
-    if (rawDiagramType !== "mindmap" && rawDiagramType !== "flowchart") {
-      throw new AppError(ErrorCodes.VALIDATION_ERROR, "diagram_type 必须是 mindmap 或 flowchart。", 400);
-    }
-
-    const formatted = formatMessage(existing) as { sources?: Array<Record<string, unknown>> };
-    const sourceIds = (formatted.sources || [])
-      .map((source) => source.chunk_id)
-      .filter((chunkId): chunkId is string => typeof chunkId === "string" && chunkId.length > 0);
-
-    const title = typeof req.body?.title === "string" && req.body.title.trim()
-      ? req.body.title.trim()
-      : session.title || "AI 整理";
-    const diagram = await generateDiagramIR(
-      title,
-      buildDiagramContent(existing.content, formatted.sources || []),
-      rawDiagramType,
-      sourceIds,
-      req.requestId
-    );
+    const rawDiagramType = normalizeDiagramType(req.body?.diagram_type);
+    const { diagram, existing, sourceIds } = await generateDiagramArtifact(req, messageId, rawDiagramType, req.body?.title);
 
     auditFromRequest(req, "chat.diagram.generate", "chat_message", messageId, {
       session_id: existing.session_id,
@@ -633,6 +708,94 @@ router.post("/chat/messages/:id/diagram", async (req: Request, res: Response, ne
     });
 
     sendSuccess(res, diagram, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/messages/:id/artifacts - 查询某条回答已持久化的产物
+router.get("/chat/messages/:id/artifacts", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    requireReadableAssistantMessage(req, messageId, "查看");
+    const artifacts = listArtifactsByMessage(messageId).map(formatArtifact);
+    sendSuccess(res, { items: artifacts }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/chat/messages/:id/artifacts/generate - 为某条回答生成并保存产物
+router.post("/chat/messages/:id/artifacts/generate", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const diagramType = normalizeDiagramType(req.body?.diagram_type ?? req.body?.type);
+    const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, req.body?.title);
+    sendSuccess(res, formatArtifact(artifact), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/chat/artifacts/:id/regenerate - 重新生成已有产物内容
+router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const artifactId = req.params.id as string;
+    const artifact = getArtifactById(artifactId);
+    if (!artifact || artifact.status === "deleted") {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "Artifact 不存在。", 404);
+    }
+
+    requireReadableAssistantMessage(req, artifact.message_id, "重新生成");
+    const diagramType = normalizeDiagramType(req.body?.diagram_type ?? artifact.type);
+    const { diagram, sourceIds } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
+    const updated = updateArtifact(artifactId, {
+      type: diagramType,
+      renderer: artifactRenderer(diagram),
+      title: typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : artifact.title,
+      summary: artifactSummary(diagram),
+      reason: "重新生成结构化图解。",
+      status: "ready",
+      payload: diagram,
+      sourceIds,
+      metadata: {
+        ...JSON.parse(artifact.metadata_json || "{}"),
+        diagram_type: diagramType,
+        objective: diagram.objective,
+        layout_hint: diagram.layout_hint,
+        regenerated_from: artifactId,
+      },
+    });
+
+    auditFromRequest(req, "chat.artifact.regenerate", "chat_artifact", artifactId, {
+      message_id: artifact.message_id,
+      artifact_type: diagramType,
+    });
+
+    sendSuccess(res, formatArtifact(updated!), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/chat/artifacts/:id - 软删除单个产物
+router.delete("/chat/artifacts/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const artifactId = req.params.id as string;
+    const artifact = getArtifactById(artifactId);
+    if (!artifact || artifact.status === "deleted") {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "Artifact 不存在。", 404);
+    }
+
+    requireReadableAssistantMessage(req, artifact.message_id, "删除");
+    softDeleteArtifact(artifactId);
+
+    auditFromRequest(req, "chat.artifact.delete", "chat_artifact", artifactId, {
+      message_id: artifact.message_id,
+      artifact_type: artifact.type,
+    });
+
+    sendSuccess(res, { deleted: true }, req.requestId);
   } catch (err) {
     next(err);
   }

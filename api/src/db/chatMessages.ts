@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "./index";
 import { touchSession } from "./chatSessions";
+import { formatArtifact, listArtifactsByMessage } from "./chatArtifacts";
 
 export interface ChatMessageRow {
   id: string;
@@ -144,6 +145,7 @@ export function formatMessage(row: ChatMessageRow) {
     sources: JSON.parse(row.sources_json || "[]"),
     confidence: metadata.confidence as number | undefined,
     followups: metadata.followups as string[] | undefined,
+    artifacts: listArtifactsByMessage(row.id).map(formatArtifact),
     metadata,
     latency_ms: row.latency_ms,
     created_at: row.created_at,
