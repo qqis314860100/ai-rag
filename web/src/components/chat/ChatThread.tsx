@@ -1,8 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2 } from "lucide-react";
-import type { ApiResponse, ChatMessage, DiagramIR, DiagramType, Source } from "../../types";
+import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
-import DiagramModal from "./DiagramModal";
+import ArtifactCard from "./ArtifactCard";
+import ArtifactModal from "./ArtifactModal";
 import { api } from "../../services/api";
 import { showToast } from "../ui/Toast";
 
@@ -53,9 +54,17 @@ function getDiagramButtonLabel(diagramType: DiagramType, hasData: boolean) {
 
 type DiagramState = {
   loading: boolean;
-  data?: DiagramIR;
+  data?: ChatArtifact;
   error?: string;
 };
+
+function mergeArtifacts(base: ChatArtifact[] | undefined, extra: ChatArtifact[] | undefined) {
+  const byId = new Map<string, ChatArtifact>();
+  [...(base || []), ...(extra || [])].forEach((artifact) => {
+    if (artifact.status !== "deleted") byId.set(artifact.id, artifact);
+  });
+  return Array.from(byId.values());
+}
 
 // Empty welcome state with categorized prompt suggestions
 function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
@@ -183,7 +192,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [favoriteStatus, setFavoriteStatus] = useState<Record<string, boolean>>({});
   const [favoriting, setFavoriting] = useState<Record<string, boolean>>({});
   const [diagramStates, setDiagramStates] = useState<Record<string, DiagramState>>({});
-  const [activeDiagram, setActiveDiagram] = useState<DiagramIR | null>(null);
+  const [generatedArtifacts, setGeneratedArtifacts] = useState<Record<string, ChatArtifact[]>>({});
+  const [activeArtifact, setActiveArtifact] = useState<ChatArtifact | null>(null);
 
   const prevContentLen = useRef(0);
   const scrollRaf = useRef<number>(0);
@@ -411,14 +421,19 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     }
   };
 
-  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType) => {
+  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType, existingArtifact?: ChatArtifact) => {
     const messageId = getPersistedMessageId(message);
     if (!canUsePersistedAssistantActions(messageId)) return;
+
+    if (existingArtifact?.status === "ready") {
+      setActiveArtifact(existingArtifact);
+      return;
+    }
 
     const key = getDiagramKey(messageId, diagramType);
     const existing = diagramStates[key];
     if (existing?.data) {
-      setActiveDiagram(existing.data);
+      setActiveArtifact(existing.data);
       return;
     }
     if (existing?.loading) return;
@@ -429,18 +444,23 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     }));
 
     try {
-      const res = await api.post<ApiResponse<DiagramIR>>(
-        `/chat/messages/${encodeURIComponent(messageId)}/diagram`,
+      const res = await api.post<ApiResponse<ChatArtifact>>(
+        `/chat/messages/${encodeURIComponent(messageId)}/artifacts/generate`,
         {
           diagram_type: diagramType,
+          type: diagramType,
           title: message.content.split("\n")[0]?.slice(0, 40) || "AI 整理",
         }
       );
+      setGeneratedArtifacts((prev) => ({
+        ...prev,
+        [messageId]: mergeArtifacts(prev[messageId], [res.data]),
+      }));
       setDiagramStates((prev) => ({
         ...prev,
         [key]: { loading: false, data: res.data },
       }));
-      setActiveDiagram(res.data);
+      setActiveArtifact(res.data);
     } catch (error) {
       setDiagramStates((prev) => ({
         ...prev,
@@ -466,6 +486,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
         const userBranchActionsDisabled = loading || !canPersistUserActions;
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
+        const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
 
         return (
           <div
@@ -567,6 +588,14 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               )}
             </div>
 
+            {!isUser && !msg.streaming && messageArtifacts.length > 0 && (
+              <div className="mt-3 w-full max-w-[80%] space-y-2">
+                {messageArtifacts.map((artifact) => (
+                  <ArtifactCard key={artifact.id} artifact={artifact} onOpen={setActiveArtifact} />
+                ))}
+              </div>
+            )}
+
             {/* AI: sources + follow-ups (hidden while streaming) */}
             {!isUser && !msg.streaming && (
               <>
@@ -615,17 +644,18 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     <div className="flex flex-wrap items-center gap-2">
                     {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
                       const state = diagramStates[getDiagramKey(persistedMessageId, type)];
+                      const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.diagram_type === type);
                       const Icon = type === "mindmap" ? Brain : Workflow;
                       return (
                         <button
                           key={type}
                           type="button"
-                          onClick={() => void generateDiagram(msg, type)}
+                          onClick={() => void generateDiagram(msg, type, state?.data || existingArtifact)}
                           disabled={state?.loading}
                           className="inline-flex min-w-[132px] items-center justify-center gap-1.5 rounded-lg border border-border bg-white px-3 py-2 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
-                          {getDiagramButtonLabel(type, Boolean(state?.data))}
+                          {getDiagramButtonLabel(type, Boolean(state?.data || existingArtifact))}
                         </button>
                       );
                     })}
@@ -765,8 +795,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         </div>
       )}
 
-      {activeDiagram && (
-        <DiagramModal diagram={activeDiagram} onClose={() => setActiveDiagram(null)} />
+      {activeArtifact && (
+        <ArtifactModal artifact={activeArtifact} onClose={() => setActiveArtifact(null)} />
       )}
 
       <div ref={bottomRef} />

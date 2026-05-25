@@ -111,7 +111,7 @@
 
 - [x] `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。路线图展示当前会话关键问答节点、总结精髓、证据/artifact 状态，并支持点击定位到对应回答；知识笔记展示现有 session/message/source 笔记。
 - [x] `api`: 新增 `chat_artifacts` 数据表和基础接口，支持按 message 保存、读取、重新生成和软删除 artifact；消息返回时携带 artifacts。
-- [ ] `web`: 新增通用 `ArtifactCard` / `ArtifactModal` 渲染层，将回答中的 artifacts 直接显示在对应回答下方，而不是放在右侧栏或只通过按钮触发。
+- [x] `web`: 新增通用 `ArtifactCard` / `ArtifactModal` 渲染层，将回答中的 artifacts 直接显示在对应回答下方，而不是放在右侧栏或只通过按钮触发。
 - [ ] `rag`: 将现有 Diagram IR 升级为可输出 Excalidraw scene 的 artifact payload，保留来源证据、生成理由和置信度。
 - [ ] `web`: 引入 `@excalidraw/excalidraw`，用只读白板图解替换当前手写 SVG 图谱弹窗。
 - [ ] `rag` / `api`: 增加 Visual Planner，基于问题、回答、引用和置信度判断是否自动生成流程图、架构图、思维导图、表格或图片 artifact。

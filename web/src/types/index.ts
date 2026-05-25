@@ -91,6 +91,7 @@ export interface ChatMessage {
   confidence?: number;
   followups?: string[];
   metadata?: Record<string, unknown> & { trace?: ChatMessageTrace };
+  artifacts?: ChatArtifact[];
   latency_ms?: number | null;
   created_at: string;
   streaming?: boolean;
@@ -145,6 +146,26 @@ export interface DiagramIR {
   edges: DiagramEdge[];
   notes: string[];
   metadata: Record<string, unknown>;
+}
+
+export type ArtifactStatus = "pending" | "ready" | "failed" | "deleted";
+
+export interface ChatArtifact {
+  id: string;
+  session_id: string;
+  message_id: string;
+  type: string;
+  renderer: string;
+  title: string;
+  summary: string;
+  reason: string;
+  status: ArtifactStatus;
+  confidence: number;
+  payload: unknown;
+  source_ids: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SearchHit {

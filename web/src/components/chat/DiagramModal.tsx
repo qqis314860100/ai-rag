@@ -177,10 +177,48 @@ function DiagramNodeShape({ node, layout }: { node: DiagramNode; layout: NodeLay
   );
 }
 
-export default function DiagramModal({ diagram, onClose }: DiagramModalProps) {
+export function DiagramCanvas({ diagram }: { diagram: DiagramIR }) {
   const markerId = useId().replace(/:/g, "");
   const viewport = getViewport(diagram);
   const nodeLayouts = new Map(diagram.nodes.map((node, index) => [node.id, getNodeLayout(node, index)]));
+
+  return (
+    <svg
+      viewBox={`0 0 ${viewport.width} ${viewport.height}`}
+      className="min-w-[860px] rounded-2xl border border-border bg-white shadow-sm-soft"
+      role="img"
+      aria-label={`${diagram.title} ${diagram.diagram_type === "flowchart" ? "流程图" : "思维导图"}`}
+    >
+      <defs>
+        <marker id={`${markerId}-arrow`} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 Z" fill="#64748B" />
+        </marker>
+      </defs>
+      {diagram.edges.map((edge, index) => {
+        const source = nodeLayouts.get(edge.source);
+        const target = nodeLayouts.get(edge.target);
+        if (!source || !target) return null;
+        const render = getEdgeRender(edge);
+        return (
+          <path
+            key={`${edge.source}-${edge.target}-${index}`}
+            d={edgePath(source, target)}
+            fill="none"
+            stroke={render.stroke}
+            strokeWidth={render.strokeWidth}
+            strokeDasharray={render.strokeDasharray}
+            markerEnd={render.arrow ? `url(#${markerId}-arrow)` : undefined}
+          />
+        );
+      })}
+      {diagram.nodes.map((node, index) => (
+        <DiagramNodeShape key={node.id} node={node} layout={nodeLayouts.get(node.id) || getNodeLayout(node, index)} />
+      ))}
+    </svg>
+  );
+}
+
+export default function DiagramModal({ diagram, onClose }: DiagramModalProps) {
   const nodeCount = diagram.nodes.length;
   const edgeCount = diagram.edges.length;
 
@@ -226,38 +264,7 @@ export default function DiagramModal({ diagram, onClose }: DiagramModalProps) {
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto bg-surface-page p-5">
-          <svg
-            viewBox={`0 0 ${viewport.width} ${viewport.height}`}
-            className="min-w-[860px] rounded-2xl border border-border bg-white shadow-sm-soft"
-            role="img"
-            aria-label={`${diagram.title} ${diagram.diagram_type === "flowchart" ? "流程图" : "思维导图"}`}
-          >
-            <defs>
-              <marker id={`${markerId}-arrow`} markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
-                <path d="M0,0 L9,4.5 L0,9 Z" fill="#64748B" />
-              </marker>
-            </defs>
-            {diagram.edges.map((edge, index) => {
-              const source = nodeLayouts.get(edge.source);
-              const target = nodeLayouts.get(edge.target);
-              if (!source || !target) return null;
-              const render = getEdgeRender(edge);
-              return (
-                <path
-                  key={`${edge.source}-${edge.target}-${index}`}
-                  d={edgePath(source, target)}
-                  fill="none"
-                  stroke={render.stroke}
-                  strokeWidth={render.strokeWidth}
-                  strokeDasharray={render.strokeDasharray}
-                  markerEnd={render.arrow ? `url(#${markerId}-arrow)` : undefined}
-                />
-              );
-            })}
-            {diagram.nodes.map((node, index) => (
-              <DiagramNodeShape key={node.id} node={node} layout={nodeLayouts.get(node.id) || getNodeLayout(node, index)} />
-            ))}
-          </svg>
+          <DiagramCanvas diagram={diagram} />
         </div>
       </div>
     </div>
