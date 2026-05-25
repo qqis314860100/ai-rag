@@ -73,6 +73,14 @@ function formatTimeLabel(iso?: string) {
   });
 }
 
+function formatShortDate(iso?: string) {
+  if (!iso) return "刚刚";
+  return new Date(iso).toLocaleDateString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  });
+}
+
 function artifactCount(message?: ChatMessage) {
   const withArtifacts = message as (ChatMessage & { artifacts?: unknown[] }) | undefined;
   if (Array.isArray(withArtifacts?.artifacts)) return withArtifacts.artifacts.length;
@@ -105,7 +113,7 @@ function buildRoadmap(messages: ChatMessage[]): RoadmapItem[] {
         turn,
         title: truncateText(message.content || "未命名问题", 40),
         essence: answer
-          ? truncateText(answer.content || "该轮回答尚无摘要", 78)
+          ? truncateText(answer.content || "该轮回答尚无摘要", 44)
           : "等待知识库回答生成后沉淀要点。",
         status: answer ? "done" : "active",
         sourceCount,
@@ -276,46 +284,43 @@ export default function ConversationNavigator({
             </div>
 
             {roadmap.length > 0 ? (
-              <div className="relative space-y-3">
-                <div className="absolute bottom-4 left-[13px] top-4 w-px bg-border" />
+              <div className="space-y-2">
                 {roadmap.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => scrollToMessage(item.targetId)}
-                    className="group relative grid w-full grid-cols-[1.75rem_1fr] gap-2 rounded-xl border border-transparent px-1.5 py-1.5 text-left transition-colors hover:border-accent/30 hover:bg-accent-soft/35"
+                    className="group w-full rounded-xl border border-border bg-white px-3 py-2.5 text-left shadow-sm-soft transition-all hover:border-accent/35 hover:bg-accent-soft/25"
                   >
-                    <span
-                      className={`z-10 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold ${
-                        item.status === "done"
-                          ? "border-success/30 bg-success-soft text-success"
-                          : "border-accent/30 bg-accent-soft text-accent"
-                      }`}
-                    >
-                      {item.turn}
-                    </span>
-                    <span className="min-w-0 rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft transition-shadow group-hover:shadow-md">
-                      <span className="flex items-start justify-between gap-2">
-                        <span className="min-w-0">
-                          <span className="block truncate text-xs font-semibold text-text">{item.title}</span>
-                          <span className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-text-secondary">{item.essence}</span>
+                    <span className="block min-w-0">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                            item.status === "done"
+                              ? "bg-success-soft text-success"
+                              : "bg-accent-soft text-accent"
+                          }`}
+                        >
+                          {item.turn}
                         </span>
-                        <ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-text-muted opacity-0 transition-opacity group-hover:opacity-100" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">{item.title}</span>
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted opacity-0 transition-opacity group-hover:opacity-100" />
                       </span>
-                      <span className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-text-muted">
+                      <span className="mt-0.5 block truncate text-xs leading-5 text-text-secondary">{item.essence}</span>
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-text-muted">
                         <span className="rounded-full bg-surface-page px-1.5 py-0.5">{item.status === "done" ? "已处理" : "进行中"}</span>
                         {item.sourceCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-surface-page px-1.5 py-0.5">
                             <FileSearch className="h-3 w-3" />
-                            {item.sourceCount} 证据
+                            {item.sourceCount}
                           </span>
                         )}
                         {item.artifactCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent">
                             <Sparkles className="h-3 w-3" />
-                            {item.artifactCount} 图解
+                            {item.artifactCount}
                           </span>
                         )}
-                        <span>{formatTimeLabel(item.createdAt)}</span>
+                        <span>{formatShortDate(item.createdAt)}</span>
                       </span>
                     </span>
                   </button>
