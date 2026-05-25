@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from pydantic import BaseModel, Field
 from ..core.source_metadata import build_source_metadata
 
@@ -296,6 +296,132 @@ class ChatTrace(BaseModel):
     total_ms: int = 0
 
 
+AnswerStatus = Literal["answered", "partial", "insufficient_context", "error"]
+AnswerWarningSeverity = Literal["info", "warning", "error"]
+
+
+class AnswerQueryRewrite(BaseModel):
+    original_query: str = ""
+    rewritten_query: str = ""
+    changed: bool = False
+    strategy: str = "none"
+    reason: str = ""
+
+
+class AnswerCitation(BaseModel):
+    id: str
+    source_index: int = 0
+    chunk_id: str = ""
+    document_id: str = ""
+    document_title: str = ""
+    section_path: str = ""
+    page_number: int = 0
+    offset_start: int | None = None
+    offset_end: int | None = None
+    snippet: str = ""
+    score: float = 0.0
+    source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
+
+    @classmethod
+    def from_source(cls, source: Mapping[str, Any], index: int) -> "AnswerCitation":
+        source_id = str(source.get("id") or source.get("chunk_id") or f"source-{index}")
+        return cls(
+            id=source_id,
+            source_index=index,
+            chunk_id=str(source.get("chunk_id") or ""),
+            document_id=str(source.get("document_id") or ""),
+            document_title=str(source.get("document_title") or ""),
+            section_path=str(source.get("section_path") or ""),
+            page_number=_coerce_int(source.get("page_number")),
+            offset_start=_coerce_optional_int(source.get("offset_start")),
+            offset_end=_coerce_optional_int(source.get("offset_end")),
+            snippet=str(source.get("snippet") or "")[:500],
+            score=_coerce_float(source.get("score")),
+            source_metadata=SourceMetadata.from_source(source),
+        )
+
+
+class AnswerClaim(BaseModel):
+    id: str
+    text: str
+    citation_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    kind: str = "conclusion"
+
+
+class AnswerWarning(BaseModel):
+    code: str
+    message: str
+    severity: AnswerWarningSeverity = "warning"
+    citation_ids: list[str] = Field(default_factory=list)
+
+
+class AnswerIR(BaseModel):
+    schema_version: str = "answer-ir/v1"
+    status: AnswerStatus = "answered"
+    answer: str = ""
+    claims: list[AnswerClaim] = Field(default_factory=list)
+    citations: list[AnswerCitation] = Field(default_factory=list)
+    query_rewrite: AnswerQueryRewrite = Field(default_factory=AnswerQueryRewrite)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    warnings: list[AnswerWarning] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_chat(
+        cls,
+        *,
+        answer: str,
+        sources: list[Mapping[str, Any]],
+        original_query: str,
+        rewritten_query: str,
+        confidence: float,
+        status: AnswerStatus | None = None,
+        warnings: list[AnswerWarning] | None = None,
+    ) -> "AnswerIR":
+        citations = [AnswerCitation.from_source(source, index) for index, source in enumerate(sources, 1)]
+        normalized_confidence = _clamp_confidence(confidence)
+        derived_status = status or _derive_answer_status(answer, citations, normalized_confidence)
+        claim_text = _extract_primary_claim(answer)
+        claims = [
+            AnswerClaim(
+                id="claim-1",
+                text=claim_text,
+                citation_ids=[citation.id for citation in citations],
+                confidence=normalized_confidence,
+            )
+        ] if claim_text and derived_status != "insufficient_context" else []
+        derived_warnings = list(warnings or [])
+        if not citations:
+            derived_warnings.append(AnswerWarning(
+                code="no_citations",
+                message="当前回答没有可用引用，不能作为可追溯结论。",
+            ))
+        if normalized_confidence > 0 and normalized_confidence < 0.6:
+            derived_warnings.append(AnswerWarning(
+                code="low_confidence",
+                message="当前回答置信度较低，需要人工核对原文。",
+                severity="info",
+                citation_ids=[citation.id for citation in citations],
+            ))
+
+        return cls(
+            status=derived_status,
+            answer=answer,
+            claims=claims,
+            citations=citations,
+            query_rewrite=AnswerQueryRewrite(
+                original_query=original_query,
+                rewritten_query=rewritten_query,
+                changed=rewritten_query != original_query,
+                strategy="chapter_number_expansion" if rewritten_query != original_query else "none",
+                reason="章节编号被展开以提高召回" if rewritten_query != original_query else "",
+            ),
+            confidence=normalized_confidence,
+            warnings=derived_warnings,
+        )
+
+
 class ChatResult(BaseModel):
     message_id: str = ""
     answer: str
@@ -303,6 +429,7 @@ class ChatResult(BaseModel):
     confidence: float = 0.0
     followups: list[str] = Field(default_factory=list)
     trace: ChatTrace = Field(default_factory=ChatTrace)
+    answer_ir: AnswerIR | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -344,3 +471,30 @@ def _coerce_optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _clamp_confidence(value: Any) -> float:
+    return max(0.0, min(1.0, _coerce_float(value)))
+
+
+def _derive_answer_status(answer: str, citations: list[AnswerCitation], confidence: float) -> AnswerStatus:
+    if not answer.strip() or not citations:
+        return "insufficient_context"
+    if confidence > 0 and confidence < 0.6:
+        return "partial"
+    return "answered"
+
+
+def _extract_primary_claim(answer: str) -> str:
+    for line in answer.splitlines():
+        cleaned = line.strip().lstrip("-*0123456789.、 ")
+        if cleaned and not cleaned.startswith("[来源") and not cleaned.startswith("来源"):
+            return cleaned[:300]
+    return ""

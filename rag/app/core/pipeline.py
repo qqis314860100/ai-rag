@@ -19,6 +19,7 @@ from ..llm.prompt_builder import (
     extract_sources,
     format_chunks_for_debug,
 )
+from ..schemas.models import AnswerIR
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,14 @@ class RagPipeline:
 
         # 4. Extract sources
         sources = extract_sources(hits)
+        confidence = _estimate_confidence(query, hits, filters)
+        answer_ir = AnswerIR.from_chat(
+            answer=llm_result["content"],
+            sources=sources,
+            original_query=query,
+            rewritten_query=rewritten_query,
+            confidence=confidence,
+        )
 
         total_ms = int((time.time() - total_start) * 1000)
 
@@ -205,13 +214,14 @@ class RagPipeline:
             "message_id": "",
             "answer": llm_result["content"],
             "sources": sources,
-            "confidence": _estimate_confidence(query, hits, filters),
+            "confidence": confidence,
             "followups": _suggest_followups(query, hits),
             "trace": {
                 "retrieval_ms": retrieval_ms,
                 "llm_ms": llm_ms,
                 "total_ms": total_ms,
             },
+            "answer_ir": answer_ir.model_dump(),
         }
 
 
