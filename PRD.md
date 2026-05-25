@@ -59,7 +59,12 @@
 - [x] `web`: 修复发送消息和点击重试时聊天标题、输入框、消息列表闪跳或布局跳动；新增消息应无感插入，流式结束只静默合并后端 ID。
 - [x] `web`: 将右侧栏接入真实当前线程目录、近期证据、笔记和结构化输出数据；现有导航壳已完成，但还需要和 API / RAG 同步成真实可用能力。
 - [x] `web`: 将统一文档预览接入真实 PDF、HTML、代码块预览；现有预览壳已完成，但还需要和 API / RAG 的来源格式、文件流、清洗规则同步。
-- [x] `web`: 将 AI 整理入口从文本/pill 占位升级为真实思维导图/流程图可视化，消费 RAG 关键词/步骤 Diagram IR 渲染节点和连线。
+- [x] `web` / `api` / `rag`: 重新打开并补强 AI 整理图谱能力。完成标准为：
+  - RAG 从回答正文、引用片段、章节标题、文档标题提取高频关键词、工艺对象、动作词、风险词、参数词。
+  - RAG 为思维导图生成 root/category/keyword/evidence 节点和 contains/supported_by 边。
+  - RAG 为流程图生成 step/decision/action 节点和 sequence/condition 边。
+  - API 生成图谱时必须把回答正文和引用证据一起传给 RAG。
+  - 前端用 SVG 渲染真实节点和连线；思维导图使用中心放射/左右树布局，流程图使用自上而下布局。
 - [x] `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
 
 ### API
@@ -75,7 +80,7 @@
 - [x] `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
 - [x] `rag`: 在不破坏现有 API consumers 的前提下，为检索结果补充可用于 source detail 的上下文字段。
 - [x] `rag`: 为 Markdown、PDF、HTML、代码块等内容格式记录来源格式信息，供后续预览层使用。
-- [x] `rag`: 将思维导图/流程图从 placeholder 升级为基于关键词、步骤和条件词生成结构化 Diagram IR。
+- [x] `rag`: 将思维导图/流程图从 placeholder 升级为基于关键词、步骤、条件词、引用证据生成结构化 Diagram IR。
 
 ### 仓库与 Ralph
 

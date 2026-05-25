@@ -31,6 +31,29 @@ function currentUser(req: Request): { id: string; name: string } {
   };
 }
 
+function compactDiagramText(value: unknown, maxLength = 600): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function buildDiagramContent(answer: string, sources: Array<Record<string, unknown>>): string {
+  const blocks = [`回答正文：\n${answer}`];
+  sources.slice(0, 8).forEach((source, index) => {
+    const title = compactDiagramText(source.document_title, 120);
+    const section = compactDiagramText(source.section_path, 160);
+    const snippet = compactDiagramText(source.content || source.snippet, 700);
+    blocks.push(
+      [
+        `[引用 ${index + 1}]`,
+        `文档：${title || "未知文档"}`,
+        `章节：${section || "未标注章节"}`,
+        `片段：${snippet || "暂无片段"}`,
+      ].join("\n")
+    );
+  });
+  return blocks.join("\n\n");
+}
+
 function requireReadableSession(req: Request, sessionId: string): ReturnType<typeof getSessionById> {
   const session = getSessionById(sessionId);
   if (!session) {
@@ -595,7 +618,7 @@ router.post("/chat/messages/:id/diagram", async (req: Request, res: Response, ne
       : session.title || "AI 整理";
     const diagram = await generateDiagramIR(
       title,
-      existing.content,
+      buildDiagramContent(existing.content, formatted.sources || []),
       rawDiagramType,
       sourceIds,
       req.requestId

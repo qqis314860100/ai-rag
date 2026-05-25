@@ -419,6 +419,26 @@
 - Blockers: 无。
 - Next: push 到 GitHub。
 
+### 2026-05-25 - 补强 AI 整理图谱完成标准
+
+- Service: repo
+- Task: 重新打开 AI 整理图谱任务，按关键词提取、图结构生成、前端可视化渲染补强。
+- Changed:
+  - PRD 将 AI 整理完成标准细化为 RAG 关键词提取、思维导图 IR、流程图 IR、API 证据传递、前端 SVG 可视化。
+  - API 生成图谱时把回答正文、引用文档标题、章节标题、引用片段一起传给 RAG。
+  - RAG 生成 root/category/keyword/evidence 和 step/decision/action 节点，以及 contains/supported_by/sequence/condition 边。
+  - 前端思维导图改为中心放射/左右树 SVG，流程图保持自上而下 SVG，并真实消费节点和边。
+- Verification:
+  - `cd rag && ./.venv/bin/python -m compileall app tests`
+  - `diagram tests ok`
+  - `pnpm run build:api`
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+  - 浏览器 smoke：思维导图和流程图均生成非空 SVG 节点和连线。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: 无。
+
 ## 执行提醒
 
 - 每轮只做一个任务。

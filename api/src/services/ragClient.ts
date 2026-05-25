@@ -300,7 +300,7 @@ export async function generateDiagramIR(
       content,
       diagram_type: diagramType,
       source_ids: sourceIds,
-      max_steps: 8,
+      max_steps: 10,
     },
     requestId
   );

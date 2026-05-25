@@ -14,14 +14,21 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert ir.layout_hint == "top_to_bottom"
     assert [node.id for node in ir.nodes][:3] == ["step-1", "step-2", "step-3"]
     assert any(node.kind == "decision" for node in ir.nodes)
+    assert any(node.kind == "action" for node in ir.nodes)
     assert any(edge.relation == "condition" for edge in ir.edges)
-    assert "设备报警现象" in ir.metadata["keywords"]
+    assert any("设备报警现象" in keyword for keyword in ir.metadata["keywords"])
 
 
 def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
     ir = build_keyword_diagram_ir(
         title="工艺风险整理",
-        content="温度窗口需要保持稳定，压力控制异常会触发安全风险，设备夹具需要复核。",
+        content=(
+            "回答正文：温度窗口需要保持稳定，压力控制异常会触发安全风险，设备夹具需要复核。\n\n"
+            "[引用 1]\n"
+            "文档：模组EOL测试\n"
+            "章节：模组EOL测试 / 5. 安全注意事项\n"
+            "片段：测试前确认夹具状态，压力异常时记录报警并复核设备。"
+        ),
         source_ids=["source-a"],
         diagram_type="mindmap",
     )
@@ -31,6 +38,8 @@ def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
     assert ir.nodes[0].kind == "root"
     assert any(node.kind == "category" and node.label == "风险" for node in ir.nodes)
     assert any(node.kind == "keyword" and "温度窗口" in node.label for node in ir.nodes)
+    assert any(node.kind == "evidence" and "安全注意事项" in node.label for node in ir.nodes)
+    assert any(edge.relation == "supported_by" for edge in ir.edges)
     assert "risk" in ir.metadata["categories"]
 
 
