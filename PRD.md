@@ -107,6 +107,18 @@
 
 ## 下一阶段任务队列
 
+### 结构化精准问答与图解
+
+- [ ] `rag`: 定义 `AnswerIR` Pydantic schema，覆盖回答状态、claims、citations、query_rewrite、confidence、warnings，并保持现有 ChatResult 兼容。
+- [ ] `rag`: 增强多轮问题重写能力，输出可追踪的重写结果，覆盖指代、省略、无歧义不改写和低信息输入。
+- [ ] `api`: 将原始问题、重写问题、AnswerIR 摘要和引用覆盖信息持久化到回答 metadata，供前端和调试面板读取。
+- [ ] `rag`: 增加拒答与低证据策略，低信息输入、无有效引用、证据不足或上下文冲突时返回结构化 `insufficient_context`。
+- [ ] `rag`: 定义新版 `DiagramIR` schema 和校验器，支持 `can_generate`、节点/边合法性、引用覆盖、布局建议和质量告警。
+- [ ] `rag`: 将图解生成从关键词规则升级为 LLM structured output，要求模型基于回答和引用提炼精简节点，不把证据节点画进图。
+- [ ] `api`: 改造 artifact 质量门槛和置信度，使用 DiagramIR 质量分与校验结果决定是否保存或展示图解。
+- [ ] `web`: 收敛图解前端为纯渲染层，只做 DiagramIR 合法性检查、布局渲染和体验兜底，不再写业务提取规则。
+- [ ] `rag`: 建立精准问答、多轮重写和图解质量评估集，覆盖参数问答、流程问答、异常排查、拒答、指代追问和图解拓扑。
+
 ### 企业级知识工作台
 
 - [x] `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。路线图展示当前会话关键问答节点、总结精髓、证据/artifact 状态，并支持点击定位到对应回答；知识笔记展示现有 session/message/source 笔记。

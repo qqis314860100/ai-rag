@@ -13,11 +13,12 @@
 - 最新完成 `web`: 进一步隔离流式轮次状态，发送/重试不会被旧定时器污染，标题、输入框、消息列表保持稳定。
 - 最新完成 `web`: 右侧栏已接入真实当前线程目录、近期证据、会话笔记 CRUD 和结构化输出数据；流式 RAG meta 会经 API 持久化到回答 metadata trace。
 - 最新完成 `api`: 新增 `chat_artifacts` 表和产物接口，回答消息返回会携带已保存 artifacts，图解生成/重生成/软删除可通过 API 恢复和管理。
+- 最新校准：基于《企业知识库 RAG 精准问答与多轮会话记忆落地方案评审》，下一阶段优先转向 `AnswerIR`、多轮问题重写、LLM structured DiagramIR、schema 校验和质量评估集，暂不优先做自动强制出图或长期偏好记忆。
 - 本轮 `web` 回归已最终提交（`02e4ed6`），修复中断后立即重试时的 stale abort 竞态。
 - 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
 - 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
 - 注意：此前记录的 `api` / `rag` 完成项仅代表阶段性尝试或局部契约，不能再作为产品完成依据；后续必须按 PRD 未完成队列重新执行和验收。
-- 下一轮建议：继续执行 PRD 未完成队列中的 `web` ArtifactCard / ArtifactModal 渲染层任务。
+- 下一轮建议：执行 PRD 未完成队列中的 `rag`: 定义 `AnswerIR` Pydantic schema，先把精准问答结构化基础打牢。
 
 ## 已完成
 
