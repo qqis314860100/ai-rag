@@ -167,15 +167,20 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     document_id = _trimmed_string(payload.get("document_id")) or _trimmed_string(document.get("id"))
     document_title = _trimmed_string(payload.get("document_title")) or _trimmed_string(document.get("title"))
+    document_available = bool(document_id or document_title)
     section_path = _trimmed_string(payload.get("section_path")) or _trimmed_string(section.get("path")) or _trimmed_string(metadata.get("section_path"))
     section_title = _trimmed_string(section.get("title")) or _trimmed_string(metadata.get("section")) or section_path
     section_level = _first_int(section.get("level"), metadata.get("section_level"))
+    section_available = bool(section_path or section_title)
 
     chunk_id = _trimmed_string(payload.get("chunk_id")) or _trimmed_string(chunk.get("id"))
     chunk_index = _first_int(chunk.get("index"), metadata.get("chunk_index"))
     chunk_title = _trimmed_string(chunk.get("title")) or _trimmed_string(metadata.get("chunk_title")) or document_title
     chunk_type = _trimmed_string(chunk.get("type")) or _trimmed_string(metadata.get("chunk_type")) or "text"
     token_count = _first_int(chunk.get("token_count"), metadata.get("token_count"))
+    chunk_available = bool(chunk_id or chunk_title or chunk_index > 0)
+    format_available = file_type != "unknown" or mime_type != "application/octet-stream"
+    snippet_available = bool(snippet)
 
     document = {
         "id": document_id,
@@ -188,12 +193,14 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         "status": _trimmed_string(document.get("status")) or _trimmed_string(metadata.get("status")),
         "file_type": file_type,
         "mime_type": mime_type,
+        "available": document_available,
     }
 
     section = {
         "path": section_path,
         "title": section_title,
         "level": section_level,
+        "available": section_available,
     }
 
     chunk = {
@@ -202,6 +209,7 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         "title": chunk_title,
         "type": chunk_type,
         "token_count": token_count,
+        "available": chunk_available,
     }
 
     page = {
@@ -223,10 +231,12 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         "format": file_type,
         "document_type": file_type,
         "content_kind": content_kind,
+        "format_available": format_available,
         "page_number": page_number,
         "page": page,
         "offset": offset,
         "snippet": snippet,
+        "snippet_available": snippet_available,
         "document": document,
         "section": section,
         "chunk": chunk,
@@ -250,11 +260,13 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
             "mime_type": mime_type,
             "document_type": file_type,
             "content_kind": content_kind,
+            "format_available": format_available,
             "page": page,
             "offset": offset,
             "document": document,
             "section": section,
             "chunk": chunk,
+            "snippet_available": snippet_available,
             "metadata": normalized_metadata,
         }
     )

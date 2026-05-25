@@ -33,13 +33,16 @@ def test_source_metadata_from_source_preserves_legacy_fields() -> None:
     assert metadata.document.id == "doc_1"
     assert metadata.document.title == "工艺说明"
     assert metadata.document.category == "安全规范"
+    assert metadata.document.available is True
     assert metadata.section.path == "第1章 / 1.1 总则"
     assert metadata.section.title == "总则"
     assert metadata.section.level == 2
+    assert metadata.section.available is True
     assert metadata.chunk.id == "chunk_123"
     assert metadata.chunk.index == 4
     assert metadata.chunk.title == "总则"
     assert metadata.chunk.type == "table"
+    assert metadata.chunk.available is True
     assert metadata.page.number == 7
     assert metadata.page.available is True
     assert metadata.offset.start == 18
@@ -47,7 +50,9 @@ def test_source_metadata_from_source_preserves_legacy_fields() -> None:
     assert metadata.offset.available is True
     assert metadata.format.name == "markdown"
     assert metadata.format.mime_type == "text/markdown"
+    assert metadata.format.available is True
     assert metadata.snippet == "这是摘要内容"
+    assert metadata.snippet_available is True
 
 
 def test_extract_sources_includes_canonical_metadata() -> None:
@@ -69,7 +74,9 @@ def test_extract_sources_includes_canonical_metadata() -> None:
 
     assert sources[0]["document_title"] == "工艺说明"
     assert sources[0]["source_metadata"]["document"]["id"] == "doc_1"
+    assert sources[0]["source_metadata"]["document"]["available"] is True
     assert sources[0]["source_metadata"]["format"]["mime_type"] == "text/markdown"
+    assert sources[0]["source_metadata"]["snippet_available"] is True
 
 
 def test_build_source_metadata_marks_unavailable_ranges() -> None:
@@ -86,4 +93,26 @@ def test_build_source_metadata_marks_unavailable_ranges() -> None:
     assert metadata["page"]["available"] is False
     assert metadata["offset"]["available"] is False
     assert metadata["format"] == "text"
+    assert metadata["format_available"] is True
     assert metadata["mime_type"] == "text/plain"
+    assert metadata["snippet_available"] is True
+
+
+def test_source_metadata_marks_missing_sections_as_unavailable() -> None:
+    source = {
+        "chunk_id": "chunk_789",
+        "document_id": "doc_3",
+        "document_title": "无章节材料",
+        "content": "",
+        "metadata": {},
+    }
+
+    metadata = SourceMetadata.from_source(source)
+
+    assert metadata.document.available is True
+    assert metadata.section.available is False
+    assert metadata.chunk.available is True
+    assert metadata.page.available is False
+    assert metadata.offset.available is False
+    assert metadata.format.available is False
+    assert metadata.snippet_available is False

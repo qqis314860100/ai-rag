@@ -48,12 +48,14 @@ class SourceDocument(BaseModel):
     security_level: str = ""
     version: str = ""
     status: str = ""
+    available: bool = False
 
 
 class SourceSection(BaseModel):
     path: str = ""
     title: str = ""
     level: int = 0
+    available: bool = False
 
 
 class SourceChunk(BaseModel):
@@ -61,6 +63,7 @@ class SourceChunk(BaseModel):
     index: int = 0
     title: str = ""
     type: str = "text"
+    available: bool = False
 
 
 class SourcePage(BaseModel):
@@ -78,20 +81,22 @@ class SourceOffset(BaseModel):
 class SourceFormat(BaseModel):
     name: str = ""
     mime_type: str = ""
+    available: bool = False
 
 
 class SourceMetadata(BaseModel):
     """Canonical source contract shared by search/chat outputs.
 
     Availability and compatibility rules:
-    - `document` is always populated from the document id/title when available.
-    - `section` is populated when the parser emits headings or a section path.
-    - `chunk` is always populated after chunking.
-    - `page` is only meaningful for page-aware parsers; otherwise it stays 0.
-    - `offset` is reserved for future precise span tracking and may be `None`.
-    - `format` is filled from the ingest source type when known.
-    - `snippet` is always the retrieval preview and remains backward compatible.
-    - Flat legacy fields remain on `SearchHit`/`Source` until all consumers migrate.
+    - `document.available` is true when an id or title can be resolved.
+    - `section.available` is true when the parser emits a heading or path.
+    - `chunk.available` is true once a retrieved hit can be tied to a chunk.
+    - `page.available` is true only for page-aware sources with a positive page.
+    - `offset.available` is true when a concrete start/end span is known.
+    - `format.available` is true when source type or MIME is known.
+    - `snippet_available` is true when the retrieval preview is non-empty.
+    - Flat legacy fields remain on `SearchHit`/`Source` until all consumers
+      migrate, so new metadata is strictly additive.
     """
 
     document: SourceDocument = Field(default_factory=SourceDocument)
@@ -102,6 +107,7 @@ class SourceMetadata(BaseModel):
     format: SourceFormat = Field(default_factory=SourceFormat)
     content_kind: str = ""
     snippet: str = ""
+    snippet_available: bool = False
 
     @classmethod
     def from_source(cls, source: Mapping[str, Any] | None) -> "SourceMetadata":
@@ -133,17 +139,20 @@ class SourceMetadata(BaseModel):
                 security_level=str(document.get("security_level") or metadata.get("security_level") or ""),
                 version=str(document.get("version") or metadata.get("version") or ""),
                 status=str(document.get("status") or metadata.get("status") or ""),
+                available=bool(document.get("available")),
             ),
             section=SourceSection(
                 path=str(normalized.get("section_path") or section.get("path") or ""),
                 title=str(section.get("title") or normalized.get("section_path") or ""),
                 level=_coerce_int(section.get("level") or metadata.get("section_level")),
+                available=bool(section.get("available")),
             ),
             chunk=SourceChunk(
                 id=str(normalized.get("chunk_id") or chunk.get("id") or ""),
                 index=_coerce_int(chunk.get("index") or metadata.get("chunk_index")),
                 title=str(chunk.get("title") or normalized.get("document_title") or ""),
                 type=str(chunk.get("type") or metadata.get("chunk_type") or "text"),
+                available=bool(chunk.get("available")),
             ),
             page=SourcePage(
                 number=_coerce_int(normalized.get("page_number") or page.get("number")),
@@ -158,9 +167,11 @@ class SourceMetadata(BaseModel):
             format=SourceFormat(
                 name=source_format,
                 mime_type=str(normalized.get("mime_type") or document.get("mime_type") or ""),
+                available=bool(normalized.get("format_available") or metadata.get("format_available")),
             ),
             content_kind=str(normalized.get("content_kind") or ""),
             snippet=str(normalized.get("snippet") or "")[:200],
+            snippet_available=bool(normalized.get("snippet_available") or metadata.get("snippet_available")),
         )
 
 
