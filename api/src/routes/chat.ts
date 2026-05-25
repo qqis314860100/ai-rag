@@ -74,6 +74,84 @@ function artifactSummary(payload: { nodes?: unknown[]; edges?: unknown[] }): str
   return `${nodeCount} 个节点，${edgeCount} 条连线`;
 }
 
+type DiagramEligibility = {
+  eligible: boolean;
+  reason?: string;
+  question?: string;
+};
+
+const MIN_ARTIFACT_CONFIDENCE = 0.66;
+const DOMAIN_SHORT_QUERY_PATTERN = /\b(?:OCV|EOL|CCD|SOC|SOP|RAG|PPM|MES|PLC|BMS|Busbar)\b/i;
+const LOW_SIGNAL_INPUT_PATTERN = /^[\d\s._\-+*/=#@!?,，。！？、;；:：()[\]{}"'`~|\\]+$/;
+const CLARIFICATION_ANSWER_PATTERN =
+  /(?:请(?:先|再)?(?:提供|补充|说明|明确)|需要(?:更多|补充|具体).{0,12}(?:信息|背景|问题)|看起来像(?:测试|误触|随意输入)|无法(?:判断|确定|生成|回答)|信息不足|问题不够具体|没有足够(?:上下文|信息|证据)|请重新输入|换个具体问题)/;
+
+function semanticLength(value: string): number {
+  return (value.match(/[\u4e00-\u9fffA-Za-z0-9Ωμ%]+/g) || []).join("").length;
+}
+
+function hasRepeatedNoise(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+  return compact.length >= 2 && /^(.)(\1)+$/.test(compact);
+}
+
+function isLowSignalQuestion(question: string): boolean {
+  const compact = question.trim();
+  if (!compact) return true;
+  if (LOW_SIGNAL_INPUT_PATTERN.test(compact)) return true;
+  if (hasRepeatedNoise(compact)) return true;
+  if (DOMAIN_SHORT_QUERY_PATTERN.test(compact)) return false;
+  return semanticLength(compact) < 6;
+}
+
+function looksLikeClarificationAnswer(answer: string): boolean {
+  return CLARIFICATION_ANSWER_PATTERN.test(answer.replace(/\s+/g, ""));
+}
+
+function getPreviousUserQuestion(sessionId: string, assistantMessageId: string): string {
+  const messages = listMessagesBySession(sessionId);
+  const assistantIndex = messages.findIndex((message) => message.id === assistantMessageId);
+  const beforeAssistant = assistantIndex >= 0 ? messages.slice(0, assistantIndex) : messages;
+  return beforeAssistant.reverse().find((message) => message.role === "user")?.content ?? "";
+}
+
+function assessDiagramEligibility(input: {
+  question: string;
+  answer: string;
+  confidence: number;
+  sourceIds: string[];
+}): DiagramEligibility {
+  if (isLowSignalQuestion(input.question)) {
+    return {
+      eligible: false,
+      reason: "当前问题信息不足，不能生成图解。请先提出具体的业务问题。",
+      question: input.question,
+    };
+  }
+  if (looksLikeClarificationAnswer(input.answer)) {
+    return {
+      eligible: false,
+      reason: "当前回答还在澄清问题，不能生成图解。请补充问题后再整理。",
+      question: input.question,
+    };
+  }
+  if (input.confidence > 0 && input.confidence < MIN_ARTIFACT_CONFIDENCE) {
+    return {
+      eligible: false,
+      reason: `当前回答可信度较低（${Math.round(input.confidence * 100)}%），暂不生成图解。请先核对或重新提问。`,
+      question: input.question,
+    };
+  }
+  if (input.sourceIds.length === 0) {
+    return {
+      eligible: false,
+      reason: "当前回答没有可追溯引用，不能生成图解。",
+      question: input.question,
+    };
+  }
+  return { eligible: true, question: input.question };
+}
+
 function requireReadableAssistantMessage(req: Request, messageId: string, action: string) {
   const existing = getMessageById(messageId);
   if (!existing) {
@@ -105,6 +183,20 @@ async function buildDiagramForMessage(
   const sourceIds = (formatted.sources || [])
     .map((source) => source.chunk_id)
     .filter((chunkId): chunkId is string => typeof chunkId === "string" && chunkId.length > 0);
+  const confidence = formatted.confidence ?? 0;
+  const eligibility = assessDiagramEligibility({
+    question: getPreviousUserQuestion(existing.session_id, existing.id),
+    answer: existing.content,
+    confidence,
+    sourceIds,
+  });
+  if (!eligibility.eligible) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, eligibility.reason || "当前回答不适合生成图解。", 422, {
+      question: eligibility.question,
+      confidence,
+      source_count: sourceIds.length,
+    });
+  }
 
   const title = typeof titleInput === "string" && titleInput.trim()
     ? titleInput.trim()
@@ -117,7 +209,7 @@ async function buildDiagramForMessage(
     req.requestId
   );
 
-  return { diagram, existing, sourceIds, title, confidence: formatted.confidence ?? 0 };
+  return { diagram, existing, sourceIds, title, confidence };
 }
 
 async function generateDiagramArtifact(
@@ -141,13 +233,15 @@ async function generateDiagramArtifact(
     title,
     summary: artifactSummary(diagram),
     reason: "基于回答正文和引用证据生成结构化图解。",
-    confidence,
+    confidence: Math.min(confidence || 1, typeof diagram.confidence === "number" ? diagram.confidence : 1),
     payload: diagram,
     sourceIds,
     metadata: {
       diagram_type: diagramType,
       objective: diagram.objective,
       layout_hint: diagram.layout_hint,
+      message_confidence: confidence,
+      diagram_confidence: diagram.confidence,
     },
   });
 
@@ -748,7 +842,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
 
     requireReadableAssistantMessage(req, artifact.message_id, "重新生成");
     const diagramType = normalizeDiagramType(req.body?.diagram_type ?? artifact.type);
-    const { diagram, sourceIds } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
+    const { diagram, sourceIds, confidence } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
     const updated = updateArtifact(artifactId, {
       type: diagramType,
       renderer: artifactRenderer(diagram),
@@ -756,6 +850,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
       summary: artifactSummary(diagram),
       reason: "重新生成结构化图解。",
       status: "ready",
+      confidence: Math.min(confidence || 1, typeof diagram.confidence === "number" ? diagram.confidence : 1),
       payload: diagram,
       sourceIds,
       metadata: {
@@ -763,6 +858,8 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
         diagram_type: diagramType,
         objective: diagram.objective,
         layout_hint: diagram.layout_hint,
+        message_confidence: confidence,
+        diagram_confidence: diagram.confidence,
         regenerated_from: artifactId,
       },
     });

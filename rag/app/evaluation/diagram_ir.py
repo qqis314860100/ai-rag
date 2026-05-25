@@ -78,6 +78,8 @@ _SEQUENCE_PATTERN = r"先|再|然后|之后|随后|最后|第一步|第二步|�
 _DECISION_PATTERN = r"如果|若|是否|判断|异常|失败|否则|低于|高于|超过|不通过|报警"
 _ACTION_PATTERN = r"检查|确认|处理|恢复|更换|复位|记录|上传|隔离|返修|复核|定位|调整"
 _PARAMETER_PATTERN = r"\d+(?:\.\d+)?\s?(?:V|mA|A|MΩ|GΩ|Ω|秒|s|PPM|%RH|%)|≥\s?\d+|≤\s?\d+"
+_MAX_MINDMAP_CATEGORIES = 5
+_MAX_KEYWORDS_PER_CATEGORY = 4
 
 
 def _clean_text(value: str, max_length: int = 80) -> str:
@@ -473,21 +475,22 @@ def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
 def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
     flow_nodes = [node for node in ir.nodes if node.kind in {"step", "decision", "action"}]
     viewport_width = 980
-    viewport_height = max(520, len(flow_nodes) * 118 + 120)
+    viewport_height = max(620, len(flow_nodes) * 168 + 140)
     center_x = viewport_width // 2
 
     for index, node in enumerate(flow_nodes):
-        y = 70 + index * 118
+        y = 86 + index * 168
         if node.kind == "decision":
-            _set_layout(node, center_x - 110, y - 36, 220, 72, "decision")
+            _set_layout(node, center_x - 160, y - 58, 320, 116, "decision")
         elif node.kind == "action":
-            _set_layout(node, center_x - 150, y - 28, 300, 56, "action")
+            _set_layout(node, center_x - 210, y - 38, 420, 76, "action")
         else:
-            _set_layout(node, center_x - 150, y - 28, 300, 56, "step")
+            _set_layout(node, center_x - 210, y - 38, 420, 76, "step")
 
     _apply_edge_render(ir.edges)
     ir.metadata["viewport"] = {"width": viewport_width, "height": viewport_height}
     ir.metadata["renderer"] = "positioned-svg"
+    ir.metadata["layout_rule"] = "top_down_process_rectangles_decision_diamonds"
     return ir
 
 
@@ -661,12 +664,19 @@ def _build_source_evidence(content: str, source_ids: list[str]) -> list[dict[str
 
 
 def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) -> float:
-    node_score = min(len(ir.nodes), 10) * 0.025
-    edge_score = min(len(ir.edges), 8) * 0.02
-    evidence_score = min(len(evidence), 4) * 0.08
+    meaningful_evidence = [
+        item
+        for item in evidence
+        if any(str(item.get(field) or "").strip() for field in ("title", "section", "snippet"))
+    ]
+    node_score = min(len(ir.nodes), 10) * 0.02
+    edge_score = min(len(ir.edges), 8) * 0.015
+    evidence_score = min(len(meaningful_evidence), 4) * 0.09
     structure_score = 0.12 if ir.nodes and (ir.diagram_type == "mindmap" or ir.edges) else 0.0
-    confidence = 0.42 + node_score + edge_score + evidence_score + structure_score
-    return round(min(confidence, 0.92), 2)
+    confidence = 0.28 + node_score + edge_score + evidence_score + structure_score
+    if not meaningful_evidence:
+        confidence = min(confidence, 0.48)
+    return round(min(confidence, 0.9), 2)
 
 
 def _build_generation_reason(ir: DiagramIR, evidence: list[dict[str, Any]]) -> str:
@@ -775,6 +785,8 @@ def build_keyword_diagram_ir(
             )
         )
         category_nodes: dict[str, str] = {}
+        category_counts: Counter[str] = Counter()
+        keyword_evidence: dict[str, list[dict[str, Any]]] = {}
         ordered_items = sorted(
             keyword_items or [
                 {"term": step, "category": _category_for_keyword(step)[0], "category_label": _category_for_keyword(step)[1], "weight": 1, "source_ids": [], "evidence": []}
@@ -786,6 +798,10 @@ def build_keyword_diagram_ir(
             keyword = item["term"]
             category = item["category"]
             label = item["category_label"]
+            if category not in category_nodes and len(category_nodes) >= _MAX_MINDMAP_CATEGORIES:
+                continue
+            if category_counts[category] >= _MAX_KEYWORDS_PER_CATEGORY:
+                continue
             if category not in category_nodes:
                 category_id = f"category-{category}"
                 category_nodes[category] = category_id
@@ -820,44 +836,29 @@ def build_keyword_diagram_ir(
                     relation="contains",
                 )
             )
-            for evidence_index, evidence in enumerate(item.get("evidence", [])[:1], 1):
-                evidence_id = f"evidence-{len(nodes)}"
-                evidence_label = evidence.get("section") or evidence.get("title") or evidence.get("snippet", "")
-                nodes.append(
-                    DiagramNode(
-                        id=evidence_id,
-                        label=evidence_label,
-                        kind="evidence",
-                        description=evidence.get("snippet", ""),
-                        source_ids=[evidence.get("source_id", "")],
-                        metadata={"keyword": keyword, "evidence_index": evidence_index},
-                    )
-                )
-                edges.append(
-                    DiagramEdge(
-                        source=node_id,
-                        target=evidence_id,
-                        relation="supported_by",
-                        label="证据",
-                    )
-                )
+            category_counts[category] += 1
+            keyword_evidence[keyword] = item.get("evidence", [])[:2]
 
         return _attach_artifact_payload(_apply_mindmap_layout(DiagramIR(
             title=title,
-            objective="基于回答和引用内容提取关键词，生成可渲染的思维导图 IR。",
+            objective="基于回答和引用内容提炼核心概念，生成精简思维导图 IR。",
             diagram_type=diagram_type,
             layout_hint="radial",
             nodes=nodes,
             edges=edges,
             notes=[
-                "关键词来自回答正文和引用摘要。",
-                "类别节点用于前端形成中心放射式布局。",
+                "画布只展示核心概念，引用证据保留在节点元数据中。",
+                f"每个分类最多展示 {_MAX_KEYWORDS_PER_CATEGORY} 个关键点。",
             ],
             metadata={
                 "source_count": len(source_ids),
-                "keyword_count": len(keywords),
+                "keyword_count": len([node for node in nodes if node.kind == "keyword"]),
                 "categories": list(category_nodes.keys()),
                 "keyword_sources": {item["term"]: item.get("source_ids", []) for item in keyword_items},
+                "keyword_evidence": keyword_evidence,
+                "condensed": True,
+                "max_categories": _MAX_MINDMAP_CATEGORIES,
+                "max_keywords_per_category": _MAX_KEYWORDS_PER_CATEGORY,
             },
         )), content, source_ids)
 
