@@ -97,52 +97,165 @@ function getDiagramKey(messageId: string, diagramType: DiagramType) {
   return `${messageId}:${diagramType}`;
 }
 
-function DiagramNodePill({ node, tone = "default" }: { node: DiagramNode; tone?: "root" | "default" }) {
+function nodeLabel(node: DiagramNode, maxLength = 14) {
+  return truncateText(node.label, maxLength);
+}
+
+function MindmapPreview({ diagram }: { diagram: DiagramIR }) {
+  const root = diagram.nodes.find((node) => node.kind === "root") || diagram.nodes[0];
+  const categories = diagram.nodes.filter((node) => node.kind === "category");
+  const keywords = diagram.nodes.filter((node) => node.kind === "keyword" || node.kind === "topic");
+  const categoryById = new Map(categories.map((node) => [node.id, node]));
+  const keywordGroups = new Map<string, DiagramNode[]>();
+
+  categories.forEach((category) => keywordGroups.set(category.id, []));
+  diagram.edges.forEach((edge) => {
+    const target = keywords.find((node) => node.id === edge.target);
+    if (target && categoryById.has(edge.source)) {
+      keywordGroups.get(edge.source)?.push(target);
+    }
+  });
+  if (categories.length === 0) {
+    keywordGroups.set("root", keywords);
+  }
+
+  const groupIds = categories.length > 0 ? categories.map((node) => node.id) : ["root"];
+  const height = Math.max(190, groupIds.length * 76 + 38);
+  const rootY = height / 2 - 18;
+
   return (
-    <div
-      className={`min-w-0 rounded-lg border px-2.5 py-2 shadow-sm-soft ${
-        tone === "root"
-          ? "border-accent/35 bg-accent-soft text-accent"
-          : "border-border bg-white text-text-secondary"
-      }`}
-    >
-      <p className="break-words text-[11px] font-semibold leading-relaxed">{node.label}</p>
+    <div className="rounded-lg border border-border bg-surface-page p-2">
+      <svg viewBox={`0 0 340 ${height}`} className="h-auto w-full" role="img" aria-label={`${diagram.title} 思维导图`}>
+        <defs>
+          <marker id="mindmap-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" className="fill-accent/60" />
+          </marker>
+        </defs>
+        {root && (
+          <g>
+            <rect x="12" y={rootY} width="82" height="36" rx="8" className="fill-accent-soft stroke-accent/40" />
+            <text x="53" y={rootY + 22} textAnchor="middle" className="fill-accent text-[10px] font-semibold">
+              {nodeLabel(root, 8)}
+            </text>
+          </g>
+        )}
+        {groupIds.map((groupId, groupIndex) => {
+          const category = categoryById.get(groupId);
+          const groupKeywords = keywordGroups.get(groupId) || [];
+          const y = 24 + groupIndex * 76;
+          const categoryY = y + Math.max(0, (Math.min(groupKeywords.length, 3) - 1) * 16);
+
+          return (
+            <g key={groupId}>
+              <path
+                d={`M94 ${rootY + 18} C120 ${rootY + 18}, 118 ${categoryY + 15}, 136 ${categoryY + 15}`}
+                className="fill-none stroke-accent/35"
+                strokeWidth="1.5"
+                markerEnd="url(#mindmap-arrow)"
+              />
+              <rect x="136" y={categoryY} width="66" height="30" rx="7" className="fill-white stroke-border" />
+              <text x="169" y={categoryY + 19} textAnchor="middle" className="fill-text text-[10px] font-semibold">
+                {nodeLabel(category || root, 6)}
+              </text>
+              {groupKeywords.slice(0, 3).map((keyword, keywordIndex) => {
+                const keywordY = y + keywordIndex * 28;
+                return (
+                  <g key={keyword.id}>
+                    <path
+                      d={`M202 ${categoryY + 15} C218 ${categoryY + 15}, 218 ${keywordY + 13}, 232 ${keywordY + 13}`}
+                      className="fill-none stroke-border"
+                      strokeWidth="1.25"
+                    />
+                    <rect x="232" y={keywordY} width="88" height="26" rx="13" className="fill-white stroke-accent/25" />
+                    <text x="276" y={keywordY + 17} textAnchor="middle" className="fill-text-secondary text-[9px] font-medium">
+                      {nodeLabel(keyword, 9)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {keywords.slice(0, 6).map((node) => (
+          <span key={node.id} className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-text-muted">
+            {node.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FlowchartPreview({ diagram }: { diagram: DiagramIR }) {
+  const nodes = diagram.nodes.slice(0, 8);
+  const height = Math.max(160, nodes.length * 68 + 24);
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-page p-2">
+      <svg viewBox={`0 0 340 ${height}`} className="h-auto w-full" role="img" aria-label={`${diagram.title} 流程图`}>
+        <defs>
+          <marker id="flow-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 Z" className="fill-text-muted" />
+          </marker>
+        </defs>
+        {nodes.map((node, index) => {
+          const y = 18 + index * 68;
+          const isDecision = node.kind === "decision";
+          const nextY = y + 68;
+          return (
+            <g key={node.id}>
+              {index < nodes.length - 1 && (
+                <line
+                  x1="170"
+                  y1={isDecision ? y + 48 : y + 42}
+                  x2="170"
+                  y2={nextY - 6}
+                  className="stroke-text-muted"
+                  strokeWidth="1.5"
+                  markerEnd="url(#flow-arrow)"
+                />
+              )}
+              {isDecision ? (
+                <path d={`M170 ${y} L246 ${y + 26} L170 ${y + 52} L94 ${y + 26} Z`} className="fill-warning/10 stroke-warning/40" />
+              ) : (
+                <rect x="72" y={y} width="196" height="44" rx="9" className="fill-white stroke-border" />
+              )}
+              <text
+                x="170"
+                y={y + (isDecision ? 30 : 26)}
+                textAnchor="middle"
+                className={`text-[10px] font-semibold ${isDecision ? "fill-warning" : "fill-text"}`}
+              >
+                {nodeLabel(node, isDecision ? 14 : 18)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="mt-1 grid grid-cols-2 gap-1.5 text-[10px] text-text-muted">
+        <span className="rounded-md bg-white px-2 py-1">步骤 {nodes.length}</span>
+        <span className="rounded-md bg-white px-2 py-1">判断 {nodes.filter((node) => node.kind === "decision").length}</span>
+      </div>
     </div>
   );
 }
 
 function DiagramPreview({ diagram }: { diagram: DiagramIR }) {
-  if (diagram.diagram_type === "mindmap") {
-    const root = diagram.nodes[0];
-    const branches = diagram.nodes.slice(1);
+  if (!diagram.nodes.length) {
     return (
-      <div className="rounded-lg border border-border bg-surface-page px-3 py-3">
-        {root && <DiagramNodePill node={root} tone="root" />}
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          {branches.map((node) => (
-            <DiagramNodePill key={node.id} node={node} />
-          ))}
-        </div>
+      <div className="rounded-lg border border-dashed border-border bg-surface-page px-3 py-4 text-center text-xs text-text-muted">
+        暂无可视化节点
       </div>
     );
   }
 
-  return (
-    <div className="rounded-lg border border-border bg-surface-page px-3 py-3">
-      <div className="space-y-2">
-        {diagram.nodes.map((node, index) => (
-          <div key={node.id}>
-            <DiagramNodePill node={node} tone={index === 0 ? "root" : "default"} />
-            {index < diagram.nodes.length - 1 && (
-              <div className="flex h-4 items-center justify-center">
-                <span className="h-full w-px bg-border" />
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  if (diagram.diagram_type === "mindmap") {
+    return <MindmapPreview diagram={diagram} />;
+  }
+
+  return <FlowchartPreview diagram={diagram} />;
 }
 
 export default function ConversationNavigator({
