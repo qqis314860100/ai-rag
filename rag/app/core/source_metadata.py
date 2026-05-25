@@ -77,6 +77,21 @@ def _first_int(*values: Any, default: int = 0) -> int:
     return default
 
 
+def _first_trimmed_string(*values: Any) -> str:
+    for value in values:
+        candidate = _trimmed_string(value)
+        if candidate:
+            return candidate
+    return ""
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def infer_file_type(*values: Any, file_path: str | None = None) -> str:
     for value in values:
         candidate = _trimmed_string(value).lower().lstrip(".")
@@ -127,6 +142,80 @@ def infer_content_kind(file_type: str, mime_type: str) -> str:
     if normalized == "unknown":
         return "unknown"
     return "binary"
+
+
+def build_source_context(payload: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = dict(payload.get("metadata") or {})
+    source_context = dict(payload.get("source_context") or {})
+
+    content = _first_trimmed_string(
+        source_context.get("content"),
+        source_context.get("text"),
+        payload.get("content"),
+    )
+    snippet = _first_trimmed_string(
+        source_context.get("snippet"),
+        payload.get("snippet"),
+        metadata.get("snippet"),
+        content[:200],
+    )
+    before = _first_trimmed_string(
+        source_context.get("before"),
+        source_context.get("context_before"),
+        payload.get("context_before"),
+        metadata.get("context_before"),
+    )
+    after = _first_trimmed_string(
+        source_context.get("after"),
+        source_context.get("context_after"),
+        payload.get("context_after"),
+        metadata.get("context_after"),
+    )
+    window = _first_trimmed_string(
+        source_context.get("window"),
+        payload.get("context_window"),
+        metadata.get("context_window"),
+    )
+    if not window:
+        window = "\n\n".join(part for part in (before, content, after) if part)
+
+    page = dict(payload.get("page") or {})
+    offset = dict(payload.get("offset") or {})
+    page_number = _first_int(
+        source_context.get("page_number"),
+        payload.get("page_number"),
+        page.get("number"),
+        metadata.get("page_number"),
+    )
+    offset_start = _coerce_int(_first_present(
+        source_context.get("offset_start"),
+        offset.get("start"),
+        payload.get("offset_start"),
+        metadata.get("offset_start"),
+    ))
+    offset_end = _coerce_int(_first_present(
+        source_context.get("offset_end"),
+        offset.get("end"),
+        payload.get("offset_end"),
+        metadata.get("offset_end"),
+    ))
+
+    return {
+        "content": content,
+        "snippet": snippet,
+        "before": before,
+        "after": after,
+        "window": window,
+        "page_number": page_number,
+        "offset_start": offset_start,
+        "offset_end": offset_end,
+        "offset_unit": _first_trimmed_string(
+            source_context.get("offset_unit"),
+            offset.get("unit"),
+            metadata.get("offset_unit"),
+        ) or "char",
+        "available": bool(content or snippet or before or after),
+    }
 
 
 def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -181,6 +270,7 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     chunk_available = bool(chunk_id or chunk_title or chunk_index > 0)
     format_available = file_type != "unknown" or mime_type != "application/octet-stream"
     snippet_available = bool(snippet)
+    source_context = build_source_context(payload)
 
     document = {
         "id": document_id,
@@ -240,6 +330,10 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         "document": document,
         "section": section,
         "chunk": chunk,
+        "source_context": source_context,
+        "context_before": source_context["before"],
+        "context_after": source_context["after"],
+        "context_window": source_context["window"],
     }
 
     normalized = dict(payload)
@@ -266,6 +360,10 @@ def build_source_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
             "document": document,
             "section": section,
             "chunk": chunk,
+            "source_context": source_context,
+            "context_before": source_context["before"],
+            "context_after": source_context["after"],
+            "context_window": source_context["window"],
             "snippet_available": snippet_available,
             "metadata": normalized_metadata,
         }

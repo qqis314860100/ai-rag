@@ -84,6 +84,19 @@ class SourceFormat(BaseModel):
     available: bool = False
 
 
+class SourceContext(BaseModel):
+    content: str = ""
+    snippet: str = ""
+    before: str = ""
+    after: str = ""
+    window: str = ""
+    page_number: int = 0
+    offset_start: int | None = None
+    offset_end: int | None = None
+    offset_unit: str = "char"
+    available: bool = False
+
+
 class SourceMetadata(BaseModel):
     """Canonical source contract shared by search/chat outputs.
 
@@ -194,6 +207,10 @@ class SearchHit(BaseModel):
     score: float
     metadata: dict[str, Any] = Field(default_factory=dict)
     source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
+    source_context: SourceContext = Field(default_factory=SourceContext)
+    context_before: str = ""
+    context_after: str = ""
+    context_window: str = ""
 
 
 class SearchRequest(BaseModel):
@@ -255,6 +272,10 @@ class Source(BaseModel):
     snippet: str = ""
     content: str = ""
     source_metadata: SourceMetadata = Field(default_factory=SourceMetadata)
+    source_context: SourceContext = Field(default_factory=SourceContext)
+    context_before: str = ""
+    context_after: str = ""
+    context_window: str = ""
 
 
 class ChatRequest(BaseModel):

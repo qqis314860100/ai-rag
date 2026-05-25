@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _client = None
 _collection = None
+CONTEXT_SNIPPET_CHARS = 400
 
 
 def _get_collection():
@@ -145,6 +146,7 @@ def search(
     )
 
     hits: list[dict] = []
+    document_context_cache: dict[str, dict[int, dict[str, str]]] = {}
     if results and results["ids"] and results["ids"][0]:
         for i, chunk_id in enumerate(results["ids"][0]):
             metadata = results["metadatas"][0][i] if results["metadatas"] else {}
@@ -153,13 +155,29 @@ def search(
                 continue
             distance = results["distances"][0][i] if results["distances"] else 0
             score = 1.0 - distance  # cosine distance to similarity
+            content = results["documents"][0][i] if results["documents"] else ""
+            snippet = metadata.get("snippet") or content[:200]
+            document_id = metadata.get("document_id", "")
+            chunk_index = metadata.get("chunk_index", 0)
+            source_context = _build_source_context(
+                col=col,
+                document_id=document_id,
+                chunk_index=chunk_index,
+                content=content,
+                snippet=snippet,
+                page_number=metadata.get("page_number", 0),
+                offset_start=metadata.get("offset_start"),
+                offset_end=metadata.get("offset_end"),
+                offset_unit=metadata.get("offset_unit", "char"),
+                cache=document_context_cache,
+            )
             raw_hit = {
                 "chunk_id": chunk_id,
-                "document_id": metadata.get("document_id", ""),
+                "document_id": document_id,
                 "document_title": metadata.get("document_title") or metadata.get("title", ""),
                 "section_path": metadata.get("section_path", ""),
                 "page_number": metadata.get("page_number", 0),
-                "chunk_index": metadata.get("chunk_index", 0),
+                "chunk_index": chunk_index,
                 "section_level": metadata.get("section_level", 0),
                 "document_type": metadata.get("source_format") or metadata.get("document_type", ""),
                 "source_format": metadata.get("source_format", ""),
@@ -170,9 +188,13 @@ def search(
                 "version": metadata.get("version", ""),
                 "offset_start": metadata.get("offset_start"),
                 "offset_end": metadata.get("offset_end"),
-                "snippet": metadata.get("snippet") or (results["documents"][0][i] if results["documents"] else "")[:200],
-                "content": results["documents"][0][i] if results["documents"] else "",
+                "snippet": snippet,
+                "content": content,
                 "score": round(score, 4),
+                "source_context": source_context,
+                "context_before": source_context["before"],
+                "context_after": source_context["after"],
+                "context_window": source_context["window"],
                 "metadata": metadata,
             }
             normalized_hit = build_source_metadata(raw_hit)
@@ -180,6 +202,90 @@ def search(
             hits.append(normalized_hit)
 
     return hits[:top_k]
+
+
+def _build_source_context(
+    col,
+    document_id: str,
+    chunk_index: int | str,
+    content: str,
+    snippet: str,
+    page_number: int | str,
+    offset_start: int | str | None,
+    offset_end: int | str | None,
+    offset_unit: str,
+    cache: dict[str, dict[int, dict[str, str]]],
+) -> dict:
+    index = _coerce_int(chunk_index)
+    neighbors = _load_document_context(col, document_id, cache) if document_id else {}
+    before = _trim_context(neighbors.get(index - 1, {}).get("content", ""))
+    after = _trim_context(neighbors.get(index + 1, {}).get("content", ""))
+    window = "\n\n".join(part for part in (before, content, after) if part)
+
+    return {
+        "content": content,
+        "snippet": snippet,
+        "before": before,
+        "after": after,
+        "window": window,
+        "page_number": _coerce_int(page_number),
+        "offset_start": _coerce_optional_int(offset_start),
+        "offset_end": _coerce_optional_int(offset_end),
+        "offset_unit": offset_unit or "char",
+        "available": bool(content or snippet or before or after),
+    }
+
+
+def _load_document_context(col, document_id: str, cache: dict[str, dict[int, dict[str, str]]]) -> dict[int, dict[str, str]]:
+    if document_id in cache:
+        return cache[document_id]
+
+    result = col.get(
+        where={"document_id": document_id},
+        include=["documents", "metadatas"],
+    )
+    rows: dict[int, dict[str, str]] = {}
+    if not result:
+        cache[document_id] = rows
+        return rows
+
+    ids = result.get("ids") or []
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+
+    for i, chunk_id in enumerate(ids):
+        metadata = metadatas[i] if i < len(metadatas) and isinstance(metadatas[i], dict) else {}
+        index = _coerce_int(metadata.get("chunk_index", i))
+        rows[index] = {
+            "chunk_id": str(chunk_id),
+            "content": documents[i] if i < len(documents) and isinstance(documents[i], str) else "",
+        }
+
+    cache[document_id] = rows
+    return rows
+
+
+def _trim_context(text: str, limit: int = CONTEXT_SNIPPET_CHARS) -> str:
+    cleaned = text.strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit].rstrip()
+
+
+def _coerce_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_optional_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def delete_by_document(document_id: str) -> int:
