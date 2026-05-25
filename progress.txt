@@ -388,6 +388,37 @@
 
 - 无剩余任务。
 
+### 2026-05-25 - 渲染 AI 整理图谱可视化
+
+- Service: web
+- Task: `web`: 将 AI 整理入口从文本/pill 占位升级为真实思维导图/流程图可视化，消费 RAG 关键词/步骤 Diagram IR 渲染节点和连线。
+- Changed:
+  - 将 AI 整理预览从 pill/list 占位改为 SVG 图谱渲染。
+  - 思维导图按 root、category、keyword/topic 节点绘制中心节点、分类节点、关键词节点和连线。
+  - 流程图按 step、decision 节点绘制纵向步骤、判断菱形和箭头连线。
+  - 空节点返回明确空态，避免无数据时渲染假图。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+  - 浏览器 smoke：`http://localhost:5173/chat`，思维导图生成 13 节点 SVG，流程图生成 8 节点 SVG。
+  - `pnpm run audit:diff -- --strict --topic "web AI 整理图谱可视化渲染" --validation "pnpm run build:web; pnpm run lint:web（仅既有 warning）；浏览器 smoke http://localhost:5173/chat，思维导图生成 13 节点 SVG，流程图生成 8 节点 SVG"`
+- Commit: `9be21a6`
+- Blockers: 无。
+- Next: 无剩余任务。
+
+### 2026-05-25 - AFK 任务队列完成
+
+- Service: repo
+- Task: 按 PRD 任务队列自动执行到完成。
+- Changed:
+  - `PRD.md` 中所有任务均已勾选完成。
+  - `progress.txt` 记录最终 web 图谱可视化任务和队列完成状态。
+- Verification:
+  - `rg -n "\[ \]" PRD.md` 返回无未完成任务。
+- Commit: 本状态提交。
+- Blockers: 无。
+- Next: push 到 GitHub。
+
 ## 执行提醒
 
 - 每轮只做一个任务。
