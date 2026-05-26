@@ -284,9 +284,11 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     } else if (wasLoading.current) {
       wasLoading.current = false;
       if (nearBottom.current) {
-        requestAnimationFrame(() => scrollToBottom("auto"));
-        setTimeout(() => scrollToBottom("auto"), 100);
-        setTimeout(() => scrollToBottom("auto"), 350);
+        // 等一次 layout（finalize 写回 messages）后再追加一次滚动，
+        // 用 rAF 链替代旧的 3 次 setTimeout(0/100/350ms) 兜底。
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => scrollToBottom("auto"));
+        });
       }
     }
     prevContentLen.current = streamingContent.length;
@@ -566,7 +568,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   </div>
                 )
-              ) : msg.streaming && !msg.content ? (
+              ) : msg.streaming && !streamingContent ? (
                 /* Streaming — no content yet, show staged progress */
                 <StreamStages />
               ) : (
@@ -597,7 +599,11 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     </div>
                   )}
                   <div className="text-[15px] leading-relaxed text-text">
-                    <MarkdownContent content={msg.content} sources={msg.sources} onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }} />
+                    <MarkdownContent
+                      content={msg.streaming ? streamingContent : msg.content}
+                      sources={msg.sources}
+                      onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }}
+                    />
                     {msg.streaming && (
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}

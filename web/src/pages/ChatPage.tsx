@@ -344,21 +344,11 @@ export default function ChatPage() {
   }, [activeSessionId, messages.length, messagesLoading, restoreScrollPosition]);
 
   // ── Streaming placeholders ──
+  // 单源化：流式期间 messages 中的 placeholder 始终保持 content=""，
+  // 流式内容由 ChatThread 直接读 stream.content 渲染。
+  // 只在 stream 结束（loading→false）时把最终内容一次性合并回 messages。
   const placeholderIdRef = useRef<string | null>(null);
   const wasLoading = useRef(false);
-
-  // Update streaming placeholder content during generation
-  useEffect(() => {
-    if (stream.loading && placeholderIdRef.current && stream.content) {
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last && last.id === placeholderIdRef.current) {
-          return [...prev.slice(0, -1), { ...last, content: stream.content }];
-        }
-        return prev;
-      });
-    }
-  }, [setMessages, stream.content, stream.loading]);
 
   // When stream ends (loading → false), finalize or remove placeholder
   useEffect(() => {
