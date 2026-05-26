@@ -380,7 +380,7 @@
 - [x] `api`: 暴露面向受控集成的 OpenAPI（`/api/integration/v1/*`），覆盖检索、问答、知识卡查询；走独立 API Token + 速率限制，与用户会话隔离。
 - [x] `api`: 增加 webhook 出站能力（知识卡发布、文档冲突、高频拒答），可向企业内 IM / 工单系统通知；地址与签名通过 `settings` 表配置。
 - [x] `api` / `rag`: 设计 MES/PLM/ERP 离线导出文件的批量导入通道（CSV/JSON/PDF 包），不接入实时数据流。
-- [ ] `web`: 提供"嵌入式问答控件"打包产物（iframe 或 Web Component），便于内嵌到 MES 工位看板，保持鉴权一致。
+- [x] `web`: 提供"嵌入式问答控件"打包产物（iframe 或 Web Component），便于内嵌到 MES 工位看板，保持鉴权一致。
 - [ ] `api`: 对外接口必须经独立鉴权链（API Token），不复用 web 会话 cookie；token 可吊销、可审计。
 
 ## 每轮验收模板
