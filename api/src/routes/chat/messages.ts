@@ -13,6 +13,10 @@ import { buildAnswerMessageMetadata, createAutoArtifactsFromVisualPlan, requireU
 
 const router = Router();
 
+function isRefusalAnswer(answer: string, answerIr?: RagAnswerIR | null): boolean {
+  return answerIr?.status === "insufficient_context" || /^(根据当前知识库信息|抱歉)/.test(answer.trim());
+}
+
 // POST /api/chat - send a message and get RAG answer
 router.post("/chat", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -182,6 +186,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       recordChatMetric({
         sourceCount: meta.sources?.length ?? 0,
         llmCalled: (meta.trace?.retrieval_ms ?? 0) >= 0 && fullAnswer.length > 0 && !/^根据当前知识库信息/.test(fullAnswer),
+        refused: isRefusalAnswer(fullAnswer, meta.answerIr),
       });
 
       // Send final event with message_id and session_id
@@ -237,6 +242,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
     recordChatMetric({
       sourceCount: chatResult.sources.length,
       llmCalled: (chatResult.trace?.llm_ms ?? 0) > 0,
+      refused: isRefusalAnswer(chatResult.answer, chatResult.answer_ir),
     });
 
     sendSuccess(

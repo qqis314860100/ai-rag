@@ -35,6 +35,7 @@ import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDr
 import { createKnowledgeFaqDraftFromMessage } from "../services/knowledgeFaqDraftService";
 import { buildKnowledgeGovernanceView } from "../services/knowledgeGovernanceService";
 import { buildKnowledgeGraph } from "../services/knowledgeGraphService";
+import { emitWebhookEvent } from "../services/webhookService";
 import {
   archiveKnowledgeCard,
   parseKnowledgeCardRevisionBody,
@@ -484,6 +485,14 @@ router.post(
         status: card.status,
         version: card.current_version,
         source_count: card.source_refs.length,
+      });
+      emitWebhookEvent("knowledge_card.published", {
+        card_id: card.id,
+        topic: card.topic,
+        summary: card.summary,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+        reviewer_id: req.user?.id,
       });
       sendSuccess(res, card, req.requestId);
     } catch (err) {

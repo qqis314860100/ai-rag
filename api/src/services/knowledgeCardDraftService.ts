@@ -11,6 +11,7 @@ import { getSessionById } from "../db/chatSessions";
 import { listMessageSourceDetails } from "../db/messageSources";
 import { listNotesBySession } from "../db/chatNotes";
 import { formatArtifact, listArtifactsByMessage } from "../db/chatArtifacts";
+import { emitWebhookEvent } from "./webhookService";
 import { AppError, ErrorCodes } from "../utils/errors";
 
 const MIN_KNOWLEDGE_CARD_CONFIDENCE = 0.65;
@@ -229,6 +230,16 @@ export function createKnowledgeCardDraftFromMessage(
   });
 
   if (reasons.length > 0) {
+    if (reasons.some((reason) => reason.code === "evidence_conflict")) {
+      emitWebhookEvent("document.conflict", {
+        message_id: message.id,
+        session_id: message.session_id,
+        confidence,
+        source_count: sourceRefs.length,
+        reason_codes: reasons.map((reason) => reason.code),
+        document_ids: uniqueStrings(sourceRefs.map((source) => source.document_id ?? "").filter(Boolean)),
+      });
+    }
     throw new AppError(ErrorCodes.VALIDATION_ERROR, "当前回答不满足知识卡草稿生成条件。", 422, {
       blocked_reasons: reasons,
       confidence,

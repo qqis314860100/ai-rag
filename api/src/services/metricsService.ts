@@ -1,3 +1,5 @@
+import { emitWebhookEvent } from "./webhookService";
+
 type RequestMetric = {
   timestamp: number;
   route: string;
@@ -11,6 +13,7 @@ type ChatMetric = {
   timestamp: number;
   sourceCount: number;
   llmCalled: boolean;
+  refused?: boolean;
 };
 
 const WINDOW_MS = 5 * 60 * 1000;
@@ -18,6 +21,7 @@ const MAX_SAMPLES = 5000;
 
 const requestSamples: RequestMetric[] = [];
 const chatSamples: ChatMetric[] = [];
+let lastRefusalWebhookAt = 0;
 
 function trimWindow<T extends { timestamp: number }>(items: T[], now = Date.now()): void {
   const cutoff = now - WINDOW_MS;
@@ -47,6 +51,24 @@ export function recordChatMetric(input: Omit<ChatMetric, "timestamp">): void {
   const now = Date.now();
   chatSamples.push({ ...input, timestamp: now });
   trimWindow(chatSamples, now);
+
+  const threshold = Number(process.env.WEBHOOK_REFUSAL_THRESHOLD ?? "5");
+  const cooldownMs = Number(process.env.WEBHOOK_REFUSAL_COOLDOWN_MS ?? "300000");
+  const refusalCount = chatSamples.filter((item) => item.refused).length;
+  if (
+    input.refused &&
+    Number.isFinite(threshold) &&
+    threshold > 0 &&
+    refusalCount >= threshold &&
+    now - lastRefusalWebhookAt >= (Number.isFinite(cooldownMs) ? cooldownMs : 300000)
+  ) {
+    lastRefusalWebhookAt = now;
+    emitWebhookEvent("chat.refusal.high_frequency", {
+      window_seconds: WINDOW_MS / 1000,
+      refusal_count: refusalCount,
+      threshold,
+    });
+  }
 }
 
 export function getRollingMetrics() {
