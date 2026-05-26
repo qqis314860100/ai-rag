@@ -71,6 +71,8 @@
 
 ## 1.2 上下文预算
 
+- 本机可用 `rtk` 时，查看 diff、git 状态、测试、构建、lint、长日志和大文件摘要优先使用 `rtk` 压缩输出，例如 `rtk diff`、`rtk git status`、`rtk pnpm run build:web`、`rtk pytest ...`、`rtk read <file>`、`rtk grep <pattern>`。
+- 如果需要完整错误上下文、交互式输出或 `rtk` 过滤后信息不足，可以回退到原生命令，并只截取关键片段。
 - 读文件优先用 `rg` 定位，再用 `sed -n` 读取小范围；不要为了找一个点整份 `cat` 大文件。
 - 不把长日志、完整测试输出、浏览器 console 全量内容贴进对话；只截取失败附近或关键证据并总结。
 - 不主动读取生成物、构建产物、数据库、PDF、`.playwright-mcp/`、`output/`、`node_modules/`、`dist/` 等大文件，除非任务明确需要。
