@@ -48,6 +48,9 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
     if (req.user) {
       logData.user_id = req.user.id;
     }
+    if (req.integration) {
+      logData.integration_client_id = req.integration.clientId;
+    }
 
     if (res.statusCode >= 500) {
       logger.error(logData, "request completed with error");

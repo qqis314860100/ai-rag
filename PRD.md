@@ -377,7 +377,7 @@
 
 让知识库成为企业内可被调用的能力，而不是孤岛。本阶段不做泛化 SDK，只覆盖企业内合规接入。
 
-- [ ] `api`: 暴露面向受控集成的 OpenAPI（`/api/integration/v1/*`），覆盖检索、问答、知识卡查询；走独立 API Token + 速率限制，与用户会话隔离。
+- [x] `api`: 暴露面向受控集成的 OpenAPI（`/api/integration/v1/*`），覆盖检索、问答、知识卡查询；走独立 API Token + 速率限制，与用户会话隔离。
 - [ ] `api`: 增加 webhook 出站能力（知识卡发布、文档冲突、高频拒答），可向企业内 IM / 工单系统通知；地址与签名通过 `settings` 表配置。
 - [ ] `api` / `rag`: 设计 MES/PLM/ERP 离线导出文件的批量导入通道（CSV/JSON/PDF 包），不接入实时数据流。
 - [ ] `web`: 提供"嵌入式问答控件"打包产物（iframe 或 Web Component），便于内嵌到 MES 工位看板，保持鉴权一致。

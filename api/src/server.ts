@@ -16,6 +16,7 @@ import authRouter from "./routes/auth";
 import statsRouter from "./routes/stats";
 import adminRouter from "./routes/admin";
 import knowledgeRouter from "./routes/knowledge";
+import integrationRouter from "./routes/integration";
 
 const config = loadConfig();
 
@@ -30,6 +31,9 @@ app.use(requestContext);
 
 // Request logging
 app.use(requestLogger);
+
+// 企业受控集成接口使用独立 API Token，不复用用户会话。
+app.use("/api", integrationRouter);
 
 // 用户提取：生产环境只接受有效 JWT，开发环境允许请求头和默认用户辅助联调。
 app.use(extractUser);
