@@ -365,7 +365,7 @@
 - [x] `api` / `rag`: 在 `requestLogger` 基础上加结构化字段（requestId、userId、route、duration_ms、status、error_code），并在两端贯通同一 requestId。
 - [x] `rag`: 给 `core/pipeline.py` 各阶段（rewrite/retrieve/refusal/generate/artifact）打点耗时，输出到日志和未来的指标系统。
 - [x] `api`: 暴露 `/api/admin/metrics`（仅 system_admin），输出 QPS、P50/P95、错误率、LLM 调用次数、检索命中率、artifact 成功率的滚动窗口统计。
-- [ ] `repo`: 选型并接入轻量指标方案（首选 Prometheus pull + Grafana，或自研 JSON dump）；选型决定写入 `docs/可观测性方案.md`。
+- [x] `repo`: 选型并接入轻量指标方案（首选 Prometheus pull + Grafana，或自研 JSON dump）；选型决定写入 `docs/可观测性方案.md`。
 - [ ] `api`: 为高风险接口（消息删除、文档删除、知识卡发布、设置变更）补全 `audit_logs` 写入，并在治理视图中暴露。
 - [ ] `api`: 实现 SQLite 日备 + ChromaDB 周备脚本，放到 `scripts/backup_*.sh`，并在 README 写明恢复流程。
 - [ ] `rag`: 接入 `usage_guard` 的硬上限（按用户/按时段），超限返回结构化错误而不是 502。
