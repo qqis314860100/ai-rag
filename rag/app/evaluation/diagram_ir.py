@@ -8,6 +8,38 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class DiagramQualityWarning(BaseModel):
+    code: str
+    message: str
+    severity: str = "warning"
+    node_ids: list[str] = Field(default_factory=list)
+    edge_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class DiagramLayoutSuggestion(BaseModel):
+    layout_hint: str = "auto"
+    direction: str = "auto"
+    node_spacing: int = 140
+    rank_spacing: int = 168
+    viewport: dict[str, int] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
+class DiagramValidationResult(BaseModel):
+    can_generate: bool = True
+    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    warnings: list[DiagramQualityWarning] = Field(default_factory=list)
+    errors: list[DiagramQualityWarning] = Field(default_factory=list)
+    layout_suggestion: DiagramLayoutSuggestion = Field(default_factory=DiagramLayoutSuggestion)
+    required_source_ids: list[str] = Field(default_factory=list)
+    covered_source_ids: list[str] = Field(default_factory=list)
+    missing_source_ids: list[str] = Field(default_factory=list)
+    citation_coverage_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    node_count: int = 0
+    edge_count: int = 0
+
+
 class DiagramNode(BaseModel):
     id: str
     label: str
@@ -26,16 +58,21 @@ class DiagramEdge(BaseModel):
 
 
 class DiagramIR(BaseModel):
+    schema_version: str = "diagram-ir/v2"
     title: str
     objective: str = ""
     diagram_type: str = "graph"
     layout_hint: str = "auto"
+    can_generate: bool = True
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     renderer: str = "diagram-ir"
     reason: str = ""
     confidence: float = 0.0
+    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    quality_warnings: list[DiagramQualityWarning] = Field(default_factory=list)
+    validation: DiagramValidationResult | None = None
     source_evidence: list[dict[str, Any]] = Field(default_factory=list)
     excalidraw_scene: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -80,6 +117,9 @@ _ACTION_PATTERN = r"检查|确认|处理|恢复|更换|复位|记录|上传|隔�
 _PARAMETER_PATTERN = r"\d+(?:\.\d+)?\s?(?:V|mA|A|MΩ|GΩ|Ω|秒|s|PPM|%RH|%)|≥\s?\d+|≤\s?\d+"
 _MAX_MINDMAP_CATEGORIES = 5
 _MAX_KEYWORDS_PER_CATEGORY = 4
+_ALLOWED_DIAGRAM_TYPES = {"mindmap", "flowchart", "graph"}
+_ALLOWED_NODE_KINDS = {"root", "category", "keyword", "evidence", "step", "decision", "action", "topic"}
+_ALLOWED_EDGE_RELATIONS = {"contains", "supported_by", "sequence", "condition", "flows_to", "relates_to"}
 
 
 def _clean_text(value: str, max_length: int = 80) -> str:
@@ -663,6 +703,163 @@ def _build_source_evidence(content: str, source_ids: list[str]) -> list[dict[str
     return [{"source_id": source_id, "title": "", "section": "", "snippet": ""} for source_id in source_ids]
 
 
+def _diagram_warning(
+    code: str,
+    message: str,
+    *,
+    severity: str = "warning",
+    node_ids: list[str] | None = None,
+    edge_ids: list[str] | None = None,
+    source_ids: list[str] | None = None,
+) -> DiagramQualityWarning:
+    return DiagramQualityWarning(
+        code=code,
+        message=message,
+        severity=severity,
+        node_ids=node_ids or [],
+        edge_ids=edge_ids or [],
+        source_ids=source_ids or [],
+    )
+
+
+def _layout_suggestion_for(ir: DiagramIR) -> DiagramLayoutSuggestion:
+    viewport = ir.metadata.get("viewport") if isinstance(ir.metadata.get("viewport"), dict) else {}
+    normalized_viewport = {
+        key: int(value)
+        for key, value in viewport.items()
+        if key in {"width", "height"} and isinstance(value, (int, float))
+    }
+    if ir.diagram_type == "flowchart":
+        return DiagramLayoutSuggestion(
+            layout_hint=ir.layout_hint or "top_to_bottom",
+            direction="top_to_bottom",
+            node_spacing=120,
+            rank_spacing=168,
+            viewport=normalized_viewport,
+            notes=["流程图建议保持单主线自上而下布局，decision 节点用于承载判断条件。"],
+        )
+    if ir.diagram_type == "mindmap":
+        return DiagramLayoutSuggestion(
+            layout_hint=ir.layout_hint or "radial",
+            direction="radial",
+            node_spacing=150,
+            rank_spacing=220,
+            viewport=normalized_viewport,
+            notes=["思维导图建议只展示主题、分类和关键词节点，引用证据保留在元数据中。"],
+        )
+    return DiagramLayoutSuggestion(
+        layout_hint=ir.layout_hint or "auto",
+        direction="auto",
+        viewport=normalized_viewport,
+        notes=["未知图解类型建议前端按通用有向图兜底渲染。"],
+    )
+
+
+def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = None) -> DiagramValidationResult:
+    required_sources = set(required_source_ids or [])
+    if not required_sources:
+        required_sources = {
+            str(item.get("source_id"))
+            for item in ir.source_evidence
+            if isinstance(item, dict) and str(item.get("source_id") or "").strip()
+        }
+
+    warnings: list[DiagramQualityWarning] = []
+    errors: list[DiagramQualityWarning] = []
+    node_ids: set[str] = set()
+    duplicate_node_ids: set[str] = set()
+    covered_sources: set[str] = set()
+
+    for node in ir.nodes:
+        node_id = node.id.strip()
+        if not node_id:
+            errors.append(_diagram_warning("blank_node_id", "节点 id 不能为空。", severity="error"))
+            continue
+        if node_id in node_ids:
+            duplicate_node_ids.add(node_id)
+        node_ids.add(node_id)
+        if not node.label.strip():
+            errors.append(_diagram_warning("blank_node_label", "节点 label 不能为空。", severity="error", node_ids=[node.id]))
+        if node.kind not in _ALLOWED_NODE_KINDS:
+            warnings.append(_diagram_warning("unknown_node_kind", "未知节点类型会触发默认样式兜底。", node_ids=[node.id]))
+        covered_sources.update(source_id for source_id in node.source_ids if source_id)
+
+    if duplicate_node_ids:
+        errors.append(_diagram_warning(
+            "duplicate_node_id",
+            "节点 id 必须唯一。",
+            severity="error",
+            node_ids=sorted(duplicate_node_ids),
+        ))
+
+    seen_edges: set[tuple[str, str, str]] = set()
+    duplicate_edges: set[str] = set()
+    for index, edge in enumerate(ir.edges):
+        edge_id = f"{edge.source}->{edge.target}:{edge.relation}:{index}"
+        if not edge.source.strip() or not edge.target.strip():
+            errors.append(_diagram_warning("blank_edge_endpoint", "连线端点不能为空。", severity="error", edge_ids=[edge_id]))
+            continue
+        missing = [node_id for node_id in (edge.source, edge.target) if node_id not in node_ids]
+        if missing:
+            errors.append(_diagram_warning(
+                "edge_endpoint_missing",
+                "连线端点必须引用已存在的节点。",
+                severity="error",
+                edge_ids=[edge_id],
+                node_ids=missing,
+            ))
+        if edge.source == edge.target:
+            warnings.append(_diagram_warning("self_edge", "连线不应指向自身。", edge_ids=[edge_id], node_ids=[edge.source]))
+        if edge.relation not in _ALLOWED_EDGE_RELATIONS:
+            warnings.append(_diagram_warning("unknown_edge_relation", "未知连线关系会触发默认连线样式兜底。", edge_ids=[edge_id]))
+        edge_key = (edge.source, edge.target, edge.relation)
+        if edge_key in seen_edges:
+            duplicate_edges.add(edge_id)
+        seen_edges.add(edge_key)
+
+    if duplicate_edges:
+        warnings.append(_diagram_warning("duplicate_edge", "存在重复连线，建议生成前去重。", edge_ids=sorted(duplicate_edges)))
+    if not ir.nodes:
+        errors.append(_diagram_warning("empty_nodes", "图解至少需要一个节点。", severity="error"))
+    if ir.diagram_type not in _ALLOWED_DIAGRAM_TYPES:
+        warnings.append(_diagram_warning("unknown_diagram_type", "未知图解类型会触发前端通用图兜底渲染。"))
+    if ir.diagram_type == "flowchart" and len(ir.nodes) > 1 and not ir.edges:
+        warnings.append(_diagram_warning("flowchart_without_edges", "流程图有多个节点但没有连线，流程关系不完整。"))
+    if ir.diagram_type == "mindmap" and not any(node.kind == "root" for node in ir.nodes):
+        warnings.append(_diagram_warning("mindmap_without_root", "思维导图缺少 root 节点，布局稳定性会下降。"))
+
+    covered_required_sources = covered_sources & required_sources if required_sources else covered_sources
+    missing_sources = sorted(required_sources - covered_sources)
+    citation_coverage_ratio = 1.0 if not required_sources else round(len(covered_required_sources) / len(required_sources), 2)
+    if missing_sources:
+        warnings.append(_diagram_warning(
+            "missing_source_coverage",
+            "部分引用未覆盖到图解节点，质量门槛应谨慎放行。",
+            source_ids=missing_sources,
+        ))
+
+    severity_penalty = {"critical": 0.4, "error": 0.35, "warning": 0.1, "info": 0.04}
+    penalty = sum(severity_penalty.get(item.severity, 0.1) for item in errors + warnings)
+    structure_bonus = 0.12 if ir.nodes and (ir.diagram_type == "mindmap" or ir.edges) else 0.0
+    coverage_bonus = 0.12 if required_sources and not missing_sources else 0.0
+    quality_score = round(max(0.0, min(1.0, 0.72 + structure_bonus + coverage_bonus - penalty)), 2)
+    can_generate = not errors and quality_score >= 0.45
+
+    return DiagramValidationResult(
+        can_generate=can_generate,
+        quality_score=quality_score,
+        warnings=warnings,
+        errors=errors,
+        layout_suggestion=_layout_suggestion_for(ir),
+        required_source_ids=sorted(required_sources),
+        covered_source_ids=sorted(covered_required_sources),
+        missing_source_ids=missing_sources,
+        citation_coverage_ratio=citation_coverage_ratio,
+        node_count=len(ir.nodes),
+        edge_count=len(ir.edges),
+    )
+
+
 def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) -> float:
     meaningful_evidence = [
         item
@@ -737,16 +934,31 @@ def _build_excalidraw_scene(ir: DiagramIR) -> dict[str, Any]:
 def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str]) -> DiagramIR:
     evidence = _build_source_evidence(content, source_ids)
     reason = _build_generation_reason(ir, evidence)
-    confidence = _estimate_diagram_confidence(ir, evidence)
-    scene = _build_excalidraw_scene(ir)
 
     ir.renderer = "excalidraw"
     ir.reason = reason
-    ir.confidence = confidence
     ir.source_evidence = evidence
+    ir.validation = validate_diagram_ir(ir, source_ids)
+    ir.can_generate = ir.validation.can_generate
+    ir.quality_score = ir.validation.quality_score
+    ir.quality_warnings = [*ir.validation.errors, *ir.validation.warnings]
+    confidence = min(_estimate_diagram_confidence(ir, evidence), max(ir.quality_score, 0.2))
+    scene = _build_excalidraw_scene(ir)
+    ir.confidence = confidence
     ir.excalidraw_scene = scene
     ir.metadata["renderer"] = "excalidraw"
     ir.metadata["legacy_renderer"] = "positioned-svg"
+    ir.metadata["can_generate"] = ir.can_generate
+    ir.metadata["quality_score"] = ir.quality_score
+    ir.metadata["quality_warnings"] = [warning.model_dump() for warning in ir.quality_warnings]
+    ir.metadata["validation"] = ir.validation.model_dump()
+    ir.metadata["citation_coverage"] = {
+        "required_source_ids": ir.validation.required_source_ids,
+        "covered_source_ids": ir.validation.covered_source_ids,
+        "missing_source_ids": ir.validation.missing_source_ids,
+        "coverage_ratio": ir.validation.citation_coverage_ratio,
+    }
+    ir.metadata["layout_suggestion"] = ir.validation.layout_suggestion.model_dump()
     ir.metadata["artifact_payload"] = {
         "renderer": "excalidraw",
         "scene_format": "excalidraw",
@@ -754,6 +966,10 @@ def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str])
         "element_count": len(scene["elements"]),
         "reason": reason,
         "confidence": confidence,
+        "can_generate": ir.can_generate,
+        "quality_score": ir.quality_score,
+        "quality_warnings": [warning.model_dump() for warning in ir.quality_warnings],
+        "citation_coverage": ir.metadata["citation_coverage"],
         "source_evidence": evidence,
     }
     return ir
