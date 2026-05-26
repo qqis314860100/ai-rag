@@ -496,6 +496,11 @@ class ImageArtifactContractRequest(BaseModel):
     requested_by_user: bool = False
 
 
+class KnowledgeGraphPlanRequest(BaseModel):
+    content: str
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ImageArtifactContract(BaseModel):
     schema_version: str = "image-artifact-contract/v1"
     renderer: str = "image-contract"

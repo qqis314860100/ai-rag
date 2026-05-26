@@ -32,6 +32,7 @@ import { getSessionById } from "../db/chatSessions";
 import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
 import { createKnowledgeFaqDraftFromMessage } from "../services/knowledgeFaqDraftService";
+import { buildKnowledgeGraph } from "../services/knowledgeGraphService";
 import {
   archiveKnowledgeCard,
   parseKnowledgeCardRevisionBody,
@@ -283,6 +284,18 @@ router.get(
         throw new AppError(ErrorCodes.VALIDATION_ERROR, "未找到对应 FAQ。", 404);
       }
       sendSuccess(res, formatKnowledgeFaq(row), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/graph",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      sendSuccess(res, buildKnowledgeGraph(), req.requestId);
     } catch (err) {
       next(err);
     }
