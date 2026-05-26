@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  BookMarked,
   BookOpenText,
   ChevronRight,
+  CircleHelp,
   ClipboardList,
   FileSearch,
   GitBranch,
@@ -47,6 +49,8 @@ interface ConversationNavigatorProps {
   onCreateNote: (content: string) => Promise<boolean>;
   onUpdateNote: (noteId: string, content: string) => Promise<boolean>;
   onDeleteNote: (noteId: string) => Promise<boolean>;
+  assetDraftStatusByMessage?: Record<string, { card?: string; faq?: string }>;
+  onCreateKnowledgeAssetDraft?: (messageId: string, type: "card" | "faq") => Promise<void>;
 }
 
 function getMessageElementId(messageId: string) {
@@ -96,6 +100,15 @@ function noteScopeLabel(scope: ChatNote["scope"]) {
   return "会话";
 }
 
+function assetStatusLabel(status?: string) {
+  if (status === "published") return "已发布";
+  if (status === "pending_review") return "待审核";
+  if (status === "returned") return "已退回";
+  if (status === "archived") return "已归档";
+  if (status === "ai_draft") return "AI 草稿";
+  return "";
+}
+
 function buildRoadmap(messages: ChatMessage[]): RoadmapItem[] {
   let turn = 0;
   return messages
@@ -143,6 +156,8 @@ export default function ConversationNavigator({
   onCreateNote,
   onUpdateNote,
   onDeleteNote,
+  assetDraftStatusByMessage = {},
+  onCreateKnowledgeAssetDraft,
 }: ConversationNavigatorProps) {
   const [view, setView] = useState<NavigatorView>("roadmap");
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
@@ -490,6 +505,27 @@ export default function ConversationNavigator({
                             {item.risks.length > 0 && (
                               <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-warning">{item.risks.length} 风险</span>
                             )}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {(["card", "faq"] as const).map((assetType) => {
+                              const status = assetType === "card"
+                                ? assetDraftStatusByMessage[item.message_id]?.card
+                                : assetDraftStatusByMessage[item.message_id]?.faq;
+                              const Icon = assetType === "card" ? BookMarked : CircleHelp;
+                              return (
+                                <button
+                                  key={assetType}
+                                  onClick={() => onCreateKnowledgeAssetDraft?.(item.message_id, assetType)}
+                                  disabled={!onCreateKnowledgeAssetDraft || Boolean(status)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-page px-2 py-1 text-[10px] font-semibold text-text-secondary hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                  title={status ? assetStatusLabel(status) : `沉淀为${assetType === "card" ? "知识卡" : "FAQ"}`}
+                                >
+                                  <Icon className="h-3 w-3" />
+                                  {assetType === "card" ? "知识卡" : "FAQ"}
+                                  {status && <span className="text-accent">{assetStatusLabel(status)}</span>}
+                                </button>
+                              );
+                            })}
                           </div>
                           {item.sources.length > 0 && (
                             <div className="mt-2 space-y-1">

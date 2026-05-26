@@ -11,7 +11,7 @@ import { useChatHistory } from "../hooks/useChatHistory";
 import { useChatDrafts } from "../hooks/useChatDrafts";
 import { showToast } from "../components/ui/Toast";
 import { track } from "../services/tracking";
-import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, Source } from "../types";
+import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, KnowledgeCard, KnowledgeFaq, Source } from "../types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {
@@ -100,6 +100,7 @@ export default function ChatPage() {
   const [sessionNotes, setSessionNotes] = useState<ChatNote[]>([]);
   const [noteAggregateItems, setNoteAggregateItems] = useState<ChatNoteAggregateItem[]>([]);
   const [sessionNotesLoading, setSessionNotesLoading] = useState(false);
+  const [assetDraftStatusByMessage, setAssetDraftStatusByMessage] = useState<Record<string, { card?: string; faq?: string }>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches
@@ -286,6 +287,32 @@ export default function ChatPage() {
     pendingScrollSessionRef.current = activeSessionId;
     sawLoadingForPendingSessionRef.current = false;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    const assistantIds = messages
+      .filter((message) => message.role === "assistant" && !message.streaming)
+      .map(getActionMessageId)
+      .filter((messageId) => !isTemporaryActionMessageId(messageId));
+    if (assistantIds.length === 0) {
+      setAssetDraftStatusByMessage({});
+      return;
+    }
+
+    let active = true;
+    api.get<{ data: Record<string, { card?: string; faq?: string }> }>(
+      `/knowledge/assets/status-by-message?message_ids=${assistantIds.map(encodeURIComponent).join(",")}`
+    )
+      .then((res) => {
+        if (active) setAssetDraftStatusByMessage(res.data || {});
+      })
+      .catch(() => {
+        if (active) setAssetDraftStatusByMessage({});
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [messages]);
 
   useLayoutEffect(() => {
     const pendingSession = pendingScrollSessionRef.current;
@@ -607,6 +634,27 @@ export default function ChatPage() {
       });
   }, [messages, setMessages]);
 
+  const handleCreateKnowledgeAssetDraft = useCallback(async (messageId: string, type: "card" | "faq") => {
+    if (isTemporaryActionMessageId(messageId)) return;
+    const path = type === "card"
+      ? "/knowledge/cards/draft/from-message"
+      : "/knowledge/faqs/draft/from-message";
+    try {
+      const res = await api.post<{ data: KnowledgeCard | KnowledgeFaq }>(path, { message_id: messageId });
+      const status = "status" in res.data ? res.data.status : "ai_draft";
+      setAssetDraftStatusByMessage((current) => ({
+        ...current,
+        [messageId]: {
+          ...(current[messageId] || {}),
+          [type]: status,
+        },
+      }));
+      showToast("success", type === "card" ? "已生成知识卡 AI 草稿" : "已生成 FAQ AI 草稿");
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "知识沉淀失败");
+    }
+  }, []);
+
   const handleCreateNote = useCallback(async (content: string) => {
     if (!activeSessionId || !content.trim()) return false;
 
@@ -764,6 +812,8 @@ export default function ChatPage() {
                 onEditUser={handleEditUser}
                 onDeleteMessage={handleDeleteMessage}
                 onSourceAnchor={handleInspectSources}
+                assetDraftStatusByMessage={assetDraftStatusByMessage}
+                onCreateKnowledgeAssetDraft={handleCreateKnowledgeAssetDraft}
                 scrollToBottomSignal={scrollToBottomSignal}
               />
             )}
@@ -818,6 +868,8 @@ export default function ChatPage() {
               onCreateNote={handleCreateNote}
               onUpdateNote={handleUpdateNote}
               onDeleteNote={handleDeleteNote}
+              assetDraftStatusByMessage={assetDraftStatusByMessage}
+              onCreateKnowledgeAssetDraft={handleCreateKnowledgeAssetDraft}
             />
           )}
         </div>

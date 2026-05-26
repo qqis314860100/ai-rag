@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2 } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
 import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../../types";
 import { MarkdownContent } from "./MarkdownContent";
 import ArtifactCard from "./ArtifactCard";
@@ -24,6 +24,8 @@ interface ChatThreadProps {
   onEditUser: (messageId: string, content: string) => void | Promise<void>;
   onDeleteMessage: (messageId: string) => void;
   onSourceAnchor?: (sources: Source[], index: number) => void;
+  assetDraftStatusByMessage?: Record<string, { card?: string; faq?: string }>;
+  onCreateKnowledgeAssetDraft?: (messageId: string, type: "card" | "faq") => Promise<void>;
 }
 
 function formatTime(iso: string) {
@@ -55,6 +57,15 @@ function getDiagramButtonLabel(diagramType: DiagramType, hasData: boolean) {
 function getDiagramActionLabel(diagramType: DiagramType, hasData: boolean) {
   if (diagramType === "mindmap") return hasData ? "查看导图" : "思维导图";
   return hasData ? "查看流程" : "流程图";
+}
+
+function assetStatusLabel(status?: string) {
+  if (status === "published") return "已发布";
+  if (status === "pending_review") return "待审核";
+  if (status === "returned") return "已退回";
+  if (status === "archived") return "已归档";
+  if (status === "ai_draft") return "AI 草稿";
+  return "";
 }
 
 type DiagramState = {
@@ -187,7 +198,7 @@ function StreamStages() {
   );
 }
 
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onSourceAnchor }: ChatThreadProps) {
+export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onSourceAnchor, assetDraftStatusByMessage = {}, onCreateKnowledgeAssetDraft }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -493,6 +504,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const userBranchActionsDisabled = loading || !canPersistUserActions;
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
+        const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
 
         return (
           <div
@@ -605,6 +617,24 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                         <Sparkles className="h-3.5 w-3.5" />
                         总结
                       </button>
+                      {(["card", "faq"] as const).map((assetType) => {
+                        const Icon = assetType === "card" ? BookMarked : CircleHelp;
+                        const status = assetType === "card" ? assetStatus.card : assetStatus.faq;
+                        return (
+                          <button
+                            key={assetType}
+                            type="button"
+                            onClick={() => onCreateKnowledgeAssetDraft?.(persistedMessageId, assetType)}
+                            disabled={!onCreateKnowledgeAssetDraft || Boolean(status)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={status ? `${assetType === "card" ? "知识卡" : "FAQ"}：${assetStatusLabel(status)}` : `沉淀为${assetType === "card" ? "知识卡" : "FAQ"}草稿`}
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                            {assetType === "card" ? "知识卡" : "FAQ"}
+                            {status && <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent">{assetStatusLabel(status)}</span>}
+                          </button>
+                        );
+                      })}
                       {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
                         const state = diagramStates[getDiagramKey(persistedMessageId, type)];
                         const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.diagram_type === type);

@@ -28,6 +28,7 @@ import {
 } from "../db/terminology";
 import type { TerminologyStatus } from "../db/terminology";
 import { requirePermission } from "../middleware/auth";
+import { getDb } from "../db";
 import { getSessionById } from "../db/chatSessions";
 import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
@@ -84,6 +85,27 @@ function queryNumber(value: unknown, fallback: number): number {
   if (typeof value !== "string" || !value.trim()) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function knowledgeAssetStatusesForMessages(messageIds: string[]) {
+  const result: Record<string, { card?: string; faq?: string }> = {};
+  const db = getDb();
+  for (const messageId of messageIds) {
+    const likePattern = `%"answer_message_id":"${messageId}"%`;
+    const card = db.prepare(
+      "SELECT status FROM knowledge_cards WHERE metadata_json LIKE ? ORDER BY updated_at DESC LIMIT 1"
+    ).get(likePattern) as { status: string } | undefined;
+    const faq = db.prepare(
+      "SELECT status FROM knowledge_faqs WHERE metadata_json LIKE ? ORDER BY updated_at DESC LIMIT 1"
+    ).get(likePattern) as { status: string } | undefined;
+    if (card || faq) {
+      result[messageId] = {
+        ...(card ? { card: card.status } : {}),
+        ...(faq ? { faq: faq.status } : {}),
+      };
+    }
+  }
+  return result;
 }
 
 router.get(
@@ -156,6 +178,20 @@ router.get(
           inputs: ["answer_message", "source_refs", "chat_notes", "chat_artifacts"],
         },
       }, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/assets/status-by-message",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const raw = typeof req.query.message_ids === "string" ? req.query.message_ids : "";
+      const messageIds = raw.split(",").map((id) => id.trim()).filter(Boolean).slice(0, 80);
+      sendSuccess(res, knowledgeAssetStatusesForMessages(messageIds), req.requestId);
     } catch (err) {
       next(err);
     }
