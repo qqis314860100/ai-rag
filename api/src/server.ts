@@ -17,6 +17,7 @@ import statsRouter from "./routes/stats";
 import adminRouter from "./routes/admin";
 import knowledgeRouter from "./routes/knowledge";
 import integrationRouter from "./routes/integration";
+import integrationTokensRouter from "./routes/integrationTokens";
 
 const config = loadConfig();
 
@@ -49,6 +50,7 @@ app.use("/api", authRouter);
 app.use("/api", statsRouter);
 app.use("/api", adminRouter);
 app.use("/api", knowledgeRouter);
+app.use("/api", integrationTokensRouter);
 
 // Error handler (must be registered last)
 app.use(errorHandler);

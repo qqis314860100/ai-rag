@@ -25,6 +25,20 @@ export function createPlatformTables(database: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS integration_api_tokens (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'active',
+      allowed_security_levels_json TEXT NOT NULL DEFAULT '["public","internal"]',
+      created_by TEXT,
+      revoked_by TEXT,
+      revoked_at TEXT,
+      last_used_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -71,5 +85,7 @@ export function createPlatformIndexes(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_operator_id ON audit_logs(operator_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_integration_api_tokens_client_id ON integration_api_tokens(client_id);
+    CREATE INDEX IF NOT EXISTS idx_integration_api_tokens_status ON integration_api_tokens(status);
   `);
 }

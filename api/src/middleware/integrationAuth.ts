@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { findActiveIntegrationTokenByHash, markIntegrationTokenUsed, parseAllowedLevels } from "../db/integrationTokens";
 import { AppError, ErrorCodes } from "../utils/errors";
 
 const VALID_SECURITY_LEVELS = new Set(["public", "internal", "confidential", "restricted"]);
@@ -66,18 +67,50 @@ function allowedSecurityLevels(): string[] {
   return levels.length > 0 ? levels : ["public"];
 }
 
-export function requireIntegrationToken(req: Request, _res: Response, next: NextFunction): void {
-  const tokens = configuredTokens();
-  if (tokens.length === 0) {
-    throw new AppError(ErrorCodes.UNAUTHORIZED, "集成 API Token 未配置。", 401);
+function activeDbToken(tokenHash: string) {
+  try {
+    return findActiveIntegrationTokenByHash(tokenHash);
+  } catch {
+    return null;
   }
+}
 
+export function requireIntegrationToken(req: Request, _res: Response, next: NextFunction): void {
   const providedToken = tokenFromRequest(req);
   if (!providedToken) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, "缺少集成 API Token。", 401);
   }
 
   const providedHash = hashToken(providedToken);
+  const dbToken = activeDbToken(providedHash);
+  if (dbToken) {
+    try {
+      markIntegrationTokenUsed(dbToken.id);
+    } catch {
+      // Token 使用时间更新失败不应阻断已经通过的鉴权请求。
+    }
+    req.integration = {
+      tokenId: dbToken.id,
+      clientId: dbToken.client_id,
+      tokenHash: dbToken.token_hash.slice(0, 16),
+      allowedSecurityLevels: parseAllowedLevels(dbToken),
+    };
+    req.user = {
+      id: `integration:${dbToken.client_id}`,
+      name: dbToken.client_id,
+      role: "integration_client",
+      permissions: ["document.read", "chat.use"],
+      allowedSecurityLevels: req.integration.allowedSecurityLevels,
+    };
+    next();
+    return;
+  }
+
+  const tokens = configuredTokens();
+  if (tokens.length === 0) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, "集成 API Token 未配置。", 401);
+  }
+
   const matched = tokens.find((token) => secureEquals(token.tokenHash, providedHash));
   if (!matched) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, "集成 API Token 无效。", 401);
