@@ -299,6 +299,40 @@ function createTablesV2(database: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_cards (
+      id TEXT PRIMARY KEY,
+      topic TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      key_parameters_json TEXT NOT NULL DEFAULT '[]',
+      steps_json TEXT NOT NULL DEFAULT '[]',
+      risks_json TEXT NOT NULL DEFAULT '[]',
+      handling_methods_json TEXT NOT NULL DEFAULT '[]',
+      source_refs_json TEXT NOT NULL DEFAULT '[]',
+      related_terms_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'ai_draft' CHECK(status IN ('ai_draft','pending_review','returned','published','archived')),
+      reviewer_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reviewer_name TEXT,
+      reviewed_at TEXT,
+      current_version INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_card_versions (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL REFERENCES knowledge_cards(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL DEFAULT '{}',
+      change_note TEXT,
+      changed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      changed_by_name TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(card_id, version)
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       operator_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -399,6 +433,10 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_chat_notes_user ON chat_notes(user_id, status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_chat_artifacts_message_id ON chat_artifacts(message_id, status);
     CREATE INDEX IF NOT EXISTS idx_chat_artifacts_session_id ON chat_artifacts(session_id, status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_cards_status ON knowledge_cards(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_cards_topic ON knowledge_cards(topic);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_cards_reviewer ON knowledge_cards(reviewer_id, status);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_card_versions_card_id ON knowledge_card_versions(card_id, version);
   `);
 }
 
