@@ -264,6 +264,10 @@ export interface DiagramIR {
 
 const unknownRecordSchema = z.record(z.unknown());
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const ragSearchResultSchema = z.object({
   chunk_id: z.string(),
   document_id: z.string(),
@@ -420,7 +424,8 @@ function parseRagContract<T>(label: string, schema: z.ZodType<T>, payload: unkno
 async function ragFetch<T>(
   path: string,
   body: unknown,
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ): Promise<T> {
   const cfg = getConfig();
   const url = `${cfg.ragServiceUrl}${path}`;
@@ -438,6 +443,7 @@ async function ragFetch<T>(
         headers: {
           "Content-Type": "application/json",
           ...(requestId ? { "X-Request-Id": requestId } : {}),
+          ...(userId ? { "X-User-Id": userId } : {}),
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -460,6 +466,20 @@ async function ragFetch<T>(
             "向量库不可用，请稍后重试。",
             503,
             errorDetail
+          );
+        }
+        if (response.status === 429) {
+          const detail = isRecord(errorDetail?.detail)
+            ? errorDetail.detail
+            : isRecord(errorDetail)
+              ? errorDetail
+              : undefined;
+          const message = typeof detail?.message === "string" ? detail.message : "LLM 使用量已达到本地限制。";
+          throw new AppError(
+            ErrorCodes.LLM_BUDGET_EXCEEDED,
+            message,
+            429,
+            detail
           );
         }
 
@@ -558,7 +578,8 @@ export async function chatWithRag(
   filters?: RagChatRequest["filters"],
   history?: Array<{ role: string; content: string }>,
   knowledgeAssets?: RagKnowledgeAssetContext[],
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ): Promise<RagChatResponse> {
   const payload = await ragFetch<unknown>(
     "/rag/chat",
@@ -570,7 +591,8 @@ export async function chatWithRag(
       history: history ?? [],
       knowledge_assets: knowledgeAssets ?? [],
     },
-    requestId
+    requestId,
+    userId
   );
   return parseRagContract("RAG chat response", ragChatResponseSchema, payload);
 }
@@ -580,7 +602,8 @@ export async function generateDiagramIR(
   content: string,
   diagramType: DiagramType,
   sourceIds: string[],
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ): Promise<DiagramIR> {
   const payload = await ragFetch<unknown>(
     "/rag/diagram/generate",
@@ -591,7 +614,8 @@ export async function generateDiagramIR(
       source_ids: sourceIds,
       max_steps: 10,
     },
-    requestId
+    requestId,
+    userId
   );
   return parseRagContract("RAG DiagramIR", diagramIRSchema, payload);
 }
@@ -601,7 +625,8 @@ export async function buildImageArtifactContract(
   answer: string,
   sources: Array<Record<string, unknown>>,
   requestedByUser: boolean,
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ): Promise<RagImageArtifactContract> {
   return ragFetch<RagImageArtifactContract>(
     "/rag/artifacts/image/contract",
@@ -611,7 +636,8 @@ export async function buildImageArtifactContract(
       sources,
       requested_by_user: requestedByUser,
     },
-    requestId
+    requestId,
+    userId
   );
 }
 
@@ -639,7 +665,8 @@ export function chatWithRagStream(
   filters?: RagChatRequest["filters"],
   history?: Array<{ role: string; content: string }>,
   knowledgeAssets?: RagKnowledgeAssetContext[],
-  requestId?: string
+  requestId?: string,
+  userId?: string
 ): Promise<Response> {
   const cfg = getConfig();
   const url = `${cfg.ragServiceUrl}/rag/chat/stream`;
@@ -649,6 +676,7 @@ export function chatWithRagStream(
     headers: {
       "Content-Type": "application/json",
       ...(requestId ? { "X-Request-Id": requestId } : {}),
+      ...(userId ? { "X-User-Id": userId } : {}),
     },
     body: JSON.stringify({
       query,

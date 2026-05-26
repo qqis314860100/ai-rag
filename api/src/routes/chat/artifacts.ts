@@ -65,7 +65,8 @@ router.post("/chat/messages/:id/artifacts/image/contract", async (req: Request, 
       existing.content,
       sources,
       true,
-      req.requestId
+      req.requestId,
+      req.user?.id
     );
     const artifact = createArtifact({
       sessionId: existing.session_id,

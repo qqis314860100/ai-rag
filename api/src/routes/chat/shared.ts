@@ -419,7 +419,8 @@ export async function buildDiagramForMessage(
     buildDiagramContent(existing.content, formatted.sources || []),
     diagramType,
     sourceIds,
-    req.requestId
+    req.requestId,
+    req.user?.id
   );
   const quality = assertDiagramQuality(diagram, confidence);
 

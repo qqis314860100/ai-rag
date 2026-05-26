@@ -77,6 +77,8 @@ class Config:
     llm_max_input_chars_per_request: int = _read_env_int("LLM_MAX_INPUT_CHARS_PER_REQUEST", 25000)
     llm_daily_request_limit: int = _read_env_int("LLM_DAILY_REQUEST_LIMIT", 50)
     llm_daily_input_char_limit: int = _read_env_int("LLM_DAILY_INPUT_CHAR_LIMIT", 300000)
+    llm_daily_request_limit_per_user: int = _read_env_int("LLM_DAILY_REQUEST_LIMIT_PER_USER", 50)
+    llm_hourly_request_limit_per_user: int = _read_env_int("LLM_HOURLY_REQUEST_LIMIT_PER_USER", 20)
 
 
 config = Config()

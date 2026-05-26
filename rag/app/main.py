@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import router as rag_router
+from .llm.usage_guard import set_usage_context
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +29,7 @@ async def request_logger(request: Request, call_next):
     start = time.perf_counter()
     request_id = request.headers.get("x-request-id") or str(uuid4())
     user_id = request.headers.get("x-user-id") or "service"
+    set_usage_context(user_id)
 
     try:
         response = await call_next(request)

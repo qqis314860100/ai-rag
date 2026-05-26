@@ -15,6 +15,7 @@ from ..core.pipeline import (
 from ..core.terminology import list_term_entries, terminology_contract
 from ..artifacts import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
 from ..artifacts.knowledge_graph import build_lightweight_knowledge_graph
+from ..llm.usage_guard import LlmBudgetExceeded
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
@@ -28,6 +29,10 @@ from ..schemas.models import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rag")
 pipeline = RagPipeline()
+
+
+def _budget_exceeded_http_error(error: LlmBudgetExceeded) -> HTTPException:
+    return HTTPException(status_code=429, detail=error.as_detail())
 
 
 @router.get("/health")
@@ -162,6 +167,8 @@ def chat(request: ChatRequest):
             knowledge_assets=request.knowledge_assets,
         )
         return result
+    except LlmBudgetExceeded as e:
+        raise _budget_exceeded_http_error(e)
     except Exception as e:
         logger.exception("Chat failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -185,6 +192,8 @@ def generate_diagram(request: DiagramGenerateRequest):
         )
     except HTTPException:
         raise
+    except LlmBudgetExceeded as e:
+        raise _budget_exceeded_http_error(e)
     except Exception as e:
         logger.exception("Diagram generation failed")
         raise HTTPException(status_code=500, detail=str(e))

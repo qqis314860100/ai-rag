@@ -61,7 +61,8 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         filters ?? {},
         history,
         knowledgeAssets,
-        req.requestId
+        req.requestId,
+        req.user?.id
       );
 
       res.writeHead(200, {
@@ -197,7 +198,8 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       filters ?? {},
       history,
       knowledgeAssets,
-      req.requestId
+      req.requestId,
+      req.user?.id
     );
 
     // Save assistant message

@@ -80,11 +80,7 @@ def chat(
             status="blocked",
             error=str(e),
         )
-        return {
-            "content": f"本次请求已被本地预算保护拦截：{e}",
-            "model": config.deepseek_model + " (blocked)",
-            "latency_ms": 0,
-        }
+        raise
     except Exception as e:
         logger.error(f"DeepSeek API error: {e}")
         record_usage(
@@ -147,7 +143,7 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
             status="blocked",
             error=str(e),
         )
-        yield f"data: {_sse_json({'type': 'error', 'message': f'本次请求已被本地预算保护拦截：{e}'})}\n\n"
+        yield f"data: {_sse_json({'type': 'error', **e.as_detail()})}\n\n"
     except Exception as e:
         logger.error(f"DeepSeek streaming error: {e}")
         record_usage(
