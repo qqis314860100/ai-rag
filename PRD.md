@@ -352,7 +352,7 @@
 - [x] `repo`: 将根目录 `人类阅读的/` 重命名为 `docs/参考资料/`，并把根目录 `企业知识库RAG精准问答+多轮会话记忆 全套落地流程方案.md` 移入；根目录只保留 README/AGENTS/CLAUDE/PRD/progress。
 - [x] `api`: 拆分 `api/src/routes/chat.ts`（1433 行）为 `routes/chat/{sessions,messages,notes,sources,artifacts}.ts`，`index.ts` 只做装配；行为不变，跑 `api/tests/run-tests.sh` 验证。
 - [x] `rag`: 拆分 `rag/app/core/pipeline.py`（899 行）为 `pipeline/{rewrite,retrieve,generate,refusal}.py`，`__init__.py` 顺序编排；`rag/evals/` 全量回归。
-- [ ] `api`: 拆分 `api/src/db/index.ts`（555 行）按主题分文件（identity / documents / chat / artifacts / knowledge / platform），`index.ts` 只做 `initDb` 装配。
+- [x] `api`: 拆分 `api/src/db/index.ts`（555 行）按主题分文件（identity / documents / chat / artifacts / knowledge / platform），`index.ts` 只做 `initDb` 装配。
 - [ ] `repo`: 跨服务统一 artifact 命名：DB 字段、API 响应、前端类型、RAG 输出统一用 `artifact` + `type`（diagram/flowchart/mindmap/chart/table/image），消除"artifact / diagram / chart"混用。
 - [ ] `api`: 在 `services/ragClient.ts` 上加 zod 校验，让 RAG 返回的 `AnswerIR` / `DiagramIR` 在边界爆出契约破坏，而不是渗到前端。
 - [ ] `web`: 把 `pages/ChatPage.tsx` + `components/chat/*` + 相关 hooks/types 收敛到 `features/chat/`，其它页面同样改造；当前 `components/*` 按 UI 类型分类已撑不住。
