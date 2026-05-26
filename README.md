@@ -23,7 +23,7 @@
 ```
 ├── web/           ← React 前端 (localhost:5174)
 ├── api/           ← Express API (localhost:3001)
-├── rag/           ← Python RAG 服务 (localhost:8001)
+├── rag/           ← Python RAG 服务 (localhost:8000)
 ├── knowledge/     ← 知识库源文档 (14 篇)
 ├── docs/          ← 项目文档 (含 CONTRIBUTING.md)
 ├── package.json   ← pnpm workspace 编排
@@ -65,6 +65,8 @@ pnpm dev          # Web + API 并行启动
 pnpm dev:rag      # RAG 服务 (Python)
 ```
 
+RAG 服务启动后可通过 http://localhost:8000/rag/health 检查健康状态。
+
 ### 初始化
 
 1. 访问 http://localhost:5174
@@ -98,4 +100,4 @@ pnpm run audit:harness
 |------|------|------|
 | web | 5174 | `pnpm dev:web` |
 | api | 3001 | `pnpm dev:api` |
-| rag | 8001 | `pnpm dev:rag` |
+| rag | 8000 | `pnpm dev:rag` |
