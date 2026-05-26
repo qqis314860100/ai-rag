@@ -309,6 +309,24 @@ export interface KnowledgeCard {
   updated_at: string;
 }
 
+export interface KnowledgeFaq {
+  id: string;
+  question: string;
+  answer: string;
+  source_refs: KnowledgeCardSourceRef[];
+  applicable_scope: string;
+  invalid_conditions: string[];
+  related_card_ids: string[];
+  tags: string[];
+  status: KnowledgeCardStatus;
+  frequency_count: number;
+  created_by: string | null;
+  created_by_name: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SearchHit {
   chunk_id: string;
   document_id: string;

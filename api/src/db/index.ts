@@ -352,6 +352,25 @@ function createTablesV2(database: Database.Database): void {
       UNIQUE(card_id, version)
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_faqs (
+      id TEXT PRIMARY KEY,
+      question TEXT NOT NULL,
+      normalized_question TEXT NOT NULL,
+      answer TEXT NOT NULL DEFAULT '',
+      source_refs_json TEXT NOT NULL DEFAULT '[]',
+      applicable_scope TEXT NOT NULL DEFAULT '',
+      invalid_conditions_json TEXT NOT NULL DEFAULT '[]',
+      related_card_ids_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'ai_draft' CHECK(status IN ('ai_draft','pending_review','returned','published','archived')),
+      frequency_count INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       operator_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -458,6 +477,8 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_knowledge_cards_topic ON knowledge_cards(topic);
     CREATE INDEX IF NOT EXISTS idx_knowledge_cards_reviewer ON knowledge_cards(reviewer_id, status);
     CREATE INDEX IF NOT EXISTS idx_knowledge_card_versions_card_id ON knowledge_card_versions(card_id, version);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_faqs_status ON knowledge_faqs(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_faqs_question ON knowledge_faqs(normalized_question);
   `);
 }
 

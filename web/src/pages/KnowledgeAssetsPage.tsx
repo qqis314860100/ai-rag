@@ -25,6 +25,7 @@ import type {
   ApiResponse,
   Document,
   KnowledgeCard,
+  KnowledgeFaq,
   KnowledgeCardSourceRef,
   KnowledgeCardStatus,
   KnowledgeCardVersion,
@@ -48,10 +49,18 @@ interface KnowledgeAsset {
   source_refs?: KnowledgeCardSourceRef[];
   updated_at?: string;
   card?: KnowledgeCard;
+  faq?: KnowledgeFaq;
 }
 
 interface KnowledgeCardListResponse {
   items: KnowledgeCard[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+interface KnowledgeFaqListResponse {
+  items: KnowledgeFaq[];
   total: number;
   page: number;
   pageSize: number;
@@ -120,6 +129,22 @@ function cardToAsset(card: KnowledgeCard): KnowledgeAsset {
   };
 }
 
+function faqToAsset(faq: KnowledgeFaq): KnowledgeAsset {
+  return {
+    id: faq.id,
+    kind: "faq",
+    title: faq.question,
+    summary: faq.answer || "暂无答案",
+    subtitle: `${faq.frequency_count} 次沉淀 · ${faq.source_refs.length} 条证据`,
+    status: faq.status,
+    related_terms: faq.tags,
+    related_topics: faq.related_card_ids,
+    source_refs: faq.source_refs,
+    updated_at: faq.updated_at,
+    faq,
+  };
+}
+
 function matchesDocument(doc: Document, asset: KnowledgeAsset) {
   const refs = asset.source_refs || [];
   if (refs.some((ref) => ref.document_id === doc.id)) return true;
@@ -157,6 +182,7 @@ export default function KnowledgeAssetsPage() {
   const [activeStatus, setActiveStatus] = useState<AssetStatus | "all">("all");
   const [keyword, setKeyword] = useState("");
   const [cards, setCards] = useState<KnowledgeCard[]>([]);
+  const [faqs, setFaqs] = useState<KnowledgeFaq[]>([]);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
@@ -186,6 +212,15 @@ export default function KnowledgeAssetsPage() {
         if (mounted) setCardsLoading(false);
       });
 
+    api.get<ApiResponse<KnowledgeFaqListResponse>>("/knowledge/faqs?page=1&page_size=80")
+      .then((res) => {
+        if (!mounted) return;
+        setFaqs(res.data.items || []);
+      })
+      .catch(() => {
+        if (mounted) setFaqs([]);
+      });
+
     api.get<ApiResponse<PaginatedResponse<Document>>>("/documents?page=1&page_size=80")
       .then((res) => {
         if (mounted) setDocuments(res.data.items || []);
@@ -202,7 +237,7 @@ export default function KnowledgeAssetsPage() {
     };
   }, []);
 
-  const assets = useMemo(() => cards.map(cardToAsset), [cards]);
+  const assets = useMemo(() => [...cards.map(cardToAsset), ...faqs.map(faqToAsset)], [cards, faqs]);
 
   const filteredAssets = useMemo(() => {
     const term = normalize(keyword);
@@ -225,12 +260,13 @@ export default function KnowledgeAssetsPage() {
   }, [assets, filteredAssets, selectedId]);
 
   const selectedCard = selectedAsset?.card || null;
+  const selectedFaq = selectedAsset?.faq || null;
 
   useEffect(() => {
     setForm(formFromCard(selectedCard));
     setSelectedVersionId(null);
     setError(null);
-  }, [selectedCard?.id]);
+  }, [selectedCard?.id, selectedFaq?.id]);
 
   const selectedVersion = useMemo(() => {
     if (!selectedCard) return null;
@@ -522,11 +558,56 @@ export default function KnowledgeAssetsPage() {
                       </button>
                     </div>
                   </>
+                ) : selectedFaq ? (
+                  <>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-accent-soft px-2 py-1 text-[11px] font-semibold text-accent">
+                      FAQ
+                    </span>
+                    <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusClass(selectedFaq.status)}`}>
+                      {statusLabels[selectedFaq.status]}
+                    </span>
+                    <span className="rounded-md bg-surface-page px-2 py-1 text-[11px] font-semibold text-text-muted">
+                      {selectedFaq.frequency_count} 次沉淀
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-semibold text-text">{selectedFaq.question}</h2>
+                  <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{selectedFaq.answer}</p>
+
+                  <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border border-border bg-surface-page p-3">
+                      <p className="text-xs font-semibold text-text-muted">适用范围</p>
+                      <p className="mt-2 text-sm leading-relaxed text-text-secondary">{selectedFaq.applicable_scope || "待人工补充"}</p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-surface-page p-3">
+                      <p className="text-xs font-semibold text-text-muted">失效条件</p>
+                      {selectedFaq.invalid_conditions.length ? (
+                        <ul className="mt-2 space-y-1 text-sm leading-relaxed text-text-secondary">
+                          {selectedFaq.invalid_conditions.map((condition) => (
+                            <li key={condition}>{condition}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-sm text-text-muted">暂无明确失效条件</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedFaq.tags.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {selectedFaq.tags.map((tag) => (
+                        <span key={tag} className="rounded-md border border-border bg-white px-2.5 py-1.5 text-xs text-text-secondary">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  </>
                 ) : (
                   <div className="rounded-lg border border-dashed border-border bg-surface-page p-6">
-                    <h2 className="text-base font-semibold text-text">等待知识卡数据</h2>
+                    <h2 className="text-base font-semibold text-text">等待知识资产数据</h2>
                     <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-                      当前页面只渲染 API 返回的真实知识卡；不会在前端编造知识资产。
+                      当前页面只渲染 API 返回的真实知识资产；不会在前端编造 FAQ 或知识卡。
                     </p>
                   </div>
                 )}
@@ -578,9 +659,9 @@ export default function KnowledgeAssetsPage() {
                   <Link2 className="h-4 w-4 text-accent" />
                   引用证据
                 </h3>
-                {selectedCard?.source_refs.length ? (
+                {selectedAsset?.source_refs?.length ? (
                   <div className="space-y-2">
-                    {selectedCard.source_refs.slice(0, 8).map((source, index) => (
+                    {selectedAsset.source_refs.slice(0, 8).map((source, index) => (
                       <div key={`${source.source_id || source.chunk_id || index}`} className="rounded-md border border-border bg-surface-page px-3 py-2">
                         <p className="truncate text-xs font-semibold text-text">{sourceTitle(source, index)}</p>
                         {source.snippet && <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-text-muted">{source.snippet}</p>}
