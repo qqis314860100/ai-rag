@@ -212,7 +212,7 @@ def chat_stream(request: ChatRequest):
             )
             hits = search_result["results"]
             if rewritten_query != request.query:
-                hits = _keyword_rerank(request.query, hits, request.filters)
+                hits = _keyword_rerank(f"{request.query} {rewritten_query}", hits, request.filters)
 
             # Send search metadata
             yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})}\n\n"

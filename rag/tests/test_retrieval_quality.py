@@ -1,4 +1,5 @@
-from app.core.pipeline import _estimate_confidence, _extract_query_terms, _keyword_rerank
+from app.core import pipeline as pipeline_module
+from app.core.pipeline import RagPipeline, _estimate_confidence, _extract_query_terms, _keyword_rerank
 from app.llm.prompt_builder import SYSTEM_PROMPT
 
 
@@ -51,6 +52,36 @@ def test_keyword_rerank_promotes_exact_domain_match_over_noisy_vector_score() ->
     assert reranked[0]["content"].startswith("绝缘电阻测试标准")
     assert reranked[0]["score"] > reranked[1]["score"]
     assert reranked[0]["metadata"]["ranking"]["keyword_coverage"] > reranked[1]["metadata"]["ranking"]["keyword_coverage"]
+
+
+def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_embed_query(query: str) -> list[float]:
+        captured["embedding_query"] = query
+        return [0.1, 0.2, 0.3]
+
+    def fake_search(query_embedding, allowed_security_levels, top_k, filters=None):
+        return [
+            _hit(0.61, "开路电压异常时需要复核静置时间、采样线和电压阈值。"),
+            _hit(0.7, "设备维护周期和日常点检要求。", document_title="常见设备故障与维护"),
+        ]
+
+    monkeypatch.setattr(pipeline_module, "embed_query", fake_embed_query)
+    monkeypatch.setattr(pipeline_module, "search", fake_search)
+
+    result = RagPipeline().search(
+        query="OCV异常怎么处理？",
+        top_k=2,
+        allowed_security_levels=["internal"],
+    )
+
+    assert "开路电压" in captured["embedding_query"]
+    assert result["expanded_query"] == captured["embedding_query"]
+    assert result["term_expansion_hits"][0]["canonical_term"] == "OCV"
+    domain_hit = next(hit for hit in result["results"] if hit["content"].startswith("开路电压异常"))
+    noisy_hit = next(hit for hit in result["results"] if hit["content"].startswith("设备维护周期"))
+    assert domain_hit["metadata"]["ranking"]["keyword_coverage"] > noisy_hit["metadata"]["ranking"]["keyword_coverage"]
 
 
 def test_estimate_confidence_uses_keywords_filters_sources_and_context() -> None:

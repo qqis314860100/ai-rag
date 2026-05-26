@@ -3,6 +3,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from .config import config
+from .terminology import TermExpansionResult, expand_query_with_terms
 from ..parsers.base import ParserRegistry
 from ..parsers.markdown import MarkdownParser
 from ..parsers.text import TxtParser
@@ -100,9 +101,11 @@ class RagPipeline:
         filters: dict | None = None,
     ) -> dict:
         start = time.time()
+        term_expansion = expand_query_with_terms(query)
+        retrieval_query = term_expansion.expanded_query
 
         # 1. Embed query
-        q_embedding = embed_query(query)
+        q_embedding = embed_query(retrieval_query)
 
         # 2. Search ChromaDB
         hits = search(
@@ -111,12 +114,14 @@ class RagPipeline:
             top_k=top_k,
             filters=filters,
         )
-        hits = _keyword_rerank(query, hits, filters)
+        hits = _keyword_rerank(retrieval_query, hits, filters)
 
         latency_ms = int((time.time() - start) * 1000)
 
         return {
             "query": query,
+            "expanded_query": retrieval_query,
+            "term_expansion_hits": _term_expansion_hits_dump(term_expansion),
             "results": hits,
             "latency_ms": latency_ms,
         }
@@ -153,12 +158,13 @@ class RagPipeline:
 
         return {
             "query": query,
-            "normalized_query": query,
+            "normalized_query": search_result.get("expanded_query") or query,
             "filters": filters or {},
             "retrieval": {
                 "mode": "vector",
                 "top_k": top_k,
                 "latency_ms": search_result["latency_ms"],
+                "term_expansion_hits": search_result.get("term_expansion_hits", []),
                 "results": hits,
             },
             "prompt_preview": prompt_preview,
@@ -190,9 +196,9 @@ class RagPipeline:
 
         hits = search_result["results"]
 
-        # 1.5 Re-apply the original user wording after chapter/number rewrite.
+        # 1.5 原问题和扩展 query 一起参与关键词融合，保留用户原词和术语别名命中。
         if rewritten_query != query:
-            hits = _keyword_rerank(query, hits, filters)
+            hits = _keyword_rerank(f"{query} {rewritten_query}", hits, filters)
 
         sources = extract_sources(hits)
         confidence = _estimate_confidence(query, hits, filters)
@@ -490,6 +496,17 @@ def _rewrite_query_with_trace(
         strategies.append("chapter_number_expansion")
         reasons.append("章节编号被展开以提高召回")
 
+    term_expansion = expand_query_with_terms(rewritten_query)
+    term_expansion_hits = _term_expansion_hits_dump(term_expansion)
+    if term_expansion.changed or term_expansion_hits:
+        rewritten_query = term_expansion.expanded_query
+        signals.append("terminology_expansion")
+        for hit in term_expansion.hits:
+            signals.append(f"term:{hit.canonical_term}")
+        if term_expansion.changed:
+            strategies.append("terminology_expansion")
+            reasons.append("命中术语库并扩展别名、缩写和同义表达")
+
     changed = rewritten_query != original_query
     if not strategies and not changed:
         strategies.append("none")
@@ -504,7 +521,12 @@ def _rewrite_query_with_trace(
         reason="；".join(reasons),
         signals=_dedupe_preserve_order(signals),
         history_turns=history_turns,
+        term_expansion_hits=term_expansion_hits,
     )
+
+
+def _term_expansion_hits_dump(result: TermExpansionResult) -> list[dict]:
+    return [hit.as_dict() for hit in result.hits]
 
 
 def _expand_chapter_query(query: str) -> tuple[str, bool]:

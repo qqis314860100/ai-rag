@@ -223,8 +223,18 @@ class SearchRequest(BaseModel):
     allowed_security_levels: list[str] = Field(default=["public", "internal"])
 
 
+class TermExpansionHit(BaseModel):
+    canonical_term: str = ""
+    matched_text: str = ""
+    matched_kind: str = ""
+    expansions: list[str] = Field(default_factory=list)
+    source: str = ""
+
+
 class SearchResult(BaseModel):
     query: str
+    expanded_query: str = ""
+    term_expansion_hits: list[TermExpansionHit] = Field(default_factory=list)
     results: list[SearchHit]
     latency_ms: int
 
@@ -308,6 +318,7 @@ class AnswerQueryRewrite(BaseModel):
     reason: str = ""
     signals: list[str] = Field(default_factory=list)
     history_turns: int = 0
+    term_expansion_hits: list[TermExpansionHit] = Field(default_factory=list)
 
 
 class AnswerCitation(BaseModel):

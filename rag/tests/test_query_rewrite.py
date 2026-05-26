@@ -60,6 +60,19 @@ def test_rewrite_preserves_chapter_number_compatibility() -> None:
     assert _rewrite_query("第五章安全注意事项是什么？") == result.rewritten_query
 
 
+def test_rewrite_expands_battery_terms_with_trace() -> None:
+    result = _rewrite_query_with_trace("OCV异常怎么处理？")
+
+    assert result.changed is True
+    assert result.strategy == "terminology_expansion"
+    assert "开路电压" in result.rewritten_query
+    assert "terminology_expansion" in result.signals
+    assert "term:OCV" in result.signals
+    assert result.term_expansion_hits[0].canonical_term == "OCV"
+    assert result.term_expansion_hits[0].matched_kind == "abbreviation"
+    assert "开路电压" in result.term_expansion_hits[0].expansions
+
+
 def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
