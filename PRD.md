@@ -367,7 +367,7 @@
 - [x] `api`: 暴露 `/api/admin/metrics`（仅 system_admin），输出 QPS、P50/P95、错误率、LLM 调用次数、检索命中率、artifact 成功率的滚动窗口统计。
 - [x] `repo`: 选型并接入轻量指标方案（首选 Prometheus pull + Grafana，或自研 JSON dump）；选型决定写入 `docs/可观测性方案.md`。
 - [x] `api`: 为高风险接口（消息删除、文档删除、知识卡发布、设置变更）补全 `audit_logs` 写入，并在治理视图中暴露。
-- [ ] `api`: 实现 SQLite 日备 + ChromaDB 周备脚本，放到 `scripts/backup_*.sh`，并在 README 写明恢复流程。
+- [x] `api`: 实现 SQLite 日备 + ChromaDB 周备脚本，放到 `scripts/backup_*.sh`，并在 README 写明恢复流程。
 - [ ] `rag`: 接入 `usage_guard` 的硬上限（按用户/按时段），超限返回结构化错误而不是 502。
 - [ ] `repo`: `.env.example` 增补所有可关闭的外发开关（LLM_PROVIDER / IMAGE_GEN_ENABLED / TELEMETRY_ENABLED），便于离线部署。
 - [ ] `api`: 在 `extractUser` 中关闭开发模式的 `system_admin` 默认值（NODE_ENV=production 时强制 401），避免线上裸奔。

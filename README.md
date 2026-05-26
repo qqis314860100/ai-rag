@@ -89,6 +89,19 @@ pnpm run verify
 pnpm run audit:harness
 ```
 
+### 备份与恢复
+
+```bash
+scripts/backup_sqlite_daily.sh
+scripts/backup_chromadb_weekly.sh
+```
+
+- SQLite 默认从 `api/data/app.db` 备份到 `data/backups/sqlite/`，保留 14 天，可用 `DB_PATH`、`BACKUP_DIR`、`KEEP_DAYS` 覆盖。
+- ChromaDB 默认从 `rag/data/chroma/` 备份到 `data/backups/chromadb/`，保留 8 周，可用 `CHROMA_DIR`、`BACKUP_DIR`、`KEEP_WEEKS` 覆盖。
+- 恢复 SQLite：先停止 API，再把目标 `.db` 复制回 `api/data/app.db`。
+- 恢复 ChromaDB：先停止 RAG，再清空或移走 `rag/data/chroma/`，解压目标 `chroma-*.tar.gz` 到 `rag/data/`。
+- 恢复后依次启动 `pnpm dev:rag` 和 `pnpm dev:api`，检查 `/rag/health` 与 `/api/admin/health`。
+
 ### 聊天体验文档
 
 - [需求文档](docs/CHAT_EXPERIENCE_SPEC.md)
