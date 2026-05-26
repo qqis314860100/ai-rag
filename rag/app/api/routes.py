@@ -12,7 +12,7 @@ from ..core.pipeline import (
     _rewrite_query_with_trace,
     _suggest_followups,
 )
-from ..evaluation import DiagramIR, build_llm_diagram_ir
+from ..evaluation import DiagramIR, build_llm_diagram_ir, plan_visual_artifacts
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
@@ -228,7 +228,14 @@ def chat_stream(request: ChatRequest):
                     metadata=refusal.metadata,
                 )
                 yield f"data: {_sse_json({'type': 'token', 'content': REFUSAL_ANSWER})}\n\n"
-                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': confidence, 'followups': [], 'answer_ir': answer_ir.model_dump()})}\n\n"
+                visual_plan = plan_visual_artifacts(
+                    question=request.query,
+                    answer=REFUSAL_ANSWER,
+                    sources=sources,
+                    confidence=confidence,
+                    answer_status=answer_ir.status,
+                )
+                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
                 return
 
             # 3. Stream LLM
@@ -254,12 +261,20 @@ def chat_stream(request: ChatRequest):
                         query_rewrite=query_rewrite,
                         confidence=confidence,
                     )
+                    visual_plan = plan_visual_artifacts(
+                        question=request.query,
+                        answer=full_answer,
+                        sources=sources,
+                        confidence=confidence,
+                        answer_status=answer_ir.status,
+                    )
                     done_data = {
                         "type": "done",
                         "sources": sources,
                         "confidence": confidence,
                         "followups": _suggest_followups(request.query, hits),
                         "answer_ir": answer_ir.model_dump(),
+                        "visual_plan": visual_plan.model_dump(),
                     }
                     yield f"data: {_sse_json(done_data)}\n\n"
                 else:

@@ -20,6 +20,7 @@ from ..llm.prompt_builder import (
     extract_sources,
     format_chunks_for_debug,
 )
+from ..evaluation import plan_visual_artifacts
 from ..schemas.models import AnswerIR, AnswerQueryRewrite, AnswerWarning
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,13 @@ class RagPipeline:
             query_rewrite=query_rewrite,
             confidence=confidence,
         )
+        visual_plan = plan_visual_artifacts(
+            question=query,
+            answer=llm_result["content"],
+            sources=sources,
+            confidence=confidence,
+            answer_status=answer_ir.status,
+        )
 
         total_ms = int((time.time() - total_start) * 1000)
 
@@ -248,6 +256,7 @@ class RagPipeline:
                 "total_ms": total_ms,
             },
             "answer_ir": answer_ir.model_dump(),
+            "visual_plan": visual_plan.model_dump(),
         }
 
 
@@ -370,6 +379,13 @@ def _build_refusal_chat_result(
         warnings=refusal.warnings,
         metadata=refusal.metadata,
     )
+    visual_plan = plan_visual_artifacts(
+        question=query,
+        answer=REFUSAL_ANSWER,
+        sources=sources,
+        confidence=confidence,
+        answer_status=answer_ir.status,
+    )
     total_ms = int((time.time() - total_start) * 1000)
 
     return {
@@ -384,6 +400,7 @@ def _build_refusal_chat_result(
             "total_ms": total_ms,
         },
         "answer_ir": answer_ir.model_dump(),
+        "visual_plan": visual_plan.model_dump(),
     }
 
 

@@ -1,6 +1,6 @@
 from app.core import pipeline as pipeline_module
 from app.core.pipeline import RagPipeline, REFUSAL_ANSWER, _estimate_confidence, _rewrite_query_with_trace
-from app.evaluation import DiagramIR, build_llm_diagram_ir, validate_diagram_ir
+from app.evaluation import DiagramIR, build_llm_diagram_ir, plan_visual_artifacts, validate_diagram_ir
 from app.schemas.models import AnswerIR
 
 
@@ -181,3 +181,31 @@ def test_quality_eval_diagram_topology_rejects_broken_edges_and_missing_coverage
     assert result.can_generate is False
     assert result.missing_source_ids == ["source-b"]
     assert any(error.code == "edge_endpoint_missing" for error in result.errors)
+
+
+def test_quality_eval_visual_planner_auto_selects_primary_flowchart() -> None:
+    plan = plan_visual_artifacts(
+        question="DCR异常的排查流程是什么？",
+        answer="先检查探针接触力，然后复核夹具定位。如果复测仍异常，记录报警并通知设备工程师。",
+        sources=[_hit(0.88, "DCR异常时先检查探针接触力，再复核夹具定位。", "chunk-flow")],
+        confidence=0.82,
+    )
+
+    assert plan.can_generate is True
+    assert plan.artifacts[0].artifact_type == "flowchart"
+    assert plan.artifacts[0].auto_generate is True
+    assert plan.artifacts[0].source_ids == ["chunk-flow"]
+
+
+def test_quality_eval_visual_planner_refuses_low_evidence() -> None:
+    plan = plan_visual_artifacts(
+        question="这个画个图？",
+        answer=REFUSAL_ANSWER,
+        sources=[],
+        confidence=0,
+        answer_status="insufficient_context",
+    )
+
+    assert plan.can_generate is False
+    assert plan.artifacts == []
+    assert plan.warnings[0].code == "visual_plan_not_ready"

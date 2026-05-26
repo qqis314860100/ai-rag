@@ -433,6 +433,28 @@ class AnswerIR(BaseModel):
         )
 
 
+VisualArtifactType = Literal["mindmap", "flowchart", "architecture", "table", "image"]
+
+
+class VisualArtifactPlan(BaseModel):
+    artifact_type: VisualArtifactType
+    auto_generate: bool = False
+    title: str = ""
+    reason: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    priority: int = Field(default=50, ge=0, le=100)
+    source_ids: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class VisualPlan(BaseModel):
+    schema_version: str = "visual-plan/v1"
+    can_generate: bool = False
+    artifacts: list[VisualArtifactPlan] = Field(default_factory=list)
+    warnings: list[AnswerWarning] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatResult(BaseModel):
     message_id: str = ""
     answer: str
@@ -441,6 +463,7 @@ class ChatResult(BaseModel):
     followups: list[str] = Field(default_factory=list)
     trace: ChatTrace = Field(default_factory=ChatTrace)
     answer_ir: AnswerIR | None = None
+    visual_plan: VisualPlan | None = None
 
 
 # ---------------------------------------------------------------------------

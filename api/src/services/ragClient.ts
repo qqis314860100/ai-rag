@@ -100,6 +100,7 @@ interface RagChatResponse {
     total_ms: number;
   };
   answer_ir?: RagAnswerIR | null;
+  visual_plan?: RagVisualPlan | null;
 }
 
 export interface RagAnswerQueryRewrite {
@@ -145,6 +146,27 @@ export interface RagAnswerIR {
   citations?: RagAnswerCitation[];
   query_rewrite?: RagAnswerQueryRewrite;
   confidence?: number;
+  warnings?: RagAnswerWarning[];
+  metadata?: Record<string, unknown>;
+}
+
+export type RagVisualArtifactType = "mindmap" | "flowchart" | "architecture" | "table" | "image";
+
+export interface RagVisualArtifactPlan {
+  artifact_type?: RagVisualArtifactType | string;
+  auto_generate?: boolean;
+  title?: string;
+  reason?: string;
+  confidence?: number;
+  priority?: number;
+  source_ids?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagVisualPlan {
+  schema_version?: string;
+  can_generate?: boolean;
+  artifacts?: RagVisualArtifactPlan[];
   warnings?: RagAnswerWarning[];
   metadata?: Record<string, unknown>;
 }

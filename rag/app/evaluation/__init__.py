@@ -12,3 +12,4 @@ from .diagram_ir import (
     extract_diagram_steps,
     validate_diagram_ir,
 )
+from .visual_planner import plan_visual_artifacts

@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
-import type { DiagramIR, DiagramValidationResult, RagAnswerIR, RagAnswerQueryRewrite } from "../services/ragClient";
+import type { DiagramIR, DiagramValidationResult, RagAnswerIR, RagAnswerQueryRewrite, RagVisualArtifactPlan, RagVisualPlan } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
@@ -89,6 +89,7 @@ type AnswerMessageMetadataInput = {
   trace?: Record<string, unknown>;
   answerIr?: RagAnswerIR | null;
   queryRewrite?: RagAnswerQueryRewrite | null;
+  visualPlan?: RagVisualPlan | null;
 };
 
 function stringValue(value: unknown): string {
@@ -172,6 +173,7 @@ function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<s
     },
     answer_ir_summary: buildAnswerIrSummary(input.answerIr),
     citation_coverage: buildCitationCoverage(input.answerIr, input.sources ?? []),
+    visual_plan: input.visualPlan ?? null,
   };
 }
 
@@ -471,6 +473,43 @@ async function generateDiagramArtifact(
   return { diagram, artifact, sourceIds, existing };
 }
 
+function plannedDiagramType(plan: RagVisualArtifactPlan): "mindmap" | "flowchart" | null {
+  if (plan.artifact_type === "mindmap" || plan.artifact_type === "flowchart") return plan.artifact_type;
+  return null;
+}
+
+async function createAutoArtifactsFromVisualPlan(
+  req: Request,
+  messageId: string,
+  visualPlan: RagVisualPlan | null | undefined
+) {
+  if (!visualPlan?.can_generate) return [];
+
+  const plans = (visualPlan.artifacts ?? [])
+    .filter((plan) => plan.auto_generate && plannedDiagramType(plan))
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || (b.confidence ?? 0) - (a.confidence ?? 0))
+    .slice(0, 1);
+
+  const artifacts: Array<ReturnType<typeof formatArtifact>> = [];
+  for (const plan of plans) {
+    const diagramType = plannedDiagramType(plan);
+    if (!diagramType) continue;
+    try {
+      const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, plan.title);
+      artifacts.push(formatArtifact(artifact));
+    } catch (error) {
+      // 自动产物不能影响主回答保存，失败原因留在审计和回答 metadata 中供排查。
+      auditFromRequest(req, "chat.artifact.auto_generate_failed", "chat_message", messageId, {
+        artifact_type: diagramType,
+        reason: plan.reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return artifacts;
+}
+
 function requireReadableSession(req: Request, sessionId: string): ReturnType<typeof getSessionById> {
   const session = getSessionById(sessionId);
   if (!session) {
@@ -616,6 +655,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         trace?: { retrieval_ms?: number; hit_count?: number };
         queryRewrite?: RagAnswerQueryRewrite;
         answerIr?: RagAnswerIR | null;
+        visualPlan?: RagVisualPlan | null;
       } = {};
       let streamFailed = false;
 
@@ -660,6 +700,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                     confidence: parsed.confidence,
                     followups: parsed.followups,
                     answerIr: parsed.answer_ir,
+                    visualPlan: parsed.visual_plan,
                   };
                 } else if (parsed.type === "error") {
                   streamFailed = true;
@@ -689,6 +730,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         confidence: meta.confidence,
         followups: meta.followups,
         trace: meta.trace,
+        visualPlan: meta.visualPlan,
       });
 
       const assistantMessage = createMessage({
@@ -699,6 +741,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         metadata: assistantMetadata,
         latencyMs: 0,
       });
+      const autoArtifacts = await createAutoArtifactsFromVisualPlan(req, assistantMessage.id, meta.visualPlan);
 
       // Update session title from first message
       if (history.length === 0) {
@@ -713,7 +756,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       });
 
       // Send final event with message_id and session_id
-      res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata, artifacts: autoArtifacts })}\n\n`);
       res.end();
       return;
     }
@@ -736,6 +779,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       confidence: chatResult.confidence,
       followups: chatResult.followups,
       trace: chatResult.trace,
+      visualPlan: chatResult.visual_plan,
     });
 
     const assistantMessage = createMessage({
@@ -746,6 +790,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       metadata: assistantMetadata,
       latencyMs: chatResult.trace?.total_ms,
     });
+    const autoArtifacts = await createAutoArtifactsFromVisualPlan(req, assistantMessage.id, chatResult.visual_plan);
 
     // Update session title from first message
     if (history.length === 0) {
@@ -769,6 +814,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         confidence: chatResult.confidence,
         followups: chatResult.followups,
         trace: chatResult.trace,
+        artifacts: autoArtifacts,
         metadata: assistantMetadata,
       },
       req.requestId
