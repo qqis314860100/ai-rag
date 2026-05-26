@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import pino from "pino";
+import { recordRequestMetric } from "../services/metricsService";
 
 const logger = pino({
   transport: {
@@ -25,6 +26,13 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       duration_ms: durationMs,
       error_code: res.locals.errorCode,
     };
+    recordRequestMetric({
+      route: req.originalUrl,
+      method: req.method,
+      status: res.statusCode,
+      durationMs,
+      errorCode: typeof res.locals.errorCode === "string" ? res.locals.errorCode : undefined,
+    });
 
     if (req.user) {
       logData.user_id = req.user.id;

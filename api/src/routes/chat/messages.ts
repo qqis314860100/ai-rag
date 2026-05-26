@@ -8,6 +8,7 @@ import { auditFromRequest } from "../../services/auditService";
 import { createSession, getSessionById, updateSession } from "../../db/chatSessions";
 import { createMessage, deleteMessageAndTruncateSession, formatMessage, getMessageById, listMessagesBySession, updateMessageAndTruncateSession } from "../../db/chatMessages";
 import { buildPublishedKnowledgeAssetContext } from "../../services/knowledgeAssetContextService";
+import { recordChatMetric } from "../../services/metricsService";
 import { buildAnswerMessageMetadata, createAutoArtifactsFromVisualPlan, requireUserMessageMutationPermission } from "./shared";
 
 const router = Router();
@@ -177,6 +178,10 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         answer_length: fullAnswer.length,
         source_count: meta.sources?.length ?? 0,
       });
+      recordChatMetric({
+        sourceCount: meta.sources?.length ?? 0,
+        llmCalled: (meta.trace?.retrieval_ms ?? 0) >= 0 && fullAnswer.length > 0 && !/^根据当前知识库信息/.test(fullAnswer),
+      });
 
       // Send final event with message_id and session_id
       res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata, artifacts: autoArtifacts })}\n\n`);
@@ -226,6 +231,10 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       query: message.substring(0, 200),
       answer_length: chatResult.answer.length,
       source_count: chatResult.sources.length,
+    });
+    recordChatMetric({
+      sourceCount: chatResult.sources.length,
+      llmCalled: (chatResult.trace?.llm_ms ?? 0) > 0,
     });
 
     sendSuccess(

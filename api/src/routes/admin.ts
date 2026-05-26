@@ -5,8 +5,22 @@ import { sendSuccess, sendPaginated } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { requirePermission } from "../middleware/auth";
 import { auditFromRequest } from "../services/auditService";
+import { getRollingMetrics } from "../services/metricsService";
 
 const router = Router();
+
+// GET /api/admin/metrics - rolling runtime metrics for system admins
+router.get("/admin/metrics", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== "system_admin") {
+      throw new AppError(ErrorCodes.FORBIDDEN, "当前用户无权限查看运行指标。", 403);
+    }
+
+    sendSuccess(res, getRollingMetrics(), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /api/admin/settings - get all settings
 router.get(
