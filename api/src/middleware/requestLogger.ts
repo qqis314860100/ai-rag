@@ -16,10 +16,14 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
     const durationMs = Date.now() - start;
     const logData: Record<string, unknown> = {
       request_id: req.requestId,
+      requestId: req.requestId,
       method: req.method,
       route: req.originalUrl,
+      userId: req.user?.id ?? "anonymous",
+      status: res.statusCode,
       status_code: res.statusCode,
       duration_ms: durationMs,
+      error_code: res.locals.errorCode,
     };
 
     if (req.user) {

@@ -362,7 +362,7 @@
 
 把 §质量目标 / §性能预算 / §安全与权限 / §可观测性 落成具体能力。
 
-- [ ] `api` / `rag`: 在 `requestLogger` 基础上加结构化字段（requestId、userId、route、duration_ms、status、error_code），并在两端贯通同一 requestId。
+- [x] `api` / `rag`: 在 `requestLogger` 基础上加结构化字段（requestId、userId、route、duration_ms、status、error_code），并在两端贯通同一 requestId。
 - [ ] `rag`: 给 `core/pipeline.py` 各阶段（rewrite/retrieve/refusal/generate/artifact）打点耗时，输出到日志和未来的指标系统。
 - [ ] `api`: 暴露 `/api/admin/metrics`（仅 system_admin），输出 QPS、P50/P95、错误率、LLM 调用次数、检索命中率、artifact 成功率的滚动窗口统计。
 - [ ] `repo`: 选型并接入轻量指标方案（首选 Prometheus pull + Grafana，或自研 JSON dump）；选型决定写入 `docs/可观测性方案.md`。

@@ -10,6 +10,7 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   if (err instanceof AppError) {
+    res.locals.errorCode = err.code;
     if (err.statusCode >= 500) {
       logger.error(
         {
@@ -35,6 +36,7 @@ export function errorHandler(
   // Handle multer errors
   if (err.name === "MulterError") {
     const multerErr = err as unknown as { code: string; field?: string };
+    res.locals.errorCode = "FILE_UPLOAD_FAILED";
     sendError(
       res,
       "FILE_UPLOAD_FAILED",
@@ -56,6 +58,7 @@ export function errorHandler(
     "unexpected error"
   );
 
+  res.locals.errorCode = "INTERNAL_ERROR";
   sendError(
     res,
     "INTERNAL_ERROR",
