@@ -12,6 +12,7 @@ from ..core.pipeline import (
     _rewrite_query_with_trace,
     _suggest_followups,
 )
+from ..core.terminology import list_term_entries, terminology_contract
 from ..evaluation import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
@@ -43,6 +44,14 @@ def health():
 @router.get("/usage")
 def usage():
     return usage_summary()
+
+
+@router.get("/terminology/contract")
+def get_terminology_contract():
+    return {
+        "contract": terminology_contract(),
+        "terms": list_term_entries(),
+    }
 
 
 @router.get("/documents")

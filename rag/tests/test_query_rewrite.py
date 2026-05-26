@@ -1,5 +1,6 @@
 from app.core import pipeline as pipeline_module
 from app.core.pipeline import RagPipeline, _rewrite_query, _rewrite_query_with_trace
+from app.core.terminology import list_term_entries, terminology_contract
 
 
 def test_rewrite_resolves_reference_pronoun_from_recent_user_turn() -> None:
@@ -71,6 +72,21 @@ def test_rewrite_expands_battery_terms_with_trace() -> None:
     assert result.term_expansion_hits[0].canonical_term == "OCV"
     assert result.term_expansion_hits[0].matched_kind == "abbreviation"
     assert "开路电压" in result.term_expansion_hits[0].expansions
+
+
+def test_terminology_contract_covers_initial_battery_line_terms() -> None:
+    contract = terminology_contract()
+    terms = {entry["canonical_term"]: entry for entry in list_term_entries()}
+
+    assert contract["schema_version"] == "terminology.v1"
+    assert {"OCV", "DCR", "EOL", "SOC", "SOP", "CCD", "Busbar"}.issubset(terms)
+    for term in ("OCV", "DCR", "EOL", "SOC", "SOP", "CCD", "Busbar"):
+        entry = terms[term]
+        assert entry["definition"]
+        assert entry["applicable_scenarios"]
+        assert entry["source_refs"]
+        assert entry["related_topics"]
+        assert entry["retrieval_terms"]
 
 
 def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> None:

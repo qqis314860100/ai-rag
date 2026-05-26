@@ -15,6 +15,7 @@ import favoritesRouter from "./routes/favorites";
 import authRouter from "./routes/auth";
 import statsRouter from "./routes/stats";
 import adminRouter from "./routes/admin";
+import knowledgeRouter from "./routes/knowledge";
 
 const config = loadConfig();
 
@@ -43,6 +44,7 @@ app.use("/api", favoritesRouter);
 app.use("/api", authRouter);
 app.use("/api", statsRouter);
 app.use("/api", adminRouter);
+app.use("/api", knowledgeRouter);
 
 // Error handler (must be registered last)
 app.use(errorHandler);

@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
+import { seedDefaultTerminology } from "./terminology";
 
 let db: Database.Database | null = null;
 
@@ -299,6 +300,24 @@ function createTablesV2(database: Database.Database): void {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS terminology_terms (
+      id TEXT PRIMARY KEY,
+      canonical_term TEXT NOT NULL UNIQUE,
+      abbreviation TEXT NOT NULL DEFAULT '',
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      synonyms_json TEXT NOT NULL DEFAULT '[]',
+      definition TEXT NOT NULL DEFAULT '',
+      applicable_scenarios_json TEXT NOT NULL DEFAULT '[]',
+      source_refs_json TEXT NOT NULL DEFAULT '[]',
+      related_topics_json TEXT NOT NULL DEFAULT '[]',
+      retrieval_terms_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','published','archived')),
+      source TEXT NOT NULL DEFAULT 'manual',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_cards (
       id TEXT PRIMARY KEY,
       topic TEXT NOT NULL,
@@ -433,6 +452,8 @@ function createTablesV2(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_chat_notes_user ON chat_notes(user_id, status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_chat_artifacts_message_id ON chat_artifacts(message_id, status);
     CREATE INDEX IF NOT EXISTS idx_chat_artifacts_session_id ON chat_artifacts(session_id, status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_terminology_terms_status ON terminology_terms(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_terminology_terms_canonical ON terminology_terms(canonical_term);
     CREATE INDEX IF NOT EXISTS idx_knowledge_cards_status ON knowledge_cards(status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_knowledge_cards_topic ON knowledge_cards(topic);
     CREATE INDEX IF NOT EXISTS idx_knowledge_cards_reviewer ON knowledge_cards(reviewer_id, status);
@@ -508,4 +529,6 @@ function seedData(database: Database.Database): void {
       insertSetting.run(key, value, valueType, desc, now);
     }
   }
+
+  seedDefaultTerminology(database);
 }
