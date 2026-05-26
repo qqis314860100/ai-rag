@@ -9,6 +9,13 @@ interface DiagramModalProps {
 
 const ExcalidrawDiagramCanvas = lazy(() => import("./ExcalidrawDiagramCanvas"));
 
+function diagramLabel(diagram: DiagramIR) {
+  if (diagram.type === "flowchart") return "流程图";
+  if (diagram.type === "diagram") return "图解";
+  if (diagram.type === "chart") return "图表";
+  return "思维导图";
+}
+
 export function DiagramCanvas({ diagram }: { diagram: DiagramIR }) {
   return (
     <Suspense
@@ -48,7 +55,7 @@ export default function DiagramModal({ diagram, onClose }: DiagramModalProps) {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-medium text-text-muted">
-                {diagram.diagram_type === "flowchart" ? "流程图" : "思维导图"} · {nodeCount} 节点 · {edgeCount} 连线
+                {diagramLabel(diagram)} · {nodeCount} 节点 · {edgeCount} 连线
               </p>
               <h2 className="truncate text-base font-semibold text-text">{diagram.title || "AI 整理"}</h2>
             </div>

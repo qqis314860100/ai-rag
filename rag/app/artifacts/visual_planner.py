@@ -11,6 +11,7 @@ MAX_AUTO_ARTIFACTS = 1
 
 _FLOW_PATTERN = re.compile(r"流程|步骤|先|再|然后|之后|最后|如果|是否|判断|异常|排查|处理|恢复|复测")
 _MINDMAP_PATTERN = re.compile(r"有哪些|包括|包含|总结|整理|要点|分类|风险|原因|影响|方法|标准")
+_CHART_PATTERN = re.compile(r"趋势|对比|比例|分布|统计|变化|指标|曲线|占比|同比|环比|数量|排行|Top", re.I)
 _TABLE_PATTERN = re.compile(r"\|.+\||参数|阈值|范围|标准|对比|清单|\d+(?:\.\d+)?\s?(?:V|A|mA|MΩ|Ω|%|秒|s)")
 _ARCH_PATTERN = re.compile(r"架构|系统|模块|链路|接口|数据流|服务|组件")
 _IMAGE_PATTERN = re.compile(r"图片|示意图|生成图|文生图|画一张|可视化海报")
@@ -35,7 +36,7 @@ def _score(base: float, confidence: float, has_sources: bool) -> float:
 
 
 def _plan(
-    artifact_type: str,
+    type: str,
     title: str,
     reason: str,
     confidence: float,
@@ -45,7 +46,7 @@ def _plan(
     metadata: dict[str, Any] | None = None,
 ) -> VisualArtifactPlan:
     return VisualArtifactPlan(
-        artifact_type=artifact_type,
+        type=type,
         title=title[:48],
         reason=reason,
         confidence=confidence,
@@ -89,6 +90,7 @@ def plan_visual_artifacts(
     flow_hits = len(_FLOW_PATTERN.findall(text))
     mindmap_hits = len(_MINDMAP_PATTERN.findall(text))
     table_hits = len(_TABLE_PATTERN.findall(text))
+    chart_hits = len(_CHART_PATTERN.findall(text))
     arch_hits = len(_ARCH_PATTERN.findall(text))
     image_hits = len(_IMAGE_PATTERN.findall(question))
 
@@ -121,14 +123,27 @@ def plan_visual_artifacts(
     if arch_hits >= 2:
         score = _score(min(1.0, 0.55 + arch_hits * 0.07), confidence, has_sources)
         plans.append(_plan(
-            "architecture",
+            "diagram",
             "架构图",
             "问题或回答包含系统、接口、模块或数据流信号，适合生成架构图。",
             score,
             78,
             source_ids,
             False,
-            {"signals": {"architecture_hits": arch_hits}, "requires_renderer": "architecture"},
+            {"signals": {"architecture_hits": arch_hits}, "requires_renderer": "excalidraw", "subtype": "architecture"},
+        ))
+
+    if chart_hits >= 2:
+        score = _score(min(1.0, 0.54 + chart_hits * 0.06), confidence, has_sources)
+        plans.append(_plan(
+            "chart",
+            "图表",
+            "回答包含趋势、对比或统计信号，适合生成图表。",
+            score,
+            76,
+            source_ids,
+            False,
+            {"signals": {"chart_hits": chart_hits}, "requires_renderer": "echarts"},
         ))
 
     if table_hits >= 2:
@@ -176,6 +191,7 @@ def plan_visual_artifacts(
             "signal_counts": {
                 "flow": flow_hits,
                 "mindmap": mindmap_hits,
+                "chart": chart_hits,
                 "table": table_hits,
                 "architecture": arch_hits,
                 "image": image_hits,

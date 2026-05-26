@@ -69,7 +69,7 @@ def test_quality_eval_flow_answer_diagram_has_top_down_sequence() -> None:
             {
               "title": "EOL测试流程",
               "objective": "提炼测试执行顺序",
-              "diagram_type": "flowchart",
+              "type": "flowchart",
               "layout_hint": "top_to_bottom",
               "nodes": [
                 {"id": "select", "label": "选择待测模组", "kind": "step", "source_ids": ["source-a"]},
@@ -177,7 +177,7 @@ def test_quality_eval_pronoun_followup_rewrite_keeps_trace() -> None:
 def test_quality_eval_diagram_topology_rejects_broken_edges_and_missing_coverage() -> None:
     ir = DiagramIR.model_validate({
         "title": "断裂图解",
-        "diagram_type": "flowchart",
+        "type": "flowchart",
         "nodes": [
             {"id": "step-1", "label": "选择待测模组", "source_ids": ["source-a"]},
             {"id": "step-2", "label": "执行绝缘测试", "source_ids": ["source-a"]},
@@ -204,7 +204,7 @@ def test_quality_eval_visual_planner_auto_selects_primary_flowchart() -> None:
     )
 
     assert plan.can_generate is True
-    assert plan.artifacts[0].artifact_type == "flowchart"
+    assert plan.artifacts[0].type == "flowchart"
     assert plan.artifacts[0].auto_generate is True
     assert plan.artifacts[0].source_ids == ["chunk-flow"]
 

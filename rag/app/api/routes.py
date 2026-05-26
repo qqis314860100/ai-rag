@@ -170,9 +170,9 @@ def chat(request: ChatRequest):
 @router.post("/diagram/generate", response_model=DiagramIR)
 def generate_diagram(request: DiagramGenerateRequest):
     try:
-        diagram_type = request.diagram_type.strip().lower()
+        diagram_type = request.type.strip().lower()
         if diagram_type not in {"mindmap", "flowchart"}:
-            raise HTTPException(status_code=400, detail="diagram_type must be mindmap or flowchart")
+            raise HTTPException(status_code=400, detail="type must be mindmap or flowchart")
         if not request.content.strip():
             raise HTTPException(status_code=400, detail="content is required")
 

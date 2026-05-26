@@ -18,7 +18,7 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     )
 
     assert ir.title == "产线排查流程"
-    assert ir.diagram_type == "flowchart"
+    assert ir.type == "flowchart"
     assert ir.layout_hint == "top_to_bottom"
     assert ir.schema_version == "diagram-ir/v2"
     assert ir.can_generate is True
@@ -39,7 +39,7 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert ir.source_evidence == [{"source_id": "source-a", "title": "", "section": "", "snippet": ""}, {"source_id": "source-b", "title": "", "section": "", "snippet": ""}]
     assert ir.excalidraw_scene is not None
     assert ir.excalidraw_scene["type"] == "excalidraw"
-    assert ir.excalidraw_scene["metadata"]["diagram_type"] == "flowchart"
+    assert ir.excalidraw_scene["metadata"]["type"] == "flowchart"
     assert any(element["type"] == "arrow" for element in ir.excalidraw_scene["elements"])
     assert any(element["type"] == "text" and element["containerId"] == "node-step-1" for element in ir.excalidraw_scene["elements"])
     assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
@@ -66,7 +66,7 @@ def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
         diagram_type="mindmap",
     )
 
-    assert ir.diagram_type == "mindmap"
+    assert ir.type == "mindmap"
     assert ir.layout_hint == "radial"
     assert ir.can_generate is True
     assert ir.validation is not None
@@ -101,7 +101,7 @@ def test_build_llm_diagram_ir_uses_structured_business_nodes_only() -> None:
             {
               "title": "压力异常排查",
               "objective": "提炼排查步骤和判断点",
-              "diagram_type": "flowchart",
+              "type": "flowchart",
               "layout_hint": "top_to_bottom",
               "nodes": [
                 {"id": "start", "label": "确认压力报警", "kind": "step", "source_ids": ["source-a"]},
@@ -130,7 +130,7 @@ def test_build_llm_diagram_ir_uses_structured_business_nodes_only() -> None:
 
     assert ir.metadata["generation_mode"] == "llm_structured"
     assert ir.metadata["model"] == "fake-structured"
-    assert ir.diagram_type == "flowchart"
+    assert ir.type == "flowchart"
     assert [node.label for node in ir.nodes] == ["确认压力报警", "检查阀门复位状态", "压力是否恢复"]
     assert not any(node.kind == "evidence" for node in ir.nodes)
     assert not any(edge.relation == "supported_by" for edge in ir.edges)
@@ -153,7 +153,7 @@ def test_build_llm_diagram_ir_falls_back_when_structured_output_is_invalid() -> 
     )
 
     assert ir.metadata["generation_mode"] == "keyword_fallback"
-    assert ir.diagram_type == "mindmap"
+    assert ir.type == "mindmap"
     assert not any(node.kind == "evidence" for node in ir.nodes)
 
 
@@ -166,7 +166,7 @@ def test_extract_diagram_keywords_prefers_repeated_domain_terms() -> None:
 def test_validate_diagram_ir_rejects_invalid_edges_and_tracks_source_coverage() -> None:
     ir = DiagramIR(
         title="无效图解",
-        diagram_type="flowchart",
+        type="flowchart",
         nodes=[DiagramNode(id="step-1", label="确认夹具状态", source_ids=["source-a"])],
         edges=[DiagramEdge(source="step-1", target="missing", relation="sequence")],
     )

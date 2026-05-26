@@ -199,7 +199,8 @@ export interface DiagramValidationResult {
 export interface DiagramIR {
   title: string;
   objective: string;
-  diagram_type: DiagramType | string;
+  type: DiagramType | string;
+  diagram_type?: DiagramType | string;
   layout_hint: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];

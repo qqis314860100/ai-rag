@@ -64,7 +64,7 @@ export function parseMessageSources(message: ReturnType<typeof getMessageById>):
 export function normalizeDiagramType(value: unknown): "mindmap" | "flowchart" {
   const rawDiagramType = typeof value === "string" ? value : "mindmap";
   if (rawDiagramType !== "mindmap" && rawDiagramType !== "flowchart") {
-    throw new AppError(ErrorCodes.VALIDATION_ERROR, "diagram_type 必须是 mindmap 或 flowchart。", 400);
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "type 必须是 mindmap 或 flowchart。", 400);
   }
   return rawDiagramType;
 }
@@ -451,7 +451,7 @@ export async function generateDiagramArtifact(
     payload: diagram,
     sourceIds,
     metadata: {
-      diagram_type: diagramType,
+      type: diagramType,
       objective: diagram.objective,
       layout_hint: diagram.layout_hint,
       message_confidence: confidence,
@@ -467,7 +467,7 @@ export async function generateDiagramArtifact(
   auditFromRequest(req, "chat.artifact.generate", "chat_message", messageId, {
     session_id: existing.session_id,
     artifact_id: artifact.id,
-    artifact_type: diagramType,
+    type: diagramType,
     node_count: diagram.nodes.length,
     edge_count: diagram.edges.length,
     source_count: sourceIds.length,
@@ -480,7 +480,7 @@ export async function generateDiagramArtifact(
 }
 
 function plannedDiagramType(plan: RagVisualArtifactPlan): "mindmap" | "flowchart" | null {
-  if (plan.artifact_type === "mindmap" || plan.artifact_type === "flowchart") return plan.artifact_type;
+  if (plan.type === "mindmap" || plan.type === "flowchart") return plan.type;
   return null;
 }
 
@@ -506,7 +506,7 @@ export async function createAutoArtifactsFromVisualPlan(
     } catch (error) {
       // 自动产物不能影响主回答保存，失败原因留在审计和回答 metadata 中供排查。
       auditFromRequest(req, "chat.artifact.auto_generate_failed", "chat_message", messageId, {
-        artifact_type: diagramType,
+        type: diagramType,
         reason: plan.reason,
         error: error instanceof Error ? error.message : String(error),
       });

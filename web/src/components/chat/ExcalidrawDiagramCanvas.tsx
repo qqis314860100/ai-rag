@@ -270,6 +270,13 @@ function toExcalidrawInitialData(diagram: DiagramIR): ExcalidrawInitialDataState
   return createProvidedScene(diagram) || createFallbackScene(diagram);
 }
 
+function diagramLabel(diagram: DiagramIR) {
+  if (diagram.type === "flowchart") return "流程图";
+  if (diagram.type === "diagram") return "图解";
+  if (diagram.type === "chart") return "图表";
+  return "思维导图";
+}
+
 export default function ExcalidrawDiagramCanvas({ diagram }: { diagram: DiagramIR }) {
   const initialData = useMemo(() => toExcalidrawInitialData(diagram), [diagram]);
   const viewport = getViewport(diagram);
@@ -280,7 +287,7 @@ export default function ExcalidrawDiagramCanvas({ diagram }: { diagram: DiagramI
       className="min-w-[860px] overflow-hidden rounded-xl border border-border bg-white shadow-sm-soft"
       style={{ height: Math.max(viewport.height, 620) }}
       role="img"
-      aria-label={`${diagram.title} ${diagram.diagram_type === "flowchart" ? "流程图" : "思维导图"}`}
+      aria-label={`${diagram.title} ${diagramLabel(diagram)}`}
     >
       <Excalidraw
         key={sceneKey}

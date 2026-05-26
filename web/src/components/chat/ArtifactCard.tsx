@@ -1,4 +1,4 @@
-import { AlertCircle, Brain, CheckCircle2, Clock, Eye, FileText, Workflow, XCircle } from "lucide-react";
+import { AlertCircle, BarChart3, Brain, CheckCircle2, Clock, Eye, FileText, Network, Workflow, XCircle } from "lucide-react";
 import type { ChatArtifact } from "../../types";
 
 interface ArtifactCardProps {
@@ -7,8 +7,10 @@ interface ArtifactCardProps {
 }
 
 function artifactLabel(artifact: ChatArtifact) {
+  if (artifact.type === "diagram") return artifact.metadata?.subtype === "architecture" ? "架构图" : "图解";
   if (artifact.type === "mindmap") return "思维导图";
   if (artifact.type === "flowchart") return "流程图";
+  if (artifact.type === "chart") return "图表";
   return artifact.type || "产物";
 }
 
@@ -40,7 +42,15 @@ function StatusBadge({ status }: { status: ChatArtifact["status"] }) {
 }
 
 export default function ArtifactCard({ artifact, onOpen }: ArtifactCardProps) {
-  const Icon = artifact.type === "mindmap" ? Brain : artifact.type === "flowchart" ? Workflow : FileText;
+  const Icon = artifact.type === "mindmap"
+    ? Brain
+    : artifact.type === "flowchart"
+      ? Workflow
+      : artifact.type === "diagram"
+        ? Network
+        : artifact.type === "chart"
+          ? BarChart3
+          : FileText;
   const isReady = artifact.status === "ready";
   const confidence = artifact.confidence > 0 ? `${Math.round(artifact.confidence * 100)}%` : null;
 

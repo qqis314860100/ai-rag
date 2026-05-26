@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Mapping
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from ..core.source_metadata import build_source_metadata
 
 
@@ -445,11 +445,11 @@ class AnswerIR(BaseModel):
         )
 
 
-VisualArtifactType = Literal["mindmap", "flowchart", "architecture", "table", "image"]
+VisualArtifactType = Literal["diagram", "flowchart", "mindmap", "chart", "table", "image"]
 
 
 class VisualArtifactPlan(BaseModel):
-    artifact_type: VisualArtifactType
+    type: VisualArtifactType = Field(validation_alias=AliasChoices("type", "artifact_type"))
     auto_generate: bool = False
     title: str = ""
     reason: str = ""
@@ -485,7 +485,7 @@ class ChatResult(BaseModel):
 class DiagramGenerateRequest(BaseModel):
     title: str = "AI 整理"
     content: str
-    diagram_type: str = "mindmap"
+    type: str = Field(default="mindmap", validation_alias=AliasChoices("type", "diagram_type"))
     source_ids: list[str] = Field(default_factory=list)
     max_steps: int = Field(default=8, ge=2, le=12)
 

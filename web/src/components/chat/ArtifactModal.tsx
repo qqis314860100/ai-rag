@@ -49,7 +49,11 @@ function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
   return {
     title: typeof artifact.payload.title === "string" ? artifact.payload.title : artifact.title,
     objective: typeof artifact.payload.objective === "string" ? artifact.payload.objective : "",
-    diagram_type: typeof artifact.payload.diagram_type === "string" ? artifact.payload.diagram_type : artifact.type,
+    type: typeof artifact.payload.type === "string"
+      ? artifact.payload.type
+      : typeof artifact.payload.diagram_type === "string"
+        ? artifact.payload.diagram_type
+        : artifact.type,
     layout_hint: typeof artifact.payload.layout_hint === "string" ? artifact.payload.layout_hint : "",
     nodes,
     edges,
@@ -68,8 +72,10 @@ function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
 }
 
 function artifactKindLabel(artifact: ChatArtifact) {
+  if (artifact.type === "diagram") return artifact.metadata?.subtype === "architecture" ? "架构图" : "图解";
   if (artifact.type === "mindmap") return "思维导图";
   if (artifact.type === "flowchart") return "流程图";
+  if (artifact.type === "chart") return "图表";
   return artifact.type || "产物";
 }
 

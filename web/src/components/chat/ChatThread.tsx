@@ -465,7 +465,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       const res = await api.post<ApiResponse<ChatArtifact>>(
         `/chat/messages/${encodeURIComponent(messageId)}/artifacts/generate`,
         {
-          diagram_type: diagramType,
           type: diagramType,
           title: "AI 整理",
         }
@@ -639,7 +638,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                       })}
                       {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
                         const state = diagramStates[getDiagramKey(persistedMessageId, type)];
-                        const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.diagram_type === type);
+                        const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.type === type || artifact.metadata?.diagram_type === type);
                         const Icon = type === "mindmap" ? Brain : Workflow;
                         return (
                           <button

@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 
 class DiagramQualityWarning(BaseModel):
@@ -62,7 +62,7 @@ class DiagramIR(BaseModel):
     schema_version: str = "diagram-ir/v2"
     title: str
     objective: str = ""
-    diagram_type: str = "graph"
+    type: str = Field(default="graph", validation_alias=AliasChoices("type", "diagram_type"))
     layout_hint: str = "auto"
     can_generate: bool = True
     nodes: list[DiagramNode] = Field(default_factory=list)
@@ -77,6 +77,10 @@ class DiagramIR(BaseModel):
     source_evidence: list[dict[str, Any]] = Field(default_factory=list)
     excalidraw_scene: dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def diagram_type(self) -> str:
+        return self.type
 
 
 class StructuredDiagramNode(BaseModel):
@@ -97,12 +101,16 @@ class StructuredDiagramEdge(BaseModel):
 class StructuredDiagramOutput(BaseModel):
     title: str = ""
     objective: str = ""
-    diagram_type: str = "mindmap"
+    type: str = Field(default="mindmap", validation_alias=AliasChoices("type", "diagram_type"))
     layout_hint: str = "auto"
     nodes: list[StructuredDiagramNode] = Field(default_factory=list)
     edges: list[StructuredDiagramEdge] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @property
+    def diagram_type(self) -> str:
+        return self.type
 
 
 StructuredDiagramChat = Callable[..., dict[str, Any]]
@@ -760,7 +768,7 @@ def _layout_suggestion_for(ir: DiagramIR) -> DiagramLayoutSuggestion:
         for key, value in viewport.items()
         if key in {"width", "height"} and isinstance(value, (int, float))
     }
-    if ir.diagram_type == "flowchart":
+    if ir.type == "flowchart":
         return DiagramLayoutSuggestion(
             layout_hint=ir.layout_hint or "top_to_bottom",
             direction="top_to_bottom",
@@ -769,7 +777,7 @@ def _layout_suggestion_for(ir: DiagramIR) -> DiagramLayoutSuggestion:
             viewport=normalized_viewport,
             notes=["流程图建议保持单主线自上而下布局，decision 节点用于承载判断条件。"],
         )
-    if ir.diagram_type == "mindmap":
+    if ir.type == "mindmap":
         return DiagramLayoutSuggestion(
             layout_hint=ir.layout_hint or "radial",
             direction="radial",
@@ -852,11 +860,11 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
         warnings.append(_diagram_warning("duplicate_edge", "存在重复连线，建议生成前去重。", edge_ids=sorted(duplicate_edges)))
     if not ir.nodes:
         errors.append(_diagram_warning("empty_nodes", "图解至少需要一个节点。", severity="error"))
-    if ir.diagram_type not in _ALLOWED_DIAGRAM_TYPES:
+    if ir.type not in _ALLOWED_DIAGRAM_TYPES:
         warnings.append(_diagram_warning("unknown_diagram_type", "未知图解类型会触发前端通用图兜底渲染。"))
-    if ir.diagram_type == "flowchart" and len(ir.nodes) > 1 and not ir.edges:
+    if ir.type == "flowchart" and len(ir.nodes) > 1 and not ir.edges:
         warnings.append(_diagram_warning("flowchart_without_edges", "流程图有多个节点但没有连线，流程关系不完整。"))
-    if ir.diagram_type == "mindmap" and not any(node.kind == "root" for node in ir.nodes):
+    if ir.type == "mindmap" and not any(node.kind == "root" for node in ir.nodes):
         warnings.append(_diagram_warning("mindmap_without_root", "思维导图缺少 root 节点，布局稳定性会下降。"))
 
     covered_required_sources = covered_sources & required_sources if required_sources else covered_sources
@@ -871,7 +879,7 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
 
     severity_penalty = {"critical": 0.4, "error": 0.35, "warning": 0.1, "info": 0.04}
     penalty = sum(severity_penalty.get(item.severity, 0.1) for item in errors + warnings)
-    structure_bonus = 0.12 if ir.nodes and (ir.diagram_type == "mindmap" or ir.edges) else 0.0
+    structure_bonus = 0.12 if ir.nodes and (ir.type == "mindmap" or ir.edges) else 0.0
     coverage_bonus = 0.12 if required_sources and not missing_sources else 0.0
     quality_score = round(max(0.0, min(1.0, 0.72 + structure_bonus + coverage_bonus - penalty)), 2)
     can_generate = not errors and quality_score >= 0.45
@@ -900,7 +908,7 @@ def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) 
     node_score = min(len(ir.nodes), 10) * 0.02
     edge_score = min(len(ir.edges), 8) * 0.015
     evidence_score = min(len(meaningful_evidence), 4) * 0.09
-    structure_score = 0.12 if ir.nodes and (ir.diagram_type == "mindmap" or ir.edges) else 0.0
+    structure_score = 0.12 if ir.nodes and (ir.type == "mindmap" or ir.edges) else 0.0
     confidence = 0.28 + node_score + edge_score + evidence_score + structure_score
     if not meaningful_evidence:
         confidence = min(confidence, 0.48)
@@ -908,7 +916,7 @@ def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) 
 
 
 def _build_generation_reason(ir: DiagramIR, evidence: list[dict[str, Any]]) -> str:
-    if ir.diagram_type == "mindmap":
+    if ir.type == "mindmap":
         keyword_count = int(ir.metadata.get("keyword_count") or len([node for node in ir.nodes if node.kind == "keyword"]))
         category_count = len(ir.metadata.get("categories", [])) if isinstance(ir.metadata.get("categories"), list) else 0
         return f"基于回答正文提取 {keyword_count} 个关键词，并结合 {len(evidence)} 条来源证据归类为 {category_count} 组思维导图节点。"
@@ -955,7 +963,7 @@ def _build_excalidraw_scene(ir: DiagramIR) -> dict[str, Any]:
         },
         "files": {},
         "metadata": {
-            "diagram_type": ir.diagram_type,
+            "type": ir.type,
             "layout_hint": ir.layout_hint,
             "viewport": viewport,
         },
@@ -991,6 +999,7 @@ def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str])
     }
     ir.metadata["layout_suggestion"] = ir.validation.layout_suggestion.model_dump()
     ir.metadata["artifact_payload"] = {
+        "type": ir.type,
         "renderer": "excalidraw",
         "scene_format": "excalidraw",
         "scene_version": scene["version"],
@@ -1022,7 +1031,7 @@ def _build_structured_diagram_messages(
     schema = {
         "title": "string",
         "objective": "string",
-        "diagram_type": "mindmap|flowchart",
+        "type": "mindmap|flowchart",
         "layout_hint": "radial|top_to_bottom|left_to_right|auto",
         "nodes": [
             {
@@ -1243,7 +1252,7 @@ def _structured_output_to_diagram_ir(
     ir = DiagramIR(
         title=_clean_text(output.title or title, 64) or title,
         objective=_clean_text(output.objective, 140) or "基于回答和引用证据提炼精简业务节点，生成结构化 Diagram IR。",
-        diagram_type=diagram_type,
+        type=diagram_type,
         layout_hint=layout_hint,
         nodes=nodes,
         edges=edges,
@@ -1292,7 +1301,7 @@ def build_llm_diagram_ir(
             response_format=_STRUCTURED_OUTPUT_FORMAT,
         )
         output = StructuredDiagramOutput.model_validate(_parse_json_object(str(response.get("content") or "")))
-        output.diagram_type = normalized_diagram_type
+        output.type = normalized_diagram_type
         return _structured_output_to_diagram_ir(
             output=output,
             title=title,
@@ -1399,7 +1408,7 @@ def build_keyword_diagram_ir(
         return _attach_artifact_payload(_apply_mindmap_layout(DiagramIR(
             title=title,
             objective="基于回答和引用内容提炼核心概念，生成精简思维导图 IR。",
-            diagram_type=diagram_type,
+            type=diagram_type,
             layout_hint="radial",
             nodes=nodes,
             edges=edges,
@@ -1448,7 +1457,7 @@ def build_keyword_diagram_ir(
     return _attach_artifact_payload(_apply_flowchart_layout(DiagramIR(
         title=title,
         objective="基于回答步骤和关键词生成可渲染的流程图 IR。",
-        diagram_type=diagram_type,
+        type=diagram_type,
         layout_hint="top_to_bottom",
         nodes=nodes,
         edges=edges,

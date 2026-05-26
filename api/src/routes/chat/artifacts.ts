@@ -12,12 +12,12 @@ const router = Router();
 router.post("/chat/messages/:id/diagram", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const messageId = req.params.id as string;
-    const rawDiagramType = normalizeDiagramType(req.body?.diagram_type);
+    const rawDiagramType = normalizeDiagramType(req.body?.type ?? req.body?.diagram_type);
     const { diagram, existing, sourceIds } = await generateDiagramArtifact(req, messageId, rawDiagramType, req.body?.title);
 
     auditFromRequest(req, "chat.diagram.generate", "chat_message", messageId, {
       session_id: existing.session_id,
-      diagram_type: rawDiagramType,
+      type: rawDiagramType,
       node_count: diagram.nodes.length,
       edge_count: diagram.edges.length,
       source_count: sourceIds.length,
@@ -45,7 +45,7 @@ router.get("/chat/messages/:id/artifacts", async (req: Request, res: Response, n
 router.post("/chat/messages/:id/artifacts/generate", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const messageId = req.params.id as string;
-    const diagramType = normalizeDiagramType(req.body?.diagram_type ?? req.body?.type);
+    const diagramType = normalizeDiagramType(req.body?.type ?? req.body?.diagram_type);
     const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, req.body?.title);
     sendSuccess(res, formatArtifact(artifact), req.requestId);
   } catch (err) {
@@ -112,7 +112,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
     }
 
     requireReadableAssistantMessage(req, artifact.message_id, "重新生成");
-    const diagramType = normalizeDiagramType(req.body?.diagram_type ?? artifact.type);
+    const diagramType = normalizeDiagramType(req.body?.type ?? req.body?.diagram_type ?? artifact.type);
     const { diagram, sourceIds, confidence, quality } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
     const updated = updateArtifact(artifactId, {
       type: diagramType,
@@ -126,7 +126,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
       sourceIds,
       metadata: {
         ...JSON.parse(artifact.metadata_json || "{}"),
-        diagram_type: diagramType,
+        type: diagramType,
         objective: diagram.objective,
         layout_hint: diagram.layout_hint,
         message_confidence: confidence,
@@ -142,7 +142,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
 
     auditFromRequest(req, "chat.artifact.regenerate", "chat_artifact", artifactId, {
       message_id: artifact.message_id,
-      artifact_type: diagramType,
+      type: diagramType,
       quality_score: quality.qualityScore,
       can_generate: quality.canGenerate,
       confidence: quality.artifactConfidence,
@@ -168,7 +168,7 @@ router.delete("/chat/artifacts/:id", async (req: Request, res: Response, next: N
 
     auditFromRequest(req, "chat.artifact.delete", "chat_artifact", artifactId, {
       message_id: artifact.message_id,
-      artifact_type: artifact.type,
+      type: artifact.type,
     });
 
     sendSuccess(res, { deleted: true }, req.requestId);

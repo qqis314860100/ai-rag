@@ -22,6 +22,23 @@
 
 ## 已完成
 
+### 2026-05-27 - 跨服务统一 artifact/type 命名
+
+- Service: repo / api / rag / web
+- Task: `repo`: 跨服务统一 artifact 命名：DB 字段、API 响应、前端类型、RAG 输出统一用 `artifact` + `type`（diagram/flowchart/mindmap/chart/table/image），消除"artifact / diagram / chart"混用。
+- Changed:
+  - RAG 的 visual plan、DiagramIR、diagram 生成入参改为 `type`，并补了 `diagram` / `chart` 规划类型。
+  - API 生成/重生成/自动产物链路改读写 `type`，metadata 也统一落 `type`。
+  - web 的图解对象、artifact 卡片和弹窗改读新字段，兼容旧数据里的 `diagram_type`。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run build:web`
+  - `cd rag && ./.venv/bin/python -m pytest tests/test_diagram_ir.py tests/test_quality_eval_suite.py`
+  - `git diff --check`
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `api`: 在 `services/ragClient.ts` 上加 zod 校验，让 RAG 返回的 `AnswerIR` / `DiagramIR` 在边界爆出契约破坏，而不是渗到前端。
+
 ### 2026-05-26 - 新增回答产物持久化契约
 
 - Service: api

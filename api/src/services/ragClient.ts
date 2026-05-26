@@ -152,9 +152,10 @@ export interface RagAnswerIR {
   metadata?: Record<string, unknown>;
 }
 
-export type RagVisualArtifactType = "mindmap" | "flowchart" | "architecture" | "table" | "image";
+export type RagVisualArtifactType = "diagram" | "flowchart" | "mindmap" | "chart" | "table" | "image";
 
 export interface RagVisualArtifactPlan {
+  type?: RagVisualArtifactType | string;
   artifact_type?: RagVisualArtifactType | string;
   auto_generate?: boolean;
   title?: string;
@@ -242,7 +243,8 @@ export interface DiagramValidationResult {
 export interface DiagramIR {
   title: string;
   objective: string;
-  diagram_type: DiagramType | string;
+  type: DiagramType | string;
+  diagram_type?: DiagramType | string;
   layout_hint: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
@@ -428,7 +430,7 @@ export async function generateDiagramIR(
     {
       title,
       content,
-      diagram_type: diagramType,
+      type: diagramType,
       source_ids: sourceIds,
       max_steps: 10,
     },
