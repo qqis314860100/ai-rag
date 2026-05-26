@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRD_PATH = ROOT / "PRD.md"
 
 
-TASK_RE = re.compile(r"^- \[( |x|X)\] `([^`]+)`: (.+)$")
+TASK_RE = re.compile(r"^- \[( |x|X)\] (.+?): (.+)$")
 
 
 def load_tasks() -> list[dict[str, object]]:
@@ -32,7 +32,7 @@ def load_tasks() -> list[dict[str, object]]:
             {
                 "section": section,
                 "done": match.group(1).lower() == "x",
-                "service": match.group(2),
+                "service": match.group(2).replace("`", ""),
                 "task": match.group(3),
                 "raw": line,
             }
