@@ -696,9 +696,9 @@ export default function ChatPage() {
     : "";
 
   const hasSelectedSources = !!(selectedSources && selectedSources.length > 0);
-  const chatContentClass = `w-full mx-auto px-4 transition-[max-width] duration-slow ease-out ${
-    historyCollapsed ? "max-w-5xl xl:max-w-6xl" : "max-w-3xl"
-  }`;
+  // 主聊天区固定 max-width，不再随 history 折叠在 max-w-3xl↔max-w-6xl 之间跳变；
+  // 右侧栏宽度变化期间，markdown 容器宽度保持稳定，避免长答案重排。
+  const chatContentClass = "w-full mx-auto px-4 max-w-3xl";
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">

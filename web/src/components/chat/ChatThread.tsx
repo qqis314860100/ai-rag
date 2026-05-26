@@ -572,12 +572,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                 /* Streaming — no content yet, show staged progress */
                 <StreamStages />
               ) : (
-                /* AI message — with subtle card background */
-                <div className={`relative rounded-2xl border px-5 py-4 shadow-sm-soft transition-colors duration-normal ${
-                  msg.streaming
-                    ? "bg-accent-soft/20 border-accent/20"
-                    : "bg-surface-page border-border/60"
-                }`}>
+                /* AI message — 统一气泡背景，流式与定稿不再换 bg/border，只靠顶部状态条和光标作为 indicator */
+                <div className="relative rounded-2xl border px-5 py-4 shadow-sm-soft bg-surface-page border-border/60">
                   {/* Streaming label */}
                   {msg.streaming && (
                     <div className="flex items-center justify-between mb-3">
