@@ -1,7 +1,7 @@
 from app.core import pipeline as pipeline_module
 from app.core.terminology import expand_query_with_terms
 from app.core.pipeline import RagPipeline, REFUSAL_ANSWER, _estimate_confidence, _rewrite_query_with_trace
-from app.evaluation import (
+from app.artifacts import (
     DiagramIR,
     build_image_artifact_contract,
     build_llm_diagram_ir,

@@ -21,7 +21,7 @@ from ..llm.prompt_builder import (
     extract_sources,
     format_chunks_for_debug,
 )
-from ..evaluation import plan_visual_artifacts
+from ..artifacts import plan_visual_artifacts
 from ..schemas.models import AnswerIR, AnswerQueryRewrite, AnswerWarning
 
 logger = logging.getLogger(__name__)

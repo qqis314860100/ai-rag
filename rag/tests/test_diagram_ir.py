@@ -1,4 +1,4 @@
-from app.evaluation import (
+from app.artifacts import (
     DiagramEdge,
     DiagramIR,
     DiagramNode,

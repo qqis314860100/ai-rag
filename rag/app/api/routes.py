@@ -13,8 +13,8 @@ from ..core.pipeline import (
     _suggest_followups,
 )
 from ..core.terminology import list_term_entries, terminology_contract
-from ..evaluation import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
-from ..evaluation.knowledge_graph import build_lightweight_knowledge_graph
+from ..artifacts import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
+from ..artifacts.knowledge_graph import build_lightweight_knowledge_graph
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
