@@ -1,238 +1,213 @@
-// Lightweight markdown renderer — handles common LLM formatting
-// patterns including tables, code blocks, styled quotes, and safety callouts.
+import { memo, useCallback, useEffect, useId, useMemo, useRef } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
+// ─── 行内文本增强：参数值高亮 + [来源 N] badge ───
+// 这两个不属于标准 markdown，需要在 text 节点上后处理。
 
-function renderInline(text: string): string {
-  let result = escapeHtml(text);
-
-  // Bold (**text**)
-  result = result.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-text">$1</strong>');
-
-  // Italic (*text*)
-  result = result.replace(/\*(.+?)\*/g, "<em>$1</em>");
-
-  // Inline code (`code`)
-  result = result.replace(/`([^`]+)`/g, '<code class="rounded-md bg-primary-soft px-1.5 py-0.5 text-[13px] font-mono text-primary">$1</code>');
-
-  // Links [text](url)
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" class="text-accent underline decoration-accent/30 hover:decoration-accent transition-colors" target="_blank" rel="noopener noreferrer">$1</a>'
-  );
-
-  // Highlight engineering parameter values: ≥200MΩ, 500VDC, 3s, ≤0.5mm etc.
-  // Use monospace font + subtle badge background for production readability
-  result = result.replace(
-    /([≥≤]?\d+(?:\.\d+)?\s*(?:MΩ|kΩ|Ω|kV|VDC|V|mV|A|mA|MPa|kPa|N|mm|cm|μm|℃|°C|s|ms|min|h)\b)/g,
-    '<strong class="param-value font-semibold text-[#b3462a] bg-red-50/60 px-1.5 py-px rounded font-mono text-[13px] tracking-tight">$1</strong>'
-  );
-
-  return result;
-}
-
-// Safety-related keywords → color mapping for callout detection
-const safetyKeywords: [RegExp, string, string][] = [
-  [/禁止|严禁|不得|切勿|致命|高压危险|触电/g, "border-danger bg-red-50/60 text-danger", "🚫"],
-  [/危险|警告|注意安全|必须穿戴|防护|绝缘破损/g, "border-warning bg-amber-50/60 text-[#b45309]", "⚠️"],
-  [/注意|小心|谨慎|建议|应当/g, "border-accent bg-accent-soft/60 text-accent", "💡"],
+const PARAM_RE =
+  /([≥≤]?\d+(?:\.\d+)?\s*(?:MΩ|kΩ|Ω|kV|VDC|V|mV|A|mA|MPa|kPa|N|mm|cm|μm|℃|°C|s|ms|min|h)\b)/g;
+const SOURCE_RE = /\[来源\s*(\d+)\]/g;
+const SAFETY_KEYWORDS: Array<[RegExp, string, string]> = [
+  [/禁止|严禁|不得|切勿|致命|高压危险|触电/, "border-danger bg-red-50/60 text-danger", "🚫"],
+  [/危险|警告|注意安全|必须穿戴|防护|绝缘破损/, "border-warning bg-amber-50/60 text-[#b45309]", "⚠️"],
+  [/注意|小心|谨慎|建议|应当/, "border-accent bg-accent-soft/60 text-accent", "💡"],
 ];
+const EMOJI_HEAD_RE = /^([\u{1F300}-\u{1FAFF}]+)\s*/u;
 
-function detectSafetyCallout(line: string): { content: string; borderClass: string; icon: string } | null {
-  for (const [regex, borderClass, icon] of safetyKeywords) {
-    if (regex.test(line)) {
-      return { content: line, borderClass, icon };
-    }
-  }
-  return null;
+interface EnhanceCtx {
+  sources?: Array<{ document_title: string; chunk_id: string }>;
+  onSourceClick?: (index: number) => void;
 }
 
-function renderMarkdownLine(line: string): string {
-  // Heading
-  const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
-  if (hMatch) {
-    const level = hMatch[1].length;
-    const sizes = ["text-lg", "text-base", "text-sm", "text-xs", "text-xs", "text-xs"];
-    const margins = ["mt-6 mb-3", "mt-5 mb-2", "mt-4 mb-1.5", "mt-3 mb-1"];
-    const m = margins[Math.min(level - 1, margins.length - 1)];
-    return `<h${level} class="font-semibold ${sizes[level - 1]} ${m} text-text">${renderInline(hMatch[2])}</h${level}>`;
-  }
+function enhanceString(text: string, ctx: EnhanceCtx, keyPrefix: string): ReactNode[] {
+  // 先按 [来源 N] 切，再在每段内按 PARAM_RE 切，保证两个匹配互不嵌套。
+  const out: ReactNode[] = [];
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+  SOURCE_RE.lastIndex = 0;
+  let segCounter = 0;
 
-  // Unordered list
-  const ulMatch = line.match(/^[-*]\s+(.+)$/);
-  if (ulMatch) {
-    return `<li class="ml-4 list-disc marker:text-accent">${renderInline(ulMatch[1])}</li>`;
-  }
-
-  // Ordered list
-  const olMatch = line.match(/^\d+[.)]\s+(.+)$/);
-  if (olMatch) {
-    return `<li class="ml-4 list-decimal marker:text-accent marker:font-medium">${renderInline(olMatch[1])}</li>`;
-  }
-
-  // Horizontal rule
-  if (/^[-*_]{3,}$/.test(line.trim())) {
-    return '<hr class="my-5 border-border" />';
-  }
-
-  // Blockquote — with safety callout detection
-  if (line.startsWith("> ")) {
-    const quoteContent = line.slice(2);
-    const renderedContent = renderInline(quoteContent);
-
-    // Check for safety callout
-    const safety = detectSafetyCallout(quoteContent);
-    if (safety) {
-      return `<blockquote class="border-l-[3px] ${safety.borderClass} rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-[14px] leading-relaxed">
-        <span class="inline-flex items-center gap-1.5 font-semibold">${safety.icon} ${renderedContent}</span>
-      </blockquote>`;
+  const pushPlain = (chunk: string) => {
+    if (!chunk) return;
+    let inner: ReactNode[] = [chunk];
+    PARAM_RE.lastIndex = 0;
+    const tmp: ReactNode[] = [];
+    let pos = 0;
+    let pm: RegExpExecArray | null;
+    while ((pm = PARAM_RE.exec(chunk)) !== null) {
+      if (pm.index > pos) tmp.push(chunk.slice(pos, pm.index));
+      tmp.push(
+        <strong
+          key={`${keyPrefix}-p-${segCounter}-${pm.index}`}
+          className="font-semibold text-[#b3462a] bg-red-50/60 px-1.5 py-px rounded font-mono text-[13px] tracking-tight"
+        >
+          {pm[1]}
+        </strong>
+      );
+      pos = pm.index + pm[0].length;
     }
+    if (pos < chunk.length) tmp.push(chunk.slice(pos));
+    if (tmp.length > 0) inner = tmp;
+    out.push(...inner);
+  };
 
-    // Check for emoji callout
-    const calloutMatch = renderedContent.match(/^([\u{1F300}-\u{1FAFF}]+)\s*(.*)/u);
-    if (calloutMatch) {
-      return `<blockquote class="border-l-[3px] border-accent bg-accent-soft/60 rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed">
-        <span class="inline-flex items-center gap-1.5 font-medium text-text">${calloutMatch[1]} ${calloutMatch[2]}</span>
-      </blockquote>`;
+  while ((m = SOURCE_RE.exec(text)) !== null) {
+    if (m.index > lastIdx) {
+      pushPlain(text.slice(lastIdx, m.index));
     }
-
-    return `<blockquote class="border-l-[3px] border-border hover:border-accent/40 bg-surface-page rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed transition-colors">${renderedContent}</blockquote>`;
-  }
-
-  return `<span>${renderInline(line)}</span>`;
-}
-
-function renderTable(lines: string[]): string {
-  if (lines.length < 2) return "";
-
-  const parseRow = (line: string) =>
-    line
-      .replace(/^\|/, "")
-      .replace(/\|$/, "")
-      .split("|")
-      .map((c) => c.trim());
-
-  const headerCells = parseRow(lines[0]);
-  const isSeparator = (l: string) => /^\|[\s\-:|]+\|$/.test(l);
-  const sepLineIdx = lines.findIndex((l, i) => i > 0 && isSeparator(l));
-
-  let headers = headerCells;
-  let bodyLines = lines.slice(1);
-
-  if (sepLineIdx > 0) {
-    headers = parseRow(lines[sepLineIdx - 1]);
-    bodyLines = [...lines.slice(0, sepLineIdx - 1), ...lines.slice(sepLineIdx + 1)];
-    bodyLines = bodyLines.filter((l) => isSeparator(l) === false);
-  }
-
-  const thHtml = headers
-    .map((h) => `<th class="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary bg-surface-hover border-b border-border first:rounded-tl-lg last:rounded-tr-lg whitespace-nowrap">${renderInline(h)}</th>`)
-    .join("");
-
-  const trHtml = bodyLines
-    .map((row) => {
-      const cells = parseRow(row);
-      while (cells.length < headers.length) cells.push("");
-      const tdHtml = cells
-        .map((c, i) => `<td class="px-3 py-2 text-sm text-text-secondary border-b border-divider whitespace-nowrap ${i === 0 ? "font-medium text-text" : ""}">${renderInline(c)}</td>`)
-        .join("");
-      return `<tr class="hover:bg-accent/5 transition-colors">${tdHtml}</tr>`;
-    })
-    .join("");
-
-  const tableId = `table-${Math.random().toString(36).slice(2, 8)}`;
-
-  return `<div class="my-4 rounded-xl border border-border shadow-sm-soft overflow-hidden">
-    <div class="flex items-center justify-end px-3 py-1.5 bg-surface-page border-b border-divider">
-      <span class="text-[10px] text-text-muted/50">表格</span>
+    const idx = parseInt(m[1], 10) - 1;
+    const src = ctx.sources?.[idx];
+    const title = src?.document_title || `来源 ${m[1]}`;
+    const short = title.length > 20 ? `${title.slice(0, 18)}…` : title;
+    out.push(
       <button
-        class="ml-2 text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
-        onclick="const t=document.getElementById('${tableId}'); const r=[]; t.querySelectorAll('tr').forEach(tr=>{const c=[];tr.querySelectorAll('th,td').forEach(td=>c.push(td.textContent?.trim()||''));r.push(c.join('\\t'))}); navigator.clipboard.writeText(r.join('\\n')); this.textContent='已复制'; setTimeout(()=>{this.textContent='复制CSV'},1500)"
-      >复制CSV</button>
-    </div>
-    <div class="overflow-x-auto table-scroll">
-      <table id="${tableId}" class="w-full text-left">
-        <thead><tr>${thHtml}</tr></thead>
-        <tbody>${trHtml}</tbody>
-      </table>
-    </div>
-  </div>`;
+        type="button"
+        key={`${keyPrefix}-src-${segCounter++}-${m.index}`}
+        onClick={(event) => {
+          event.preventDefault();
+          ctx.onSourceClick?.(idx);
+        }}
+        className="inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 rounded-full bg-accent-soft text-[11px] text-accent hover:bg-accent hover:text-white shadow-sm-soft hover:shadow-md-soft transition-all duration-fast font-medium cursor-pointer align-baseline"
+        title={title}
+      >
+        [{m[1]}] {short}
+      </button>
+    );
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) pushPlain(text.slice(lastIdx));
+  return out.length > 0 ? out : [text];
 }
 
-let codeBlockIdCounter = 0;
+function enhanceChildren(children: ReactNode, ctx: EnhanceCtx, keyPrefix: string): ReactNode {
+  if (children == null || children === false) return children;
+  if (typeof children === "string") return enhanceString(children, ctx, keyPrefix);
+  if (Array.isArray(children)) {
+    return children.map((child, i) =>
+      typeof child === "string" ? (
+        <span key={`${keyPrefix}-${i}`}>{enhanceString(child, ctx, `${keyPrefix}-${i}`)}</span>
+      ) : (
+        child
+      )
+    );
+  }
+  return children;
+}
 
-function renderCodeBlock(code: string, language?: string): string {
-  const id = `code-${++codeBlockIdCounter}`;
+function nodeToPlainText(node: ReactNode): string {
+  if (node == null || node === false) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeToPlainText).join("");
+  if (typeof node === "object" && "props" in node) {
+    return nodeToPlainText((node as { props: { children?: ReactNode } }).props.children);
+  }
+  return "";
+}
+
+// ─── sanitize schema 放宽 className，让我们的样式 hook 不被吃掉 ───
+const SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code || []), "className"],
+    span: [...(defaultSchema.attributes?.span || []), "className"],
+    div: [...(defaultSchema.attributes?.div || []), "className"],
+    pre: [...(defaultSchema.attributes?.pre || []), "className"],
+  },
+};
+
+// ─── 代码块：带语言 label + 复制 ───
+function CodeBlockCard({ language, code }: { language?: string; code: string }) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleCopy = useCallback(() => {
+    const text = preRef.current?.textContent || "";
+    void navigator.clipboard.writeText(text).then(() => {
+      const btn = btnRef.current;
+      if (!btn) return;
+      btn.textContent = "已复制";
+      window.setTimeout(() => {
+        if (btn) btn.textContent = "复制";
+      }, 1500);
+    });
+  }, []);
+
   return (
-    `<div class="my-4 rounded-xl border border-border overflow-hidden shadow-sm-soft code-block-wrapper">` +
-    `<div class="flex items-center justify-between px-4 py-2 bg-surface-page border-b border-divider">` +
-    (language
-      ? `<span class="text-xs text-text-muted font-mono">${escapeHtml(language)}</span>`
-      : `<span class="text-xs text-text-muted/50">code</span>`) +
-    `<button
-      class="text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
-      onclick="var el=document.getElementById('${id}'); navigator.clipboard.writeText(el.textContent||''); this.textContent='已复制'; setTimeout(function(){this.textContent='复制'}.bind(this),1500)"
-    >复制</button>` +
-    `</div>` +
-    `<pre id="${id}" class="p-4 overflow-x-auto text-[13px] font-mono text-text leading-relaxed bg-[#fafaf8]"><code>${escapeHtml(code)}</code></pre>` +
-    `</div>`
+    <div className="my-4 rounded-xl border border-border overflow-hidden shadow-sm-soft code-block-wrapper">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface-page border-b border-divider">
+        <span className={language ? "text-xs text-text-muted font-mono" : "text-xs text-text-muted/50"}>
+          {language || "code"}
+        </span>
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={handleCopy}
+          className="text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
+        >
+          复制
+        </button>
+      </div>
+      <pre
+        ref={preRef}
+        className="p-4 overflow-x-auto text-[13px] font-mono text-text leading-relaxed bg-[#fafaf8]"
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
   );
 }
 
-export function renderMarkdown(md: string): string {
-  const rawLines = md.split("\n");
-  const result: string[] = [];
-  let i = 0;
+// ─── 表格：带复制 CSV 按钮 ───
+function TableCard({ children }: { children?: ReactNode }) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
-  while (i < rawLines.length) {
-    const line = rawLines[i];
+  const handleCopy = useCallback(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const rows: string[] = [];
+    table.querySelectorAll("tr").forEach((tr) => {
+      const cells: string[] = [];
+      tr.querySelectorAll("th,td").forEach((td) => {
+        cells.push((td.textContent || "").trim());
+      });
+      rows.push(cells.join("\t"));
+    });
+    void navigator.clipboard.writeText(rows.join("\n")).then(() => {
+      const btn = btnRef.current;
+      if (!btn) return;
+      btn.textContent = "已复制";
+      window.setTimeout(() => {
+        if (btn) btn.textContent = "复制CSV";
+      }, 1500);
+    });
+  }, []);
 
-    // Code block fence — consume until closing fence
-    if (line.trim().startsWith("```")) {
-      const codeLang = line.trim().slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < rawLines.length) {
-        if (rawLines[i].trim().startsWith("```")) { i++; break; }
-        codeLines.push(rawLines[i]);
-        i++;
-      }
-      result.push(renderCodeBlock(codeLines.join("\n"), codeLang));
-      continue;
-    }
-
-    // Table detection — consecutive lines starting/ending with |
-    if (/^\|.+\|$/.test(line.trim())) {
-      const tableLines: string[] = [];
-      while (i < rawLines.length) {
-        const l = rawLines[i].trim();
-        if (!/^\|.+\|$/.test(l) && !/^\|[\s\-:|]+\|$/.test(l)) break;
-        tableLines.push(l);
-        i++;
-      }
-      if (tableLines.length >= 2) {
-        result.push(renderTable(tableLines));
-        continue;
-      }
-      i -= tableLines.length;
-    }
-
-    const trimmed = line.trim();
-    if (trimmed === "") {
-      i++;
-      continue;
-    }
-
-    result.push(`<p class="mb-2 text-[15px] leading-relaxed">${renderMarkdownLine(line)}</p>`);
-    i++;
-  }
-
-  return result.join("\n");
+  return (
+    <div className="my-4 rounded-xl border border-border shadow-sm-soft overflow-hidden">
+      <div className="flex items-center justify-end px-3 py-1.5 bg-surface-page border-b border-divider">
+        <span className="text-[10px] text-text-muted/50">表格</span>
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={handleCopy}
+          className="ml-2 text-[10px] text-text-muted hover:text-accent transition-colors font-medium"
+        >
+          复制CSV
+        </button>
+      </div>
+      <div className="overflow-x-auto table-scroll">
+        <table ref={tableRef} className="w-full text-left">
+          {children}
+        </table>
+      </div>
+    </div>
+  );
 }
 
 interface MarkdownContentProps {
@@ -241,41 +216,149 @@ interface MarkdownContentProps {
   onSourceClick?: (index: number) => void;
 }
 
-export function MarkdownContent({ content, sources, onSourceClick }: MarkdownContentProps) {
-  // Reset code block counter for each render to avoid duplicate IDs
-  codeBlockIdCounter = 0;
+function MarkdownContentInner({ content, sources, onSourceClick }: MarkdownContentProps) {
+  const id = useId();
+  // 用 ref 透传最新 callback，避免父组件每次 render 引起整个 memo 失效
+  const ctxRef = useRef<EnhanceCtx>({ sources, onSourceClick });
+  useEffect(() => {
+    ctxRef.current = { sources, onSourceClick };
+  }, [sources, onSourceClick]);
 
-  let html = renderMarkdown(content);
+  const enhance = useCallback(
+    (children: ReactNode, keyPrefix: string) =>
+      enhanceChildren(children, ctxRef.current, `${id}-${keyPrefix}`),
+    [id]
+  );
 
-  // Replace [来源 N] with styled citation badges
-  if (sources && sources.length > 0) {
-    html = html.replace(
-      /\[来源\s*(\d+)\]/g,
-      (_match: string, numStr: string) => {
-        const idx = parseInt(numStr, 10) - 1;
-        const src = sources[idx];
-        const title = src?.document_title || `来源 ${numStr}`;
-        const shortTitle = title.length > 20 ? title.slice(0, 18) + "…" : title;
-        return `<a href="#" class="source-ref-link inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent-soft text-[11px] text-accent hover:bg-accent hover:text-white shadow-sm-soft hover:shadow-md-soft transition-all duration-fast font-medium cursor-pointer no-underline" data-source-idx="${idx}" title="${title}">[${numStr}] ${shortTitle}</a>`;
-      }
-    );
-  }
-
-  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!onSourceClick) return;
-    const target = e.target as HTMLElement;
-    const link = target.closest(".source-ref-link") as HTMLElement | null;
-    if (link?.dataset.sourceIdx != null) {
-      e.preventDefault();
-      onSourceClick(parseInt(link.dataset.sourceIdx, 10));
-    }
-  };
+  const components = useMemo(
+    () => ({
+      h1: ({ children }: ComponentPropsWithoutRef<"h1">) => (
+        <h1 className="font-semibold text-lg mt-6 mb-3 text-text">{enhance(children, "h1")}</h1>
+      ),
+      h2: ({ children }: ComponentPropsWithoutRef<"h2">) => (
+        <h2 className="font-semibold text-base mt-5 mb-2 text-text">{enhance(children, "h2")}</h2>
+      ),
+      h3: ({ children }: ComponentPropsWithoutRef<"h3">) => (
+        <h3 className="font-semibold text-sm mt-4 mb-1.5 text-text">{enhance(children, "h3")}</h3>
+      ),
+      h4: ({ children }: ComponentPropsWithoutRef<"h4">) => (
+        <h4 className="font-semibold text-xs mt-3 mb-1 text-text">{enhance(children, "h4")}</h4>
+      ),
+      p: ({ children }: ComponentPropsWithoutRef<"p">) => (
+        <p className="mb-2 text-[15px] leading-relaxed break-words">{enhance(children, "p")}</p>
+      ),
+      ul: ({ children }: ComponentPropsWithoutRef<"ul">) => (
+        <ul className="mb-2 ml-1 list-disc marker:text-accent space-y-1">{children}</ul>
+      ),
+      ol: ({ children }: ComponentPropsWithoutRef<"ol">) => (
+        <ol className="mb-2 ml-1 list-decimal marker:text-accent marker:font-medium space-y-1">{children}</ol>
+      ),
+      li: ({ children }: ComponentPropsWithoutRef<"li">) => (
+        <li className="ml-4 text-[15px] leading-relaxed break-words">{enhance(children, "li")}</li>
+      ),
+      hr: () => <hr className="my-5 border-border" />,
+      a: ({ href, children }: ComponentPropsWithoutRef<"a">) => (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent underline decoration-accent/30 hover:decoration-accent transition-colors"
+        >
+          {children}
+        </a>
+      ),
+      strong: ({ children }: ComponentPropsWithoutRef<"strong">) => (
+        <strong className="font-semibold text-text">{children}</strong>
+      ),
+      em: ({ children }: ComponentPropsWithoutRef<"em">) => <em>{children}</em>,
+      blockquote: ({ children }: ComponentPropsWithoutRef<"blockquote">) => {
+        const plain = nodeToPlainText(children).trim();
+        const safety = SAFETY_KEYWORDS.find(([re]) => re.test(plain));
+        if (safety) {
+          const [, borderClass, icon] = safety;
+          return (
+            <blockquote
+              className={`border-l-[3px] ${borderClass} rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-[14px] leading-relaxed`}
+            >
+              <span className="inline-flex items-start gap-1.5 font-semibold">
+                <span>{icon}</span>
+                <span>{enhance(children, "bq-safe")}</span>
+              </span>
+            </blockquote>
+          );
+        }
+        const emojiMatch = plain.match(EMOJI_HEAD_RE);
+        if (emojiMatch) {
+          return (
+            <blockquote className="border-l-[3px] border-accent bg-accent-soft/60 rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed">
+              <span className="inline-flex items-start gap-1.5 font-medium text-text">
+                {enhance(children, "bq-emoji")}
+              </span>
+            </blockquote>
+          );
+        }
+        return (
+          <blockquote className="border-l-[3px] border-border hover:border-accent/40 bg-surface-page rounded-r-lg pl-4 pr-3 py-2.5 my-2 text-text-secondary text-[14px] leading-relaxed transition-colors">
+            {enhance(children, "bq")}
+          </blockquote>
+        );
+      },
+      pre: (props: ComponentPropsWithoutRef<"pre">) => {
+        // 仅处理 react-markdown 默认包出来的 <pre><code>，剥掉 pre 用 CodeBlockCard 替代
+        const child = Array.isArray(props.children) ? props.children[0] : props.children;
+        if (child && typeof child === "object" && "props" in child) {
+          const codeProps = (child as { props: { className?: string; children?: ReactNode } }).props;
+          const className = codeProps.className || "";
+          const match = /language-(\w+)/.exec(className);
+          const code = nodeToPlainText(codeProps.children).replace(/\n$/, "");
+          return <CodeBlockCard language={match?.[1]} code={code} />;
+        }
+        return <pre {...props} />;
+      },
+      code: ({ className, children }: ComponentPropsWithoutRef<"code">) => {
+        // 走到这里都是 inline code（block 由 pre 拦截）
+        const text = typeof children === "string" ? children : nodeToPlainText(children);
+        return (
+          <code className={`rounded-md bg-primary-soft px-1.5 py-0.5 text-[13px] font-mono text-primary ${className || ""}`}>
+            {text}
+          </code>
+        );
+      },
+      table: ({ children }: ComponentPropsWithoutRef<"table">) => <TableCard>{children}</TableCard>,
+      thead: ({ children }: ComponentPropsWithoutRef<"thead">) => <thead>{children}</thead>,
+      tbody: ({ children }: ComponentPropsWithoutRef<"tbody">) => <tbody>{children}</tbody>,
+      tr: ({ children }: ComponentPropsWithoutRef<"tr">) => (
+        <tr className="hover:bg-accent/5 transition-colors">{children}</tr>
+      ),
+      th: ({ children }: ComponentPropsWithoutRef<"th">) => (
+        <th className="px-3 py-2.5 text-left text-xs font-semibold text-text-secondary bg-surface-hover border-b border-border whitespace-nowrap">
+          {enhance(children, "th")}
+        </th>
+      ),
+      td: ({ children }: ComponentPropsWithoutRef<"td">) => (
+        <td className="px-3 py-2 text-sm text-text-secondary border-b border-divider whitespace-nowrap">
+          {enhance(children, "td")}
+        </td>
+      ),
+    }),
+    [enhance]
+  );
 
   return (
-    <div
-      className="markdown-content"
-      dangerouslySetInnerHTML={{ __html: html }}
-      onClick={handleClick}
-    />
+    <div className="markdown-content break-words">
+      <Markdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA]]}
+        components={components}
+      >
+        {content}
+      </Markdown>
+    </div>
   );
 }
+
+// memo：只在 content / sources 变化时重渲染；onSourceClick 走 ref，
+// 避免父组件每次 render 都通过 inline closure 让整段 markdown 重算。
+export const MarkdownContent = memo(MarkdownContentInner, (prev, next) => {
+  return prev.content === next.content && prev.sources === next.sources;
+});
