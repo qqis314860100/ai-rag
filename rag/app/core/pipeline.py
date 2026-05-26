@@ -531,7 +531,7 @@ def _extract_rewrite_topic(text: str) -> str:
     cleaned = _normalize_query_text(text)
     cleaned = re.sub(r"[？?！!。；;，,、]+", " ", cleaned)
     cleaned = re.sub(r"(请问|请|帮我|帮忙|一下|详细|介绍|说明|列出|查询|告诉我)", " ", cleaned)
-    cleaned = re.sub(r"(是什么|有哪些|多少|如何|怎么处理|怎么办|怎么|为什么|是否|吗|呢)\s*$", " ", cleaned)
+    cleaned = re.sub(r"(是什么|是多少|为多少|有哪些|多少|如何|怎么处理|怎么办|怎么|为什么|是否|吗|呢)\s*$", " ", cleaned)
     cleaned = re.sub(r"(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中)", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" 的")
     if len(cleaned) < 4:
