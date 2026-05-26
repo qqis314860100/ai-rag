@@ -1,8 +1,8 @@
-import json
 import logging
 import time
 
 from ..config import config
+from ..logging_safety import safe_log_json, sha256_short
 from ..terminology import expand_query_with_terms
 from ...chunking.chunker import chunk_document
 from ...cleaning.cleaner import clean_parsed_document
@@ -108,7 +108,14 @@ class RagPipeline:
         chunk_count = upsert_chunks(chunks)
 
         total_ms = int((time.time() - start) * 1000)
-        logger.info(f"Ingested {document_id}: {chunk_count} chunks in {total_ms}ms")
+        logger.info(
+            "rag_ingest_completed %s",
+            safe_log_json({
+                "document_id_hash": sha256_short(document_id),
+                "chunk_count": chunk_count,
+                "duration_ms": total_ms,
+            }),
+        )
 
         return {
             "document_id": document_id,
@@ -259,7 +266,7 @@ class RagPipeline:
                 total_start=total_start,
                 knowledge_assets=matched_assets,
             )
-            logger.info("rag_pipeline_timing %s", json.dumps(result["trace"].get("stage_timings_ms", {}), ensure_ascii=False))
+            logger.info("rag_pipeline_timing %s", safe_log_json(result["trace"].get("stage_timings_ms", {})))
             return result
 
         result = _build_answer_chat_result(
@@ -278,7 +285,7 @@ class RagPipeline:
             temperature=self.config.rag_temperature,
             llm_chat_fn=llm_chat,
         )
-        logger.info("rag_pipeline_timing %s", json.dumps(result["trace"].get("stage_timings_ms", {}), ensure_ascii=False))
+        logger.info("rag_pipeline_timing %s", safe_log_json(result["trace"].get("stage_timings_ms", {})))
         return result
 
 

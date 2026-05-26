@@ -371,7 +371,7 @@
 - [x] `rag`: 接入 `usage_guard` 的硬上限（按用户/按时段），超限返回结构化错误而不是 502。
 - [x] `repo`: `.env.example` 增补所有可关闭的外发开关（LLM_PROVIDER / IMAGE_GEN_ENABLED / TELEMETRY_ENABLED），便于离线部署。
 - [x] `api`: 在 `extractUser` 中关闭开发模式的 `system_admin` 默认值（NODE_ENV=production 时强制 401），避免线上裸奔。
-- [ ] `rag`: 文档原文与 chunk 内容默认不进日志，确认 `requestLogger` 与 `pipeline` 的所有 print/log 都做了截断或 hash。
+- [x] `rag`: 文档原文与 chunk 内容默认不进日志，确认 `requestLogger` 与 `pipeline` 的所有 print/log 都做了截断或 hash。
 
 ### 企业系统集成
 

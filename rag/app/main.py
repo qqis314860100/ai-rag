@@ -1,10 +1,10 @@
 import logging
-import json
 import time
 from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import router as rag_router
+from .core.logging_safety import safe_log_json, safe_text_summary, sha256_short
 from .llm.usage_guard import set_usage_context
 
 logging.basicConfig(
@@ -35,16 +35,16 @@ async def request_logger(request: Request, call_next):
         response = await call_next(request)
     except Exception:
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.exception(json.dumps({
+        logger.exception(safe_log_json({
             "requestId": request_id,
             "request_id": request_id,
-            "userId": user_id,
+            "userId_hash": sha256_short(user_id),
             "route": request.url.path,
             "method": request.method,
             "status": 500,
             "duration_ms": duration_ms,
             "error_code": "INTERNAL_ERROR",
-        }, ensure_ascii=False))
+        }))
         raise
 
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
@@ -52,14 +52,16 @@ async def request_logger(request: Request, call_next):
     log_data = {
         "requestId": request_id,
         "request_id": request_id,
-        "userId": user_id,
+        "userId_hash": sha256_short(user_id),
         "route": request.url.path,
         "method": request.method,
         "status": response.status_code,
         "duration_ms": duration_ms,
         "error_code": None if response.status_code < 400 else f"HTTP_{response.status_code}",
     }
-    message = json.dumps(log_data, ensure_ascii=False)
+    if request.url.query:
+        log_data["query"] = safe_text_summary(request.url.query, limit=0)
+    message = safe_log_json(log_data)
     if response.status_code >= 500:
         logger.error(message)
     elif response.status_code >= 400:
