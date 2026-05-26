@@ -381,6 +381,7 @@ class AnswerIR(BaseModel):
         query_rewrite: AnswerQueryRewrite | Mapping[str, Any] | None = None,
         status: AnswerStatus | None = None,
         warnings: list[AnswerWarning] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "AnswerIR":
         citations = [AnswerCitation.from_source(source, index) for index, source in enumerate(sources, 1)]
         normalized_confidence = _clamp_confidence(confidence)
@@ -428,6 +429,7 @@ class AnswerIR(BaseModel):
             query_rewrite=rewrite,
             confidence=normalized_confidence,
             warnings=derived_warnings,
+            metadata=metadata or {},
         )
 
 

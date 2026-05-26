@@ -1,6 +1,7 @@
 import time
 import logging
 import re
+from dataclasses import dataclass, field
 from .config import config
 from ..parsers.base import ParserRegistry
 from ..parsers.markdown import MarkdownParser
@@ -19,9 +20,11 @@ from ..llm.prompt_builder import (
     extract_sources,
     format_chunks_for_debug,
 )
-from ..schemas.models import AnswerIR, AnswerQueryRewrite
+from ..schemas.models import AnswerIR, AnswerQueryRewrite, AnswerWarning
 
 logger = logging.getLogger(__name__)
+REFUSAL_ANSWER = "根据当前知识库信息，我暂时无法确认该问题。"
+MIN_ANSWER_CONFIDENCE = 0.5
 
 # Register parsers
 ParserRegistry.register(".md", MarkdownParser())
@@ -190,6 +193,29 @@ class RagPipeline:
         if rewritten_query != query:
             hits = _keyword_rerank(query, hits, filters)
 
+        sources = extract_sources(hits)
+        confidence = _estimate_confidence(query, hits, filters)
+        refusal = _assess_insufficient_context(
+            query=query,
+            query_rewrite=query_rewrite,
+            hits=hits,
+            sources=sources,
+            confidence=confidence,
+        )
+        if refusal.should_refuse:
+            return _build_refusal_chat_result(
+                query=query,
+                rewritten_query=rewritten_query,
+                query_rewrite=query_rewrite,
+                hits=hits,
+                sources=sources,
+                confidence=confidence,
+                refusal=refusal,
+                retrieval_ms=retrieval_ms,
+                llm_ms=0,
+                total_start=total_start,
+            )
+
         # 2. Build prompt
         messages = build_messages(query, hits, history, self.config.rag_max_context_chars)
 
@@ -199,8 +225,6 @@ class RagPipeline:
         llm_ms = llm_result["latency_ms"]
 
         # 4. Extract sources
-        sources = extract_sources(hits)
-        confidence = _estimate_confidence(query, hits, filters)
         answer_ir = AnswerIR.from_chat(
             answer=llm_result["content"],
             sources=sources,
@@ -225,6 +249,14 @@ class RagPipeline:
             },
             "answer_ir": answer_ir.model_dump(),
         }
+
+
+@dataclass
+class EvidenceAssessment:
+    should_refuse: bool = False
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[AnswerWarning] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = None) -> float:
@@ -255,6 +287,134 @@ def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = No
         confidence = min(confidence, 0.60)
 
     return round(_clamp_float(confidence), 2)
+
+
+def _assess_insufficient_context(
+    *,
+    query: str,
+    query_rewrite: AnswerQueryRewrite,
+    hits: list[dict],
+    sources: list[dict],
+    confidence: float,
+) -> EvidenceAssessment:
+    reasons: list[str] = []
+    warnings: list[AnswerWarning] = []
+
+    if query_rewrite.strategy == "low_information":
+        reasons.append("low_information")
+        warnings.append(AnswerWarning(
+            code="low_information",
+            message="用户问题信息量过低，且没有可用于补全的历史上下文。",
+        ))
+
+    if not sources:
+        reasons.append("no_valid_citations")
+        warnings.append(AnswerWarning(
+            code="no_valid_citations",
+            message="检索结果中没有可用于回答的有效引用。",
+        ))
+
+    if hits and confidence < MIN_ANSWER_CONFIDENCE:
+        reasons.append("insufficient_evidence")
+        warnings.append(AnswerWarning(
+            code="insufficient_evidence",
+            message="检索证据与问题匹配度不足，不能形成可追溯回答。",
+            severity="info",
+            citation_ids=[str(source.get("id") or source.get("chunk_id") or "") for source in sources if source.get("id") or source.get("chunk_id")],
+        ))
+
+    if _has_context_conflict(query, hits):
+        reasons.append("context_conflict")
+        warnings.append(AnswerWarning(
+            code="context_conflict",
+            message="检索上下文存在互相冲突的表述，需要人工核对原文。",
+        ))
+
+    return EvidenceAssessment(
+        should_refuse=bool(reasons),
+        reasons=_dedupe_preserve_order(reasons),
+        warnings=warnings,
+        metadata={
+            "refusal_reason": reasons[0] if reasons else "",
+            "refusal_reasons": _dedupe_preserve_order(reasons),
+            "evidence": {
+                "hit_count": len(hits),
+                "confidence": confidence,
+                "min_answer_confidence": MIN_ANSWER_CONFIDENCE,
+            },
+        },
+    )
+
+
+def _build_refusal_chat_result(
+    *,
+    query: str,
+    rewritten_query: str,
+    query_rewrite: AnswerQueryRewrite,
+    hits: list[dict],
+    sources: list[dict],
+    confidence: float,
+    refusal: EvidenceAssessment,
+    retrieval_ms: int,
+    llm_ms: int,
+    total_start: float,
+) -> dict:
+    answer_ir = AnswerIR.from_chat(
+        answer=REFUSAL_ANSWER,
+        sources=sources,
+        original_query=query,
+        rewritten_query=rewritten_query,
+        query_rewrite=query_rewrite,
+        confidence=confidence,
+        status="insufficient_context",
+        warnings=refusal.warnings,
+        metadata=refusal.metadata,
+    )
+    total_ms = int((time.time() - total_start) * 1000)
+
+    return {
+        "message_id": "",
+        "answer": REFUSAL_ANSWER,
+        "sources": sources,
+        "confidence": confidence,
+        "followups": _suggest_followups(query, hits) if sources else [],
+        "trace": {
+            "retrieval_ms": retrieval_ms,
+            "llm_ms": llm_ms,
+            "total_ms": total_ms,
+        },
+        "answer_ir": answer_ir.model_dump(),
+    }
+
+
+_CONFLICT_PAIRS = (
+    (r"(必须|必须要|(?<!不)需要|应当)", r"(无需|不需要|禁止|不得|不应|不能)"),
+    (r"(可以|允许|可进行|可直接)", r"(禁止|不得|不能|不允许|不可)"),
+    (r"(启用|开启|打开|接通)", r"(停用|关闭|断开|切断)"),
+    (r"(合格|正常|满足|通过)", r"(不合格|异常|不满足|失败)"),
+    (r"(高于|大于|超过|不低于|至少)", r"(低于|小于|不超过|不高于|至多)"),
+)
+
+
+def _has_context_conflict(query: str, hits: list[dict]) -> bool:
+    if len(hits) < 2:
+        return False
+
+    query_terms = _extract_query_terms(query, limit=8)
+    relevant_texts = [
+        _hit_text(hit, include_content=True)
+        for hit in hits[:4]
+        if not query_terms or _term_coverage_score(query_terms, _hit_text(hit, include_content=True)) >= 0.15
+    ]
+    if len(relevant_texts) < 2:
+        return False
+
+    for positive_pattern, negative_pattern in _CONFLICT_PAIRS:
+        positive_seen = any(re.search(positive_pattern, text) for text in relevant_texts)
+        negative_seen = any(re.search(negative_pattern, text) for text in relevant_texts)
+        if positive_seen and negative_seen:
+            return True
+    return False
 
 
 def _rewrite_query(query: str) -> str:

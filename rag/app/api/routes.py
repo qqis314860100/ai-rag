@@ -3,7 +3,15 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from ..core.pipeline import RagPipeline, _estimate_confidence, _keyword_rerank, _rewrite_query_with_trace, _suggest_followups
+from ..core.pipeline import (
+    REFUSAL_ANSWER,
+    RagPipeline,
+    _assess_insufficient_context,
+    _estimate_confidence,
+    _keyword_rerank,
+    _rewrite_query_with_trace,
+    _suggest_followups,
+)
 from ..evaluation import DiagramIR, build_keyword_diagram_ir
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
@@ -199,6 +207,29 @@ def chat_stream(request: ChatRequest):
             from ..llm.prompt_builder import build_messages, extract_sources
             messages = build_messages(request.query, hits, request.history, pipeline.config.rag_max_context_chars)
             sources = extract_sources(hits)
+            confidence = _estimate_confidence(request.query, hits, request.filters)
+            refusal = _assess_insufficient_context(
+                query=request.query,
+                query_rewrite=query_rewrite,
+                hits=hits,
+                sources=sources,
+                confidence=confidence,
+            )
+            if refusal.should_refuse:
+                answer_ir = AnswerIR.from_chat(
+                    answer=REFUSAL_ANSWER,
+                    sources=sources,
+                    original_query=request.query,
+                    rewritten_query=rewritten_query,
+                    query_rewrite=query_rewrite,
+                    confidence=confidence,
+                    status="insufficient_context",
+                    warnings=refusal.warnings,
+                    metadata=refusal.metadata,
+                )
+                yield f"data: {_sse_json({'type': 'token', 'content': REFUSAL_ANSWER})}\n\n"
+                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': confidence, 'followups': [], 'answer_ir': answer_ir.model_dump()})}\n\n"
+                return
 
             # 3. Stream LLM
             from ..llm.client import chat_stream as llm_stream
@@ -215,7 +246,6 @@ def chat_stream(request: ChatRequest):
                     full_answer += str(event_data.get("content") or "")
                     yield sse_chunk
                 elif event_data and event_data.get("type") == "done":
-                    confidence = _estimate_confidence(request.query, hits, request.filters)
                     answer_ir = AnswerIR.from_chat(
                         answer=full_answer,
                         sources=sources,
