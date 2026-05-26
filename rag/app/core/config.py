@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root (enterprise-rag-kb/)
+# 从项目根目录加载 .env，便于 rag 服务单独启动时也能读取统一配置。
 _root = Path(__file__).resolve().parent.parent.parent.parent
 load_dotenv(_root / ".env")
 load_dotenv()
@@ -15,13 +15,13 @@ DB_PATH = os.getenv("APP_DB_PATH", os.path.join(os.path.dirname(__file__), "..",
 
 
 def _read_db_setting(key: str, default: str = "") -> str:
-    """Read a setting from the SQLite settings table, fall back to env var, then default."""
-    # 1. Try env var (explicit override)
+    """优先读取环境变量，其次读取 SQLite settings 表，最后回退默认值。"""
+    # 环境变量作为显式覆盖，优先级最高。
     env_val = os.getenv(key.upper())
     if env_val is not None:
         return env_val
 
-    # 2. Try SQLite settings table
+    # 数据库配置允许后台管理页动态调整 RAG 参数。
     try:
         db = sqlite3.connect(DB_PATH)
         row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -56,6 +56,13 @@ def _read_env_int(key: str, default: int) -> int:
         return default
 
 
+def _read_env_bool(key: str, default: bool = False) -> bool:
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Config:
     project_root: str = str(_root)
 
@@ -68,6 +75,9 @@ class Config:
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    llm_provider: str = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
+    image_gen_enabled: bool = _read_env_bool("IMAGE_GEN_ENABLED", False)
+    telemetry_enabled: bool = _read_env_bool("TELEMETRY_ENABLED", False)
 
     rag_top_k: int = _read_db_setting_int("rag_top_k", int(os.getenv("RAG_TOP_K", "5")))
     rag_temperature: float = _read_db_setting_float("rag_temperature", float(os.getenv("RAG_TEMPERATURE", "0.2")))

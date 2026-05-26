@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from ..core.config import config
 from ..schemas.models import AnswerWarning, ImageArtifactContract
 
 
@@ -75,8 +76,14 @@ def build_image_artifact_contract(
             message="图片产物必须继承可追溯引用，当前回答没有有效来源。",
             severity="warning",
         ))
+    if not config.image_gen_enabled:
+        warnings.append(AnswerWarning(
+            code="image_generation_disabled",
+            message="图片生成外发开关未开启，本次只返回脱敏提示词契约。",
+            severity="info",
+        ))
 
-    allowed = requested_by_user and bool(source_ids)
+    allowed = config.image_gen_enabled and requested_by_user and bool(source_ids)
     return ImageArtifactContract(
         allowed=allowed,
         sanitized_prompt=sanitized_prompt[:1600],
@@ -86,6 +93,7 @@ def build_image_artifact_contract(
         safety_warnings=warnings,
         metadata={
             "provider": "not_configured",
+            "image_gen_enabled": config.image_gen_enabled,
             "permission_model": "inherit_from_chat_message_and_sources",
             "default_auto_generate": False,
             "requires_async_worker": True,

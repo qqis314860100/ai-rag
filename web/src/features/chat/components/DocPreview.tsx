@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { X, FileText, MessageSquare, Send, Trash2, Pencil, FileCode, Globe, Loader2, ExternalLink, CornerDownRight } from "lucide-react";
 import type { Source, DocComment, DocumentPreviewContract, PreviewView } from "../types";
 import { api } from "../../../services/api";
+import { track } from "../../../services/tracking";
 import { useAuth } from "../../../contexts/AuthContext";
 import { showToast } from "../../../components/ui/Toast";
 import { MarkdownContent } from "./MarkdownContent";
@@ -271,12 +272,7 @@ export default function DocPreview({ source, onClose, onAskAbout }: Props) {
     setHtmlContent(null);
     setHtmlLoading(false);
 
-    api.post("/stats/browse", {
-      event_type: "source_view",
-      resource_type: "chunk",
-      resource_id: source.chunk_id,
-      metadata: { document_title: source.document_title, score: source.score },
-    }).catch(() => {});
+    track("source_view", "chunk", source.chunk_id, { document_title: source.document_title, score: source.score });
 
     const immediateContent = source.content || source.snippet || "";
     if (immediateContent) {
