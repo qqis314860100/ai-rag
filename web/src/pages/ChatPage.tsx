@@ -11,7 +11,7 @@ import { useChatHistory } from "../hooks/useChatHistory";
 import { useChatDrafts } from "../hooks/useChatDrafts";
 import { showToast } from "../components/ui/Toast";
 import { track } from "../services/tracking";
-import type { ChatMessage, ChatNote, Source } from "../types";
+import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, Source } from "../types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {
@@ -98,6 +98,7 @@ export default function ChatPage() {
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
   const [sessionNotes, setSessionNotes] = useState<ChatNote[]>([]);
+  const [noteAggregateItems, setNoteAggregateItems] = useState<ChatNoteAggregateItem[]>([]);
   const [sessionNotesLoading, setSessionNotesLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(() =>
@@ -245,6 +246,7 @@ export default function ChatPage() {
 
     if (!activeSessionId) {
       setSessionNotes([]);
+      setNoteAggregateItems([]);
       setSessionNotesLoading(false);
       return () => {
         active = false;
@@ -252,14 +254,16 @@ export default function ChatPage() {
     }
 
     setSessionNotesLoading(true);
-    api.get<{ data: { items: ChatNote[] } }>(`/chat/notes?scope=session&session_id=${encodeURIComponent(activeSessionId)}`)
+    api.get<{ data: ChatNoteAggregate }>(`/chat/notes/aggregate?session_id=${encodeURIComponent(activeSessionId)}`)
       .then((res) => {
         if (!active) return;
-        setSessionNotes(res.data.items || []);
+        setSessionNotes(res.data.session_notes || []);
+        setNoteAggregateItems(res.data.items || []);
       })
       .catch(() => {
         if (!active) return;
         setSessionNotes([]);
+        setNoteAggregateItems([]);
       })
       .finally(() => {
         if (!active) return;
@@ -802,6 +806,7 @@ export default function ChatPage() {
               selectedSources={selectedSources}
               highlightSourceIdx={highlightSourceIdx}
               notes={sessionNotes}
+              noteAggregateItems={noteAggregateItems}
               notesLoading={sessionNotesLoading}
               notesWritable={!!activeSessionId}
               onClose={() => setRightPanelOpen(false)}

@@ -13,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ChatMessage, ChatNote, Source } from "../../types";
+import type { ChatMessage, ChatNote, ChatNoteAggregateItem, Source } from "../../types";
 
 type NavigatorView = "roadmap" | "notes";
 
@@ -35,6 +35,7 @@ interface ConversationNavigatorProps {
   selectedSources: Source[] | null;
   highlightSourceIdx: number | null;
   notes: ChatNote[];
+  noteAggregateItems: ChatNoteAggregateItem[];
   notesLoading: boolean;
   notesWritable: boolean;
   onClose: () => void;
@@ -130,6 +131,7 @@ export default function ConversationNavigator({
   selectedSources,
   highlightSourceIdx,
   notes,
+  noteAggregateItems,
   notesLoading,
   notesWritable,
   onClose,
@@ -466,9 +468,54 @@ export default function ConversationNavigator({
                 <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-text-muted">
                   正在加载笔记
                 </div>
-              ) : notes.length > 0 ? (
-                notes.map((note) => (
-                  <div key={note.id} className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
+              ) : (
+                <>
+                  {noteAggregateItems.length > 0 && (
+                    <div className="space-y-2">
+                      {noteAggregateItems.map((item) => (
+                        <div key={item.message_id} className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold text-text">{item.question || "本轮回答"}</p>
+                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-text-muted">{item.answer_preview}</p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-surface-page px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                              {Math.round(item.confidence * 100)}%
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-text-muted">
+                            <span className="rounded-full bg-surface-page px-1.5 py-0.5">{item.sources.length} 引用</span>
+                            <span className="rounded-full bg-surface-page px-1.5 py-0.5">{item.manual_note_count} 笔记</span>
+                            <span className="rounded-full bg-surface-page px-1.5 py-0.5">{item.source_comment_count} 评论</span>
+                            {item.risks.length > 0 && (
+                              <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-warning">{item.risks.length} 风险</span>
+                            )}
+                          </div>
+                          {item.sources.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {item.sources.slice(0, 3).map((source) => (
+                                <div key={source.id} className="rounded-md bg-surface-page px-2 py-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="min-w-0 truncate text-[11px] font-medium text-text-secondary">{source.document_title}</span>
+                                    <span className="shrink-0 text-[10px] text-text-muted">{scoreLabel(source.score)}</span>
+                                  </div>
+                                  <p className="mt-0.5 truncate text-[10px] text-text-muted">{source.section_path || source.chunk_id}</p>
+                                  {(source.notes.length > 0 || source.comments.length > 0) && (
+                                    <p className="mt-1 text-[10px] text-accent">
+                                      {source.notes.length} 条引用笔记 · {source.comments.length} 条资料评论
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {notes.length > 0 ? notes.map((note) => (
+                    <div key={note.id} className="rounded-lg border border-border bg-white px-3 py-2.5 shadow-sm-soft">
                     <div className="flex items-start gap-2">
                       <NotebookPen className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
                       <div className="min-w-0 flex-1">
@@ -499,11 +546,12 @@ export default function ConversationNavigator({
                       </div>
                     </div>
                   </div>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted">
-                  还没有知识笔记
-                </div>
+                  )) : noteAggregateItems.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted">
+                      还没有知识笔记
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

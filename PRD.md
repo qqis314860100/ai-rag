@@ -127,7 +127,7 @@
 - [x] `rag`: 将现有 Diagram IR 升级为可输出 Excalidraw scene 的 artifact payload，保留来源证据、生成理由和置信度。
 - [x] `web`: 引入 `@excalidraw/excalidraw`，用只读白板图解替换当前手写 SVG 图谱弹窗。
 - [x] `rag` / `api`: 增加 Visual Planner，基于问题、回答、引用和置信度判断是否自动生成流程图、架构图、思维导图、表格或图片 artifact。
-- [ ] `api` / `web`: 增强知识笔记聚合视图，将回答笔记、引用评论、风险提示和人工补充按回答与 source 组织。
+- [x] `api` / `web`: 增强知识笔记聚合视图，将回答笔记、引用评论、风险提示和人工补充按回答与 source 组织。
 - [ ] `api` / `rag`: 设计受控 image artifact 生成链路，包含 prompt 脱敏、权限继承、异步生成和失败兜底；本阶段只做契约，不默认自动生成图片。
 
 ## 每轮验收模板

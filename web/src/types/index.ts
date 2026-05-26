@@ -118,6 +118,43 @@ export interface ChatNote {
   updated_at: string;
 }
 
+export interface ChatNoteSourceAggregate {
+  id: string;
+  chunk_id: string;
+  document_id: string | null;
+  document_title: string;
+  section_path: string;
+  score: number;
+  snippet: string;
+  notes: ChatNote[];
+  comments: Array<{
+    id: string;
+    user_name: string;
+    content: string;
+    parent_id: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+}
+
+export interface ChatNoteAggregateItem {
+  message_id: string;
+  question: string;
+  answer_preview: string;
+  confidence: number;
+  notes: ChatNote[];
+  sources: ChatNoteSourceAggregate[];
+  risks: Array<Record<string, unknown>>;
+  manual_note_count: number;
+  source_comment_count: number;
+  created_at: string;
+}
+
+export interface ChatNoteAggregate {
+  session_notes: ChatNote[];
+  items: ChatNoteAggregateItem[];
+}
+
 export type DiagramType = "mindmap" | "flowchart";
 
 export interface DiagramNode {

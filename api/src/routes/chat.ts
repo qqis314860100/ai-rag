@@ -8,9 +8,10 @@ import { auditFromRequest } from "../services/auditService";
 import { listSessions, getSessionById, createSession, updateSession } from "../db/chatSessions";
 import { listMessagesBySession, createMessage, formatMessage, deleteMessageAndTruncateSession, getMessageById, updateMessageAndTruncateSession } from "../db/chatMessages";
 import { getMessageSourceDetail, listMessageSourceDetails } from "../db/messageSources";
-import { NOTE_OWNERSHIP_CONTRACT, createNote, formatNote, isNoteScope, listNotes, softDeleteNote, updateNote } from "../db/chatNotes";
+import { NOTE_OWNERSHIP_CONTRACT, createNote, formatNote, isNoteScope, listNotes, listNotesBySession, softDeleteNote, updateNote } from "../db/chatNotes";
 import type { NoteTarget } from "../db/chatNotes";
 import { createArtifact, formatArtifact, getArtifactById, listArtifactsByMessage, softDeleteArtifact, updateArtifact } from "../db/chatArtifacts";
+import { listComments } from "../db/docComments";
 import { getDb } from "../db/index";
 
 const router = Router();
@@ -928,6 +929,86 @@ router.get("/chat/notes/contract", async (req: Request, res: Response, next: Nex
       },
       req.requestId
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/notes/aggregate - group notes, source comments and answer risks by assistant answer
+router.get("/chat/notes/aggregate", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = typeof req.query.session_id === "string" ? req.query.session_id.trim() : "";
+    if (!sessionId) {
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, "必须指定 session_id。", 400);
+    }
+    requireReadableSession(req, sessionId);
+
+    const user = currentUser(req);
+    const notes = listNotesBySession(sessionId, user.id).map(formatNote);
+    const messages = listMessagesBySession(sessionId);
+    const items = messages
+      .map((message, index) => {
+        if (message.role !== "assistant") return null;
+        const metadata = JSON.parse(message.metadata_json || "{}") as Record<string, unknown>;
+        const confidence = typeof metadata.confidence === "number" ? metadata.confidence : 0;
+        const previousQuestion = [...messages.slice(0, index)].reverse().find((item) => item.role === "user")?.content ?? "";
+        const messageNotes = notes.filter((note) => note.scope === "message" && note.message_id === message.id);
+        const sourceDetails = listMessageSourceDetails(message.id);
+        const sources = sourceDetails.map((source) => {
+          const sourceNotes = notes.filter((note) =>
+            note.scope === "source" &&
+            note.message_id === message.id &&
+            (note.source_id === source.id || note.chunk_id === source.chunk_id)
+          );
+          const comments = source.document_id ? listComments(source.document_id, source.chunk_id).map((comment) => ({
+            id: comment.id,
+            user_name: comment.user_name,
+            content: comment.content,
+            parent_id: comment.parent_id,
+            created_at: comment.created_at,
+            updated_at: comment.updated_at,
+          })) : [];
+          return {
+            id: source.id,
+            chunk_id: source.chunk_id,
+            document_id: source.document_id,
+            document_title: source.document_title,
+            section_path: source.section_path,
+            score: source.score,
+            snippet: source.snippet,
+            notes: sourceNotes,
+            comments,
+          };
+        });
+        const answerIrSummary = isRecord(metadata.answer_ir_summary) ? metadata.answer_ir_summary : {};
+        const visualPlan = isRecord(metadata.visual_plan) ? metadata.visual_plan : {};
+        const answerWarnings = Array.isArray(answerIrSummary.warnings) ? answerIrSummary.warnings : [];
+        const visualWarnings = Array.isArray(visualPlan.warnings) ? visualPlan.warnings : [];
+        const risks = [
+          ...(confidence > 0 && confidence < 0.6 ? [{ code: "low_confidence", message: `回答可信度 ${Math.round(confidence * 100)}%，建议核对原文。` }] : []),
+          ...answerWarnings,
+          ...visualWarnings,
+        ];
+
+        return {
+          message_id: message.id,
+          question: previousQuestion,
+          answer_preview: compactDiagramText(message.content, 180),
+          confidence,
+          notes: messageNotes,
+          sources,
+          risks,
+          manual_note_count: messageNotes.length + sources.reduce((total, source) => total + source.notes.length, 0),
+          source_comment_count: sources.reduce((total, source) => total + source.comments.length, 0),
+          created_at: message.created_at,
+        };
+      })
+      .filter(Boolean);
+
+    sendSuccess(res, {
+      session_notes: notes.filter((note) => note.scope === "session"),
+      items,
+    }, req.requestId);
   } catch (err) {
     next(err);
   }

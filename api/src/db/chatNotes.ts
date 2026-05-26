@@ -93,6 +93,18 @@ export function listNotes(target: NoteTarget, userId: string): ChatNoteRow[] {
   ) as ChatNoteRow[];
 }
 
+export function listNotesBySession(sessionId: string, userId: string): ChatNoteRow[] {
+  const db = getDb();
+  return db.prepare(
+    `SELECT *
+     FROM chat_notes
+     WHERE user_id = ?
+       AND status = 'active'
+       AND session_id = ?
+     ORDER BY updated_at DESC, rowid DESC`
+  ).all(userId, sessionId) as ChatNoteRow[];
+}
+
 export function getNoteById(id: string): ChatNoteRow | null {
   const db = getDb();
   const row = db.prepare("SELECT * FROM chat_notes WHERE id = ? AND status = 'active'").get(id) as ChatNoteRow | undefined;
