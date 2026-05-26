@@ -22,6 +22,14 @@ import { requirePermission } from "../middleware/auth";
 import { getSessionById } from "../db/chatSessions";
 import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
+import {
+  archiveKnowledgeCard,
+  parseKnowledgeCardRevisionBody,
+  publishKnowledgeCard,
+  returnKnowledgeCard,
+  reviseKnowledgeCard,
+  submitKnowledgeCardForReview,
+} from "../services/knowledgeCardReviewService";
 import { auditFromRequest } from "../services/auditService";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
@@ -118,6 +126,15 @@ router.get(
     try {
       sendSuccess(res, {
         contract: KNOWLEDGE_CARD_MODEL_CONTRACT,
+        review_workflow: {
+          revise: "PATCH /api/knowledge/cards/:id",
+          submit: "POST /api/knowledge/cards/:id/submit",
+          publish: "POST /api/knowledge/cards/:id/publish",
+          return: "POST /api/knowledge/cards/:id/return",
+          archive: "POST /api/knowledge/cards/:id/archive",
+          required_evidence_before_publish: true,
+          version_compare: "GET /api/knowledge/cards/:id/versions",
+        },
         draft_generation: {
           endpoint: "POST /api/knowledge/cards/draft/from-message",
           required_message_role: "assistant",
@@ -222,6 +239,96 @@ router.post(
         confidence: card.metadata.confidence,
       });
 
+      sendSuccess(res, card, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  "/knowledge/cards/:id",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const card = reviseKnowledgeCard(String(req.params.id), currentUser(req), parseKnowledgeCardRevisionBody(req.body));
+      auditFromRequest(req, "knowledge_card.revise", "knowledge_card", card.id, {
+        status: card.status,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+      });
+      sendSuccess(res, card, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/cards/:id/submit",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const card = submitKnowledgeCardForReview(String(req.params.id), currentUser(req), parseKnowledgeCardRevisionBody(req.body));
+      auditFromRequest(req, "knowledge_card.submit_review", "knowledge_card", card.id, {
+        status: card.status,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+      });
+      sendSuccess(res, card, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/cards/:id/publish",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const card = publishKnowledgeCard(String(req.params.id), currentUser(req), parseKnowledgeCardRevisionBody(req.body));
+      auditFromRequest(req, "knowledge_card.publish", "knowledge_card", card.id, {
+        status: card.status,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+      });
+      sendSuccess(res, card, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/cards/:id/return",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const card = returnKnowledgeCard(String(req.params.id), currentUser(req), parseKnowledgeCardRevisionBody(req.body));
+      auditFromRequest(req, "knowledge_card.return", "knowledge_card", card.id, {
+        status: card.status,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+      });
+      sendSuccess(res, card, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/cards/:id/archive",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const card = archiveKnowledgeCard(String(req.params.id), currentUser(req), parseKnowledgeCardRevisionBody(req.body));
+      auditFromRequest(req, "knowledge_card.archive", "knowledge_card", card.id, {
+        status: card.status,
+        version: card.current_version,
+        source_count: card.source_refs.length,
+      });
       sendSuccess(res, card, req.requestId);
     } catch (err) {
       next(err);

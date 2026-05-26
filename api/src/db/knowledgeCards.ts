@@ -152,6 +152,12 @@ function parseJson<T>(input: string, fallback: T): T {
   }
 }
 
+function existingUserIdOrNull(userId?: string | null): string | null {
+  if (!userId) return null;
+  const row = getDb().prepare("SELECT id FROM users WHERE id = ? LIMIT 1").get(userId) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
 function snapshotFromRow(row: KnowledgeCardRow) {
   return {
     id: row.id,
@@ -191,7 +197,7 @@ function insertVersion(row: KnowledgeCardRow, changedBy?: string | null, changed
     row.current_version,
     toJson(snapshotFromRow(row)),
     changeNote ?? null,
-    changedBy ?? null,
+    existingUserIdOrNull(changedBy),
     changedByName ?? null,
     now
   );
@@ -228,10 +234,10 @@ export function createKnowledgeCard(input: KnowledgeCardDraftInput): KnowledgeCa
       toJson(input.sourceRefs ?? []),
       toJson(input.relatedTerms ?? []),
       input.status ?? "ai_draft",
-      input.reviewerId ?? null,
+      existingUserIdOrNull(input.reviewerId),
       input.reviewerName ?? null,
       input.reviewedAt ?? null,
-      input.createdBy ?? null,
+      existingUserIdOrNull(input.createdBy),
       input.createdByName ?? null,
       toJson(input.metadata ?? {}),
       now,
@@ -350,7 +356,7 @@ export function updateKnowledgeCard(id: string, input: UpdateKnowledgeCardInput)
       input.sourceRefs === undefined ? existing.source_refs_json : toJson(input.sourceRefs),
       input.relatedTerms === undefined ? existing.related_terms_json : toJson(input.relatedTerms),
       input.status ?? existing.status,
-      input.reviewerId === undefined ? existing.reviewer_id : input.reviewerId,
+      input.reviewerId === undefined ? existing.reviewer_id : existingUserIdOrNull(input.reviewerId),
       input.reviewerName === undefined ? existing.reviewer_name : input.reviewerName,
       input.reviewedAt === undefined ? existing.reviewed_at : input.reviewedAt,
       nextVersion,

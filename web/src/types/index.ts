@@ -236,6 +236,79 @@ export interface ChatArtifact {
   updated_at: string;
 }
 
+export type KnowledgeCardStatus = "ai_draft" | "pending_review" | "returned" | "published" | "archived";
+
+export interface KnowledgeCardSourceRef {
+  document_id?: string;
+  chunk_id?: string;
+  message_id?: string;
+  source_id?: string;
+  title?: string;
+  section_path?: string;
+  snippet?: string;
+  score?: number;
+}
+
+export interface KnowledgeCardKeyParameter {
+  name: string;
+  value?: string;
+  unit?: string;
+  range?: string;
+  description?: string;
+}
+
+export interface KnowledgeCardStep {
+  title: string;
+  description?: string;
+  order?: number;
+}
+
+export interface KnowledgeCardRisk {
+  title: string;
+  level?: "low" | "medium" | "high" | "critical";
+  description?: string;
+}
+
+export interface KnowledgeCardHandlingMethod {
+  title: string;
+  description?: string;
+  related_risk?: string;
+}
+
+export interface KnowledgeCardVersion {
+  id: string;
+  card_id: string;
+  version: number;
+  snapshot: Record<string, unknown>;
+  change_note: string | null;
+  changed_by: string | null;
+  changed_by_name: string | null;
+  created_at: string;
+}
+
+export interface KnowledgeCard {
+  id: string;
+  topic: string;
+  summary: string;
+  key_parameters: KnowledgeCardKeyParameter[];
+  steps: KnowledgeCardStep[];
+  risks: KnowledgeCardRisk[];
+  handling_methods: KnowledgeCardHandlingMethod[];
+  source_refs: KnowledgeCardSourceRef[];
+  related_terms: string[];
+  status: KnowledgeCardStatus;
+  reviewer_id: string | null;
+  reviewer_name: string | null;
+  reviewed_at: string | null;
+  current_version: number;
+  created_by: string | null;
+  created_by_name: string | null;
+  metadata: Record<string, unknown>;
+  version_history: KnowledgeCardVersion[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SearchHit {
   chunk_id: string;
   document_id: string;
