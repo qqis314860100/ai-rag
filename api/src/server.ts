@@ -31,7 +31,7 @@ app.use(requestContext);
 // Request logging
 app.use(requestLogger);
 
-// User extraction from headers (dev mode: defaults to system_admin)
+// 用户提取：生产环境只接受有效 JWT，开发环境允许请求头和默认用户辅助联调。
 app.use(extractUser);
 
 // API Routes

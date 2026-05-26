@@ -76,7 +76,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
 };
 
 export function extractUser(req: Request, _res: Response, next: NextFunction): void {
-  // JWT takes precedence
+  const isProduction = process.env.NODE_ENV === "production";
+
+  // JWT 优先；生产环境下无效 token 不能继续降级到开发头或默认用户。
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
     try {
@@ -92,11 +94,17 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
       };
       return next();
     } catch {
-      // Invalid JWT — fall through to header-based or default
+      if (isProduction) {
+        throw new AppError(ErrorCodes.UNAUTHORIZED, "登录凭证无效。", 401);
+      }
     }
   }
 
-  // Fallback: header-based (dev mode)
+  if (isProduction) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, "生产环境必须提供有效登录凭证。", 401);
+  }
+
+  // 开发模式允许通过请求头模拟用户，便于本地联调。
   const userId = req.headers["x-user-id"] as string | undefined;
   const userRole = req.headers["x-user-role"] as string | undefined;
 
@@ -110,7 +118,7 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
       allowedSecurityLevels: ROLE_SECURITY_LEVELS[role] || ["public"],
     };
   } else {
-    // Default to system user from DB
+    // 仅开发模式允许回退到系统用户，生产环境已在上方强制 401。
     try {
       const db = getDb();
       const sys = db.prepare("SELECT id, name, role FROM users WHERE name='system' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
