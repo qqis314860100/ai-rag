@@ -3,7 +3,7 @@ import { Excalidraw, convertToExcalidrawElements } from "@excalidraw/excalidraw"
 import type { ExcalidrawElementSkeleton } from "@excalidraw/excalidraw/data/transform";
 import type { ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
-import type { DiagramEdge, DiagramIR, DiagramNode } from "../../types";
+import type { DiagramEdge, DiagramIR, DiagramNode } from "../types";
 
 type NodeLayout = {
   x: number;

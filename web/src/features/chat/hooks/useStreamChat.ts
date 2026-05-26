@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { sseStream } from "../services/api";
+import { sseStream } from "../../../services/api";
 import type { Source } from "../types";
 
 export interface StreamState {

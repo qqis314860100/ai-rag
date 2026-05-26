@@ -1,5 +1,5 @@
 import { AlertCircle, BarChart3, Brain, CheckCircle2, Clock, Eye, FileText, Network, Workflow, XCircle } from "lucide-react";
-import type { ChatArtifact } from "../../types";
+import type { ChatArtifact } from "../types";
 
 interface ArtifactCardProps {
   artifact: ChatArtifact;

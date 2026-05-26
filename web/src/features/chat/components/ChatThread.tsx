@@ -1,11 +1,11 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
-import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../../types";
+import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
 import ArtifactCard from "./ArtifactCard";
 import ArtifactModal from "./ArtifactModal";
-import { api } from "../../services/api";
-import { showToast } from "../ui/Toast";
+import { api } from "../../../services/api";
+import { showToast } from "../../../components/ui/Toast";
 
 interface ChatThreadProps {
   messages: ChatMessage[];

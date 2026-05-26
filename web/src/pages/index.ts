@@ -1,4 +1,4 @@
-export { default as ChatPage } from "./ChatPage";
+export { default as ChatPage } from "../features/chat/ChatPage";
 export { default as DocumentsPage } from "./DocumentsPage";
 export { default as KnowledgeAssetsPage } from "./KnowledgeAssetsPage";
 export { default as SopDocumentsPage } from "./SopDocumentsPage";

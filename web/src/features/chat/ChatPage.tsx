@@ -1,17 +1,17 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import ChatThread from "../components/chat/ChatThread";
-import { SessionList } from "../components/chat/SessionList";
-import ChatInput from "../components/chat/ChatInput";
-import DocPreview from "../components/chat/DocPreview";
-import ConversationNavigator from "../components/chat/ConversationNavigator";
-import { api } from "../services/api";
-import { useStreamChat } from "../hooks/useStreamChat";
-import { useChatHistory } from "../hooks/useChatHistory";
-import { useChatDrafts } from "../hooks/useChatDrafts";
-import { showToast } from "../components/ui/Toast";
-import { track } from "../services/tracking";
-import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, KnowledgeCard, KnowledgeFaq, Source } from "../types";
+import ChatThread from "./components/ChatThread";
+import { SessionList } from "./components/SessionList";
+import ChatInput from "./components/ChatInput";
+import DocPreview from "./components/DocPreview";
+import ConversationNavigator from "./components/ConversationNavigator";
+import { api } from "../../services/api";
+import { useStreamChat } from "./hooks/useStreamChat";
+import { useChatHistory } from "./hooks/useChatHistory";
+import { useChatDrafts } from "./hooks/useChatDrafts";
+import { showToast } from "../../components/ui/Toast";
+import { track } from "../../services/tracking";
+import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, KnowledgeCard, KnowledgeFaq, Source } from "./types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {

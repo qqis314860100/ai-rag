@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ChatMessage, ChatNote, ChatNoteAggregateItem, Source } from "../../types";
+import type { ChatMessage, ChatNote, ChatNoteAggregateItem, Source } from "../types";
 
 type NavigatorView = "roadmap" | "notes";
 

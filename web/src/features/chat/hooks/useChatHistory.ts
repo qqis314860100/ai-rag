@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "../services/api";
-import { showToast } from "../components/ui/Toast";
+import { api } from "../../../services/api";
+import { showToast } from "../../../components/ui/Toast";
 import type { ChatMessage, ChatSession } from "../types";
 
 interface SessionListResponse {

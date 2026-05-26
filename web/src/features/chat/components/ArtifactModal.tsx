@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Code2, Maximize2, Network, X } from "lucide-react";
-import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramNode } from "../../types";
+import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramNode } from "../types";
 import { DiagramCanvas } from "./DiagramModal";
 
 interface ArtifactModalProps {

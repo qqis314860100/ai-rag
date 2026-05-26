@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Maximize2, Network, X } from "lucide-react";
-import type { DiagramIR } from "../../types";
+import type { DiagramIR } from "../types";
 
 interface DiagramModalProps {
   diagram: DiagramIR;

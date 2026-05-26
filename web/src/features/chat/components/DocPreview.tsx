@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { X, FileText, MessageSquare, Send, Trash2, Pencil, FileCode, Globe, Loader2, ExternalLink, CornerDownRight } from "lucide-react";
-import type { Source, DocComment, DocumentPreviewContract, PreviewView } from "../../types";
-import { api } from "../../services/api";
-import { useAuth } from "../../contexts/AuthContext";
-import { showToast } from "../ui/Toast";
+import type { Source, DocComment, DocumentPreviewContract, PreviewView } from "../types";
+import { api } from "../../../services/api";
+import { useAuth } from "../../../contexts/AuthContext";
+import { showToast } from "../../../components/ui/Toast";
 import { MarkdownContent } from "./MarkdownContent";
 
 interface Props {

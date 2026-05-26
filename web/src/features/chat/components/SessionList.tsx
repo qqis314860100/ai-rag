@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { MessageSquare, Trash2, X } from "lucide-react";
-import type { ChatSession } from "../../types";
-import { showToast } from "../ui/Toast";
+import type { ChatSession } from "../types";
+import { showToast } from "../../../components/ui/Toast";
 
 interface Props {
   sessions: ChatSession[];

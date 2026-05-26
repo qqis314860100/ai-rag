@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
 import { ArrowUp, Paperclip, Image, Mic, Keyboard, StopCircle } from "lucide-react";
-import { showToast } from "../ui/Toast";
+import { showToast } from "../../../components/ui/Toast";
 
 interface ChatInputProps {
   onSend: (message: string) => void;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, FileText, ArrowRight, ShieldCheck, Copy, MessageSquare, Layers, Search, ChevronDown, ChevronUp } from "lucide-react";
-import type { Source } from "../../types";
+import type { Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
 
 interface SourcePanelProps {
