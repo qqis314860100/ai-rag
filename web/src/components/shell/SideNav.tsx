@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose } from "lucide-react";
+import { MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose, LibraryBig } from "lucide-react";
 
 const primaryNav = [
   { to: "/chat", icon: MessageSquare, label: "聊天" },
   { to: "/analytics", icon: BarChart3, label: "统计看板" },
   { to: "/documents", icon: BookOpen, label: "知识库管理" },
+  { to: "/knowledge-assets", icon: LibraryBig, label: "知识资产" },
   { to: "/sop", icon: FileText, label: "工艺SOP" },
 ];
 

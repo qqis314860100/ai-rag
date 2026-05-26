@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AppShell } from "./components/shell";
-import { ChatPage, DocumentsPage, SopDocumentsPage, FavoritesPage, AnalyticsPage, DebuggerPage, SettingsPage } from "./pages";
+import { ChatPage, DocumentsPage, SopDocumentsPage, FavoritesPage, AnalyticsPage, DebuggerPage, SettingsPage, KnowledgeAssetsPage } from "./pages";
 import LoginPage from "./pages/LoginPage";
 import { ToastContainer } from "./components/ui/Toast";
 
@@ -24,6 +24,7 @@ function AppRoutes() {
               <Route path="/" element={<Navigate to="/chat" replace />} />
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
+              <Route path="/knowledge-assets" element={<KnowledgeAssetsPage />} />
               <Route path="/sop" element={<SopDocumentsPage />} />
               <Route path="/favorites" element={<FavoritesPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
