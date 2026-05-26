@@ -57,42 +57,6 @@ function getDiagramActionLabel(diagramType: DiagramType, hasData: boolean) {
   return hasData ? "查看流程" : "流程图";
 }
 
-const MIN_ARTIFACT_CONFIDENCE = 0.66;
-const DOMAIN_SHORT_QUERY_PATTERN = /\b(?:OCV|EOL|CCD|SOC|SOP|RAG|PPM|MES|PLC|BMS|Busbar)\b/i;
-const LOW_SIGNAL_INPUT_PATTERN = /^[\d\s._\-+*/=#@!?,，。！？、;；:：()[\]{}"'`~|\\]+$/;
-const CLARIFICATION_ANSWER_PATTERN =
-  /(?:请(?:先|再)?(?:提供|补充|说明|明确)|需要(?:更多|补充|具体).{0,12}(?:信息|背景|问题)|看起来像(?:测试|误触|随意输入)|无法(?:判断|确定|生成|回答)|信息不足|问题不够具体|没有足够(?:上下文|信息|证据)|请重新输入|换个具体问题)/;
-
-function semanticLength(value: string) {
-  return (value.match(/[\u4e00-\u9fffA-Za-z0-9Ωμ%]+/g) || []).join("").length;
-}
-
-function isLowSignalQuestion(question: string) {
-  const compact = question.trim();
-  if (!compact) return true;
-  if (LOW_SIGNAL_INPUT_PATTERN.test(compact)) return true;
-  if (compact.length >= 2 && /^(.)(\1)+$/.test(compact.replace(/\s+/g, ""))) return true;
-  if (DOMAIN_SHORT_QUERY_PATTERN.test(compact)) return false;
-  return semanticLength(compact) < 6;
-}
-
-function artifactBlockedReason(message: ChatMessage, previousQuestion: string) {
-  if (isLowSignalQuestion(previousQuestion)) return "当前问题信息不足，暂不生成图解";
-  if (CLARIFICATION_ANSWER_PATTERN.test(message.content.replace(/\s+/g, ""))) return "当前回答还在澄清问题，暂不生成图解";
-  if (message.confidence !== undefined && message.confidence > 0 && message.confidence < MIN_ARTIFACT_CONFIDENCE) {
-    return `回答可信度 ${Math.round(message.confidence * 100)}%，暂不生成图解`;
-  }
-  if (!message.sources || message.sources.length === 0) return "当前回答没有可追溯引用，暂不生成图解";
-  return "";
-}
-
-function previousUserQuestion(messages: ChatMessage[], index: number) {
-  for (let i = index - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === "user") return messages[i].content;
-  }
-  return "";
-}
-
 type DiagramState = {
   loading: boolean;
   data?: ChatArtifact;
@@ -462,7 +426,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     }
   };
 
-  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType, existingArtifact?: ChatArtifact, titleInput?: string) => {
+  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType, existingArtifact?: ChatArtifact) => {
     const messageId = getPersistedMessageId(message);
     if (!canUsePersistedAssistantActions(messageId)) return;
 
@@ -490,7 +454,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         {
           diagram_type: diagramType,
           type: diagramType,
-          title: titleInput?.trim().slice(0, 40) || "AI 整理",
+          title: "AI 整理",
         }
       );
       setGeneratedArtifacts((prev) => ({
@@ -521,7 +485,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
 
   return (
     <div className="py-6 space-y-10">
-      {messages.map((msg, index) => {
+      {messages.map((msg) => {
         const isUser = msg.role === "user";
         const persistedMessageId = getPersistedMessageId(msg);
         const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
@@ -529,7 +493,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const userBranchActionsDisabled = loading || !canPersistUserActions;
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
-        const blockedArtifactReason = !isUser ? artifactBlockedReason(msg, previousUserQuestion(messages, index)) : "";
 
         return (
           <div
@@ -633,42 +596,33 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                         <Sparkles className="h-3.5 w-3.5 text-accent" />
                         可继续整理
                       </span>
-                      {blockedArtifactReason ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft/70 px-2.5 py-1.5 text-[11px] font-medium text-warning">
-                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                          {blockedArtifactReason}
-                        </span>
-                      ) : (
-                        <>
+                      <button
+                        type="button"
+                        onClick={() => onFollowUp("请把上一条回答整理成 3 条关键结论，并保留必要的引用依据。")}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent"
+                        title="让 AI 基于本条回答继续总结"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        总结
+                      </button>
+                      {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
+                        const state = diagramStates[getDiagramKey(persistedMessageId, type)];
+                        const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.diagram_type === type);
+                        const Icon = type === "mindmap" ? Brain : Workflow;
+                        return (
                           <button
+                            key={type}
                             type="button"
-                            onClick={() => onFollowUp("请把上一条回答整理成 3 条关键结论，并保留必要的引用依据。")}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent"
-                            title="让 AI 基于本条回答继续总结"
+                            onClick={() => void generateDiagram(msg, type, state?.data || existingArtifact)}
+                            disabled={state?.loading}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={getDiagramButtonLabel(type, Boolean(state?.data || existingArtifact))}
                           >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            总结
+                            {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+                            {getDiagramActionLabel(type, Boolean(state?.data || existingArtifact))}
                           </button>
-                          {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
-                            const state = diagramStates[getDiagramKey(persistedMessageId, type)];
-                            const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.diagram_type === type);
-                            const Icon = type === "mindmap" ? Brain : Workflow;
-                            return (
-                              <button
-                                key={type}
-                                type="button"
-                                onClick={() => void generateDiagram(msg, type, state?.data || existingArtifact, previousUserQuestion(messages, index))}
-                                disabled={state?.loading}
-                                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
-                                title={getDiagramButtonLabel(type, Boolean(state?.data || existingArtifact))}
-                              >
-                                {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
-                                {getDiagramActionLabel(type, Boolean(state?.data || existingArtifact))}
-                              </button>
-                            );
-                          })}
-                        </>
-                      )}
+                        );
+                      })}
                       {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
                         const state = diagramStates[getDiagramKey(persistedMessageId, type)];
                         return state?.error ? (

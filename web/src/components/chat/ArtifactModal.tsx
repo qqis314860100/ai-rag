@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Code2, Maximize2, Network, X } from "lucide-react";
-import type { ChatArtifact, DiagramIR } from "../../types";
+import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramNode } from "../../types";
 import { DiagramCanvas } from "./DiagramModal";
 
 interface ArtifactModalProps {
@@ -12,23 +12,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function normalizeNode(value: unknown): DiagramNode | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") return null;
+  return {
+    id: value.id,
+    label: value.label,
+    kind: typeof value.kind === "string" ? value.kind : "topic",
+    description: typeof value.description === "string" ? value.description : "",
+    source_ids: Array.isArray(value.source_ids) ? value.source_ids.filter((id): id is string => typeof id === "string") : [],
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+  };
+}
+
+function normalizeEdge(value: unknown, nodeIds: Set<string>): DiagramEdge | null {
+  if (!isRecord(value) || typeof value.source !== "string" || typeof value.target !== "string") return null;
+  if (!nodeIds.has(value.source) || !nodeIds.has(value.target)) return null;
+  return {
+    source: value.source,
+    target: value.target,
+    relation: typeof value.relation === "string" ? value.relation : "relates_to",
+    label: typeof value.label === "string" ? value.label : "",
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+  };
+}
+
 function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
   if (!isRecord(artifact.payload)) return null;
-  const nodes = artifact.payload.nodes;
-  const edges = artifact.payload.edges;
-  if (!Array.isArray(nodes) || !Array.isArray(edges)) return null;
+  const rawNodes = artifact.payload.nodes;
+  const rawEdges = artifact.payload.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
+  const nodes = rawNodes.map(normalizeNode).filter((node): node is DiagramNode => Boolean(node));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = rawEdges.map((edge) => normalizeEdge(edge, nodeIds)).filter((edge): edge is DiagramEdge => Boolean(edge));
+  if (nodes.length === 0) return null;
 
   return {
     title: typeof artifact.payload.title === "string" ? artifact.payload.title : artifact.title,
     objective: typeof artifact.payload.objective === "string" ? artifact.payload.objective : "",
     diagram_type: typeof artifact.payload.diagram_type === "string" ? artifact.payload.diagram_type : artifact.type,
     layout_hint: typeof artifact.payload.layout_hint === "string" ? artifact.payload.layout_hint : "",
-    nodes: nodes as DiagramIR["nodes"],
-    edges: edges as DiagramIR["edges"],
+    nodes,
+    edges,
     notes: Array.isArray(artifact.payload.notes) ? artifact.payload.notes as string[] : [],
     renderer: typeof artifact.payload.renderer === "string" ? artifact.payload.renderer : undefined,
     reason: typeof artifact.payload.reason === "string" ? artifact.payload.reason : undefined,
     confidence: typeof artifact.payload.confidence === "number" ? artifact.payload.confidence : undefined,
+    can_generate: typeof artifact.payload.can_generate === "boolean" ? artifact.payload.can_generate : undefined,
+    quality_score: typeof artifact.payload.quality_score === "number" ? artifact.payload.quality_score : undefined,
+    quality_warnings: Array.isArray(artifact.payload.quality_warnings) ? artifact.payload.quality_warnings as DiagramIR["quality_warnings"] : undefined,
+    validation: isRecord(artifact.payload.validation) ? artifact.payload.validation as DiagramIR["validation"] : null,
     source_evidence: Array.isArray(artifact.payload.source_evidence) ? artifact.payload.source_evidence as Record<string, unknown>[] : undefined,
     excalidraw_scene: isRecord(artifact.payload.excalidraw_scene) ? artifact.payload.excalidraw_scene : null,
     metadata: isRecord(artifact.payload.metadata) ? artifact.payload.metadata : {},

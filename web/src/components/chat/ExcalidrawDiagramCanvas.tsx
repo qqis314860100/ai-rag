@@ -115,11 +115,6 @@ function getNodeLayout(node: DiagramNode, index: number): NodeLayout {
   }, compactLabel(node, render), render);
 }
 
-function fixedLayout(node: DiagramNode, layout: NodeLayout): NodeLayout {
-  const render = getNodeRender(node);
-  return fitLayoutToLabel(layout, compactLabel(node, render), render);
-}
-
 function nodeCenter(layout: NodeLayout) {
   return {
     x: layout.x + layout.width / 2,
@@ -156,139 +151,22 @@ function connectorPoints(source: NodeLayout, target: NodeLayout) {
   };
 }
 
-function mindmapConnectorPoints(source: NodeLayout, target: NodeLayout) {
-  const sourceCenter = nodeCenter(source);
-  const targetCenter = nodeCenter(target);
-  const startX = source.x + source.width + 8;
-  const endX = target.x - 8;
-  const width = endX - startX;
-  const height = targetCenter.y - sourceCenter.y;
-  const elbowX = width / 2;
-
-  return {
-    x: startX,
-    y: sourceCenter.y,
-    width,
-    height,
-    points: [[0, 0], [elbowX, 0], [elbowX, height], [width, height]],
-  };
-}
-
-function getVisibleMindmapNodeIds(diagram: DiagramIR) {
-  const visible = new Set<string>();
-  const root = diagram.nodes.find((node) => node.kind === "root");
-  if (root) visible.add(root.id);
-
-  const categoryIds = diagram.edges
-    .filter((edge) => edge.source === root?.id)
-    .map((edge) => edge.target)
-    .filter((nodeId) => diagram.nodes.some((node) => node.id === nodeId && node.kind === "category"))
-    .slice(0, 5);
-
-  categoryIds.forEach((categoryId) => {
-    visible.add(categoryId);
-    diagram.edges
-      .filter((edge) => edge.source === categoryId)
-      .map((edge) => edge.target)
-      .filter((nodeId) => diagram.nodes.some((node) => node.id === nodeId && node.kind !== "evidence"))
-      .slice(0, 4)
-      .forEach((nodeId) => visible.add(nodeId));
-  });
-
-  if (visible.size === 0) {
-    diagram.nodes
-      .filter((node) => node.kind !== "evidence")
-      .slice(0, 18)
-      .forEach((node) => visible.add(node.id));
-  }
-  return visible;
-}
-
 function getRenderableGraph(diagram: DiagramIR) {
-  const visibleIds = diagram.diagram_type === "mindmap"
-    ? getVisibleMindmapNodeIds(diagram)
-    : new Set(diagram.nodes.filter((node) => node.kind !== "evidence").map((node) => node.id));
-  const nodes = diagram.nodes.filter((node) => visibleIds.has(node.id));
+  const nodes = diagram.nodes;
+  const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = diagram.edges.filter((edge) => {
-    if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) return false;
-    if (diagram.diagram_type !== "mindmap") return true;
-    return !diagram.nodes.some((node) => node.id === edge.target && node.kind === "evidence");
+    return nodeIds.has(edge.source) && nodeIds.has(edge.target);
   });
   return { nodes, edges };
 }
 
-function createMindmapLayouts(diagram: DiagramIR, nodes: DiagramNode[]) {
-  const layouts = new Map<string, NodeLayout>();
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const root = nodes.find((node) => node.kind === "root");
-  if (!root) return layouts;
-
-  const categoryIds = diagram.edges
-    .filter((edge) => edge.source === root.id && byId.get(edge.target)?.kind === "category")
-    .map((edge) => edge.target)
-    .filter((id) => byId.has(id));
-
-  const categories = categoryIds.map((id) => byId.get(id)!).slice(0, 5);
-  const keywordIdsByCategory = new Map<string, string[]>();
-  categories.forEach((category) => {
-    keywordIdsByCategory.set(
-      category.id,
-      diagram.edges
-        .filter((edge) => edge.source === category.id && byId.get(edge.target)?.kind !== "evidence")
-        .map((edge) => edge.target)
-        .filter((id) => byId.has(id))
-        .slice(0, 4)
-    );
-  });
-
-  const blocks = categories.map((category) => {
-    const keywords = keywordIdsByCategory.get(category.id) || [];
-    return {
-      category,
-      keywords,
-      height: Math.max(118, Math.max(1, keywords.length) * 74),
-    };
-  });
-  const totalHeight = blocks.reduce((sum, block) => sum + block.height + 36, 0);
-  const canvasHeight = Math.max(680, totalHeight + 96);
-  const rootX = 80;
-  const rootY = canvasHeight / 2 - 46;
-  layouts.set(root.id, fixedLayout(root, { x: rootX, y: rootY, width: 300, height: 92 }));
-
-  let cursorY = Math.max(56, (canvasHeight - totalHeight) / 2);
-  blocks.forEach((block) => {
-    const top = cursorY;
-    cursorY += block.height + 36;
-
-    // 中文注释：思维导图使用单向层级树，保证父节点到子节点的箭头不交叉、不穿卡片。
-    const categoryX = 470;
-    const keywordX = 820;
-    const categoryY = top + block.height / 2 - 34;
-    layouts.set(block.category.id, fixedLayout(block.category, { x: categoryX, y: categoryY, width: 210, height: 68 }));
-
-    block.keywords.forEach((keywordId, index) => {
-      const keyword = byId.get(keywordId);
-      if (!keyword) return;
-      layouts.set(keyword.id, fixedLayout(keyword, {
-        x: keywordX,
-        y: top + index * 74 + Math.max(0, block.height - block.keywords.length * 74) / 2,
-        width: 280,
-        height: 64,
-      }));
-    });
-  });
-
-  return layouts;
-}
-
-function createLayouts(diagram: DiagramIR, nodes: DiagramNode[]) {
-  if (diagram.diagram_type === "mindmap") return createMindmapLayouts(diagram, nodes);
+function createLayouts(nodes: DiagramNode[]) {
   return new Map(nodes.map((node, index) => [node.id, getNodeLayout(node, index)]));
 }
 
 function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   const graph = getRenderableGraph(diagram);
-  const layouts = createLayouts(diagram, graph.nodes);
+  const layouts = createLayouts(graph.nodes);
   const edgeSkeleton: ExcalidrawElementSkeleton[] = [];
   const nodeSkeleton: ExcalidrawElementSkeleton[] = [];
 
@@ -331,8 +209,7 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
     const target = layouts.get(edge.target);
     if (!source || !target) return;
     const render = getEdgeRender(edge);
-    const isMindmap = diagram.diagram_type === "mindmap";
-    const line = isMindmap ? mindmapConnectorPoints(source, target) : connectorPoints(source, target);
+    const line = connectorPoints(source, target);
     edgeSkeleton.push({
       type: "arrow",
       id: `edge-${edge.source}-${edge.target}-${index}`,
@@ -341,8 +218,8 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
       width: line.width,
       height: line.height,
       points: line.points,
-      strokeColor: isMindmap ? "#94A3B8" : render.stroke,
-      strokeWidth: isMindmap ? 1.5 : render.strokeWidth,
+      strokeColor: render.stroke,
+      strokeWidth: render.strokeWidth,
       roughness: 0.35,
       strokeStyle: render.strokeDasharray ? "dashed" : "solid",
       startArrowhead: null,
@@ -369,8 +246,28 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createProvidedScene(diagram: DiagramIR): ExcalidrawInitialDataState | null {
+  const scene = diagram.excalidraw_scene;
+  if (!isRecord(scene) || !Array.isArray(scene.elements) || scene.elements.length === 0) return null;
+
+  return {
+    elements: scene.elements as ExcalidrawInitialDataState["elements"],
+    appState: {
+      viewBackgroundColor: "#FFFFFF",
+      theme: "light",
+      ...(isRecord(scene.appState) ? scene.appState : {}),
+    } as ExcalidrawInitialDataState["appState"],
+    files: isRecord(scene.files) ? scene.files as ExcalidrawInitialDataState["files"] : {},
+    scrollToContent: true,
+  };
+}
+
 function toExcalidrawInitialData(diagram: DiagramIR): ExcalidrawInitialDataState {
-  return createFallbackScene(diagram);
+  return createProvidedScene(diagram) || createFallbackScene(diagram);
 }
 
 export default function ExcalidrawDiagramCanvas({ diagram }: { diagram: DiagramIR }) {
