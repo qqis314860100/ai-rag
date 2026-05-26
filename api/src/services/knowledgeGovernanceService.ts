@@ -1,6 +1,14 @@
 import { getDb } from "../db";
+import { listAuditLogs } from "../db/auditLogs";
 import { listKnowledgeCards } from "../db/knowledgeCards";
 import { listKnowledgeFaqs } from "../db/knowledgeFaqs";
+
+const HIGH_RISK_AUDIT_ACTIONS = [
+  "chat.message.delete",
+  "document.delete",
+  "knowledge_card.publish",
+  "settings.update",
+];
 
 function documentStatusById() {
   const rows = getDb()
@@ -100,6 +108,11 @@ export function buildKnowledgeGovernanceView() {
         }))
     )
     .slice(0, 20);
+  const highRiskAuditLogs = HIGH_RISK_AUDIT_ACTIONS.flatMap((action) =>
+    listAuditLogs({ action, pageSize: 5 }).items
+  )
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, 20);
 
   return {
     schema_version: "knowledge-governance/v1",
@@ -109,11 +122,13 @@ export function buildKnowledgeGovernanceView() {
       expired_source_count: expiredSources.length,
       frequent_card_count: frequentCards.length,
       risk_review_count: riskReview.length,
+      high_risk_audit_count: highRiskAuditLogs.length,
     },
     pending,
     low_evidence: lowEvidence,
     expired_sources: expiredSources,
     frequent_cards: frequentCards,
     risk_review: riskReview,
+    high_risk_audit_logs: highRiskAuditLogs,
   };
 }

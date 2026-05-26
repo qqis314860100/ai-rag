@@ -310,6 +310,13 @@ router.delete("/chat/messages/:id", async (req: Request, res: Response, next: Ne
       throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "消息不存在。", 404);
     }
 
+    auditFromRequest(req, "chat.message.delete", "chat_message", messageId, {
+      session_id: existing.session_id,
+      truncated_from_message_id: messageId,
+      role: existing.role,
+      content_preview: existing.content.slice(0, 120),
+    });
+
     sendSuccess(res, { deleted: true }, req.requestId);
   } catch (err) {
     next(err);
