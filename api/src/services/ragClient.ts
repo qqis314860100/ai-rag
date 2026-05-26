@@ -168,6 +168,28 @@ interface DiagramEdge {
   metadata: Record<string, unknown>;
 }
 
+export interface DiagramQualityWarning {
+  code: string;
+  message: string;
+  severity?: string;
+  node_ids?: string[];
+  edge_ids?: string[];
+  source_ids?: string[];
+}
+
+export interface DiagramValidationResult {
+  can_generate?: boolean;
+  quality_score?: number;
+  warnings?: DiagramQualityWarning[];
+  errors?: DiagramQualityWarning[];
+  required_source_ids?: string[];
+  covered_source_ids?: string[];
+  missing_source_ids?: string[];
+  citation_coverage_ratio?: number;
+  node_count?: number;
+  edge_count?: number;
+}
+
 export interface DiagramIR {
   title: string;
   objective: string;
@@ -179,6 +201,10 @@ export interface DiagramIR {
   renderer?: string;
   reason?: string;
   confidence?: number;
+  can_generate?: boolean;
+  quality_score?: number;
+  quality_warnings?: DiagramQualityWarning[];
+  validation?: DiagramValidationResult | null;
   source_evidence?: Record<string, unknown>[];
   excalidraw_scene?: Record<string, unknown> | null;
   metadata: Record<string, unknown>;

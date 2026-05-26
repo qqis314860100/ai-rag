@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
-import type { RagAnswerIR, RagAnswerQueryRewrite } from "../services/ragClient";
+import type { DiagramIR, DiagramValidationResult, RagAnswerIR, RagAnswerQueryRewrite } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
@@ -176,6 +176,8 @@ function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<s
 }
 
 const MIN_ARTIFACT_CONFIDENCE = 0.66;
+const MIN_DIAGRAM_QUALITY_SCORE = 0.62;
+const MIN_DIAGRAM_CONFIDENCE = 0.5;
 const DOMAIN_SHORT_QUERY_PATTERN = /\b(?:OCV|EOL|CCD|SOC|SOP|RAG|PPM|MES|PLC|BMS|Busbar)\b/i;
 const LOW_SIGNAL_INPUT_PATTERN = /^[\d\s._\-+*/=#@!?,，。！？、;；:：()[\]{}"'`~|\\]+$/;
 const CLARIFICATION_ANSWER_PATTERN =
@@ -247,6 +249,114 @@ function assessDiagramEligibility(input: {
   return { eligible: true, question: input.question };
 }
 
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function unitNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? clampUnit(value) : undefined;
+}
+
+function diagramMetadata(diagram: DiagramIR): Record<string, unknown> {
+  return isRecord(diagram.metadata) ? diagram.metadata : {};
+}
+
+function diagramValidation(diagram: DiagramIR): DiagramValidationResult | undefined {
+  if (diagram.validation) return diagram.validation;
+  const validation = diagramMetadata(diagram).validation;
+  return isRecord(validation) ? validation as DiagramValidationResult : undefined;
+}
+
+function diagramCanGenerate(diagram: DiagramIR): boolean | undefined {
+  if (typeof diagram.can_generate === "boolean") return diagram.can_generate;
+  const metadataCanGenerate = diagramMetadata(diagram).can_generate;
+  if (typeof metadataCanGenerate === "boolean") return metadataCanGenerate;
+  const validationCanGenerate = diagramValidation(diagram)?.can_generate;
+  return typeof validationCanGenerate === "boolean" ? validationCanGenerate : undefined;
+}
+
+function diagramQualityScore(diagram: DiagramIR): number | undefined {
+  return unitNumber(diagram.quality_score)
+    ?? unitNumber(diagramMetadata(diagram).quality_score)
+    ?? unitNumber(diagramValidation(diagram)?.quality_score);
+}
+
+function diagramValidationErrors(diagram: DiagramIR): unknown[] {
+  const errors = diagramValidation(diagram)?.errors;
+  return Array.isArray(errors) ? errors : [];
+}
+
+function diagramQualityWarnings(diagram: DiagramIR): unknown[] {
+  if (Array.isArray(diagram.quality_warnings)) return diagram.quality_warnings;
+  const warnings = diagramMetadata(diagram).quality_warnings;
+  return Array.isArray(warnings) ? warnings : [];
+}
+
+function artifactConfidence(input: {
+  messageConfidence: number;
+  diagramConfidence?: number;
+  qualityScore?: number;
+}): number {
+  const candidates = [
+    input.messageConfidence > 0 ? unitNumber(input.messageConfidence) : undefined,
+    unitNumber(input.diagramConfidence),
+    input.qualityScore,
+  ].filter((value): value is number => value !== undefined);
+
+  if (candidates.length === 0) return 0;
+  return Math.round(Math.min(...candidates) * 100) / 100;
+}
+
+function assertDiagramQuality(diagram: DiagramIR, messageConfidence: number): {
+  artifactConfidence: number;
+  qualityScore?: number;
+  canGenerate?: boolean;
+  validation?: DiagramValidationResult;
+} {
+  const qualityScore = diagramQualityScore(diagram);
+  const canGenerate = diagramCanGenerate(diagram);
+  const validation = diagramValidation(diagram);
+  const diagramConfidence = unitNumber(diagram.confidence);
+  const combinedConfidence = artifactConfidence({
+    messageConfidence,
+    diagramConfidence,
+    qualityScore,
+  });
+
+  if (canGenerate === false || diagramValidationErrors(diagram).length > 0) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解结构校验未通过，暂不保存或展示。", 422, {
+      can_generate: canGenerate,
+      quality_score: qualityScore,
+      quality_warnings: diagramQualityWarnings(diagram),
+      validation,
+    });
+  }
+  if (qualityScore !== undefined && qualityScore < MIN_DIAGRAM_QUALITY_SCORE) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解质量分低于保存门槛，暂不保存或展示。", 422, {
+      quality_score: qualityScore,
+      min_quality_score: MIN_DIAGRAM_QUALITY_SCORE,
+      quality_warnings: diagramQualityWarnings(diagram),
+      validation,
+    });
+  }
+  if (diagramConfidence !== undefined && diagramConfidence < MIN_DIAGRAM_CONFIDENCE) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解置信度低于保存门槛，暂不保存或展示。", 422, {
+      diagram_confidence: diagramConfidence,
+      min_diagram_confidence: MIN_DIAGRAM_CONFIDENCE,
+      quality_score: qualityScore,
+      quality_warnings: diagramQualityWarnings(diagram),
+      validation,
+    });
+  }
+
+  return {
+    artifactConfidence: combinedConfidence,
+    qualityScore,
+    canGenerate,
+    validation,
+  };
+}
+
 function requireReadableAssistantMessage(req: Request, messageId: string, action: string) {
   const existing = getMessageById(messageId);
   if (!existing) {
@@ -303,8 +413,9 @@ async function buildDiagramForMessage(
     sourceIds,
     req.requestId
   );
+  const quality = assertDiagramQuality(diagram, confidence);
 
-  return { diagram, existing, sourceIds, title, confidence };
+  return { diagram, existing, sourceIds, title, confidence, quality };
 }
 
 async function generateDiagramArtifact(
@@ -313,7 +424,7 @@ async function generateDiagramArtifact(
   diagramType: "mindmap" | "flowchart",
   titleInput?: unknown
 ) {
-  const { diagram, existing, sourceIds, title, confidence } = await buildDiagramForMessage(
+  const { diagram, existing, sourceIds, title, confidence, quality } = await buildDiagramForMessage(
     req,
     messageId,
     diagramType,
@@ -327,8 +438,8 @@ async function generateDiagramArtifact(
     renderer: artifactRenderer(diagram),
     title,
     summary: artifactSummary(diagram),
-    reason: "基于回答正文和引用证据生成结构化图解。",
-    confidence: Math.min(confidence || 1, typeof diagram.confidence === "number" ? diagram.confidence : 1),
+    reason: diagram.reason || "基于回答正文和引用证据生成结构化图解。",
+    confidence: quality.artifactConfidence,
     payload: diagram,
     sourceIds,
     metadata: {
@@ -337,6 +448,11 @@ async function generateDiagramArtifact(
       layout_hint: diagram.layout_hint,
       message_confidence: confidence,
       diagram_confidence: diagram.confidence,
+      artifact_confidence: quality.artifactConfidence,
+      quality_score: quality.qualityScore,
+      can_generate: quality.canGenerate,
+      quality_warnings: diagramQualityWarnings(diagram),
+      validation: quality.validation,
     },
   });
 
@@ -347,6 +463,9 @@ async function generateDiagramArtifact(
     node_count: diagram.nodes.length,
     edge_count: diagram.edges.length,
     source_count: sourceIds.length,
+    quality_score: quality.qualityScore,
+    can_generate: quality.canGenerate,
+    confidence: quality.artifactConfidence,
   });
 
   return { diagram, artifact, sourceIds, existing };
@@ -953,7 +1072,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
 
     requireReadableAssistantMessage(req, artifact.message_id, "重新生成");
     const diagramType = normalizeDiagramType(req.body?.diagram_type ?? artifact.type);
-    const { diagram, sourceIds, confidence } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
+    const { diagram, sourceIds, confidence, quality } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
     const updated = updateArtifact(artifactId, {
       type: diagramType,
       renderer: artifactRenderer(diagram),
@@ -961,7 +1080,7 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
       summary: artifactSummary(diagram),
       reason: "重新生成结构化图解。",
       status: "ready",
-      confidence: Math.min(confidence || 1, typeof diagram.confidence === "number" ? diagram.confidence : 1),
+      confidence: quality.artifactConfidence,
       payload: diagram,
       sourceIds,
       metadata: {
@@ -971,6 +1090,11 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
         layout_hint: diagram.layout_hint,
         message_confidence: confidence,
         diagram_confidence: diagram.confidence,
+        artifact_confidence: quality.artifactConfidence,
+        quality_score: quality.qualityScore,
+        can_generate: quality.canGenerate,
+        quality_warnings: diagramQualityWarnings(diagram),
+        validation: quality.validation,
         regenerated_from: artifactId,
       },
     });
@@ -978,6 +1102,9 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
     auditFromRequest(req, "chat.artifact.regenerate", "chat_artifact", artifactId, {
       message_id: artifact.message_id,
       artifact_type: diagramType,
+      quality_score: quality.qualityScore,
+      can_generate: quality.canGenerate,
+      confidence: quality.artifactConfidence,
     });
 
     sendSuccess(res, formatArtifact(updated!), req.requestId);
