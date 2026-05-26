@@ -356,7 +356,7 @@
 - [x] `repo`: 跨服务统一 artifact 命名：DB 字段、API 响应、前端类型、RAG 输出统一用 `artifact` + `type`（diagram/flowchart/mindmap/chart/table/image），消除"artifact / diagram / chart"混用。
 - [x] `api`: 在 `services/ragClient.ts` 上加 zod 校验，让 RAG 返回的 `AnswerIR` / `DiagramIR` 在边界爆出契约破坏，而不是渗到前端。
 - [x] `web`: 把 `pages/ChatPage.tsx` + `components/chat/*` + 相关 hooks/types 收敛到 `features/chat/`，其它页面同样改造；当前 `components/*` 按 UI 类型分类已撑不住。
-- [ ] `docs`: 用 mermaid 或 Excalidraw 画一份运行时拓扑 + 数据流图放在 `docs/图/`，作为「项目架构总览」的可视化补充。
+- [x] `docs`: 用 mermaid 或 Excalidraw 画一份运行时拓扑 + 数据流图放在 `docs/图/`，作为「项目架构总览」的可视化补充。
 
 ### 性能、安全与可观测性
 
