@@ -296,6 +296,7 @@ class ChatRequest(BaseModel):
     allowed_security_levels: list[str] = Field(default=["public", "internal"])
     filters: dict[str, Any] = Field(default_factory=dict)
     history: list[dict[str, str]] = Field(default_factory=list)
+    knowledge_assets: list[dict[str, Any]] = Field(default_factory=list)
     session_id: str | None = None
     stream: bool = False
 

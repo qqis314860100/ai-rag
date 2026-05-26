@@ -13,6 +13,7 @@ import type { NoteTarget } from "../db/chatNotes";
 import { createArtifact, formatArtifact, getArtifactById, listArtifactsByMessage, softDeleteArtifact, updateArtifact } from "../db/chatArtifacts";
 import { listComments } from "../db/docComments";
 import { getDb } from "../db/index";
+import { buildPublishedKnowledgeAssetContext } from "../services/knowledgeAssetContextService";
 
 const router = Router();
 
@@ -185,6 +186,7 @@ function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<s
     answer_ir_summary: buildAnswerIrSummary(input.answerIr),
     citation_coverage: buildCitationCoverage(input.answerIr, input.sources ?? []),
     visual_plan: input.visualPlan ?? null,
+    knowledge_assets: input.answerIr?.metadata?.knowledge_assets ?? input.visualPlan?.metadata?.knowledge_assets ?? [],
   };
 }
 
@@ -643,6 +645,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
     const history = listMessagesBySession(sessionId)
       .slice(-11, -1)
       .map((m) => ({ role: m.role, content: m.content }));
+    const knowledgeAssets = buildPublishedKnowledgeAssetContext(message);
 
     // Streaming mode
     if (stream) {
@@ -652,6 +655,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         top_k ?? 5,
         filters ?? {},
         history,
+        knowledgeAssets,
         req.requestId
       );
 
@@ -783,6 +787,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       top_k ?? 5,
       filters ?? {},
       history,
+      knowledgeAssets,
       req.requestId
     );
 

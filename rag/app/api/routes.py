@@ -159,6 +159,7 @@ def chat(request: ChatRequest):
             allowed_security_levels=request.allowed_security_levels,
             filters=request.filters,
             history=request.history,
+            knowledge_assets=request.knowledge_assets,
         )
         return result
     except Exception as e:
@@ -225,7 +226,12 @@ def chat_stream(request: ChatRequest):
     async def generate():
         try:
             # 1. Search
-            query_rewrite = _rewrite_query_with_trace(request.query, request.history)
+            matched_assets = [
+                asset for asset in request.knowledge_assets
+                if str(asset.get("label") or "").lower() in request.query.lower()
+                or any(str(term).lower() in request.query.lower() for term in asset.get("retrieval_terms", []) if len(str(term)) >= 2)
+            ][:8]
+            query_rewrite = _rewrite_query_with_trace(request.query, request.history, matched_assets)
             rewritten_query = query_rewrite.rewritten_query
             search_result = pipeline.search(
                 query=rewritten_query,
@@ -244,13 +250,14 @@ def chat_stream(request: ChatRequest):
             from ..llm.prompt_builder import build_messages, extract_sources
             messages = build_messages(request.query, hits, request.history, pipeline.config.rag_max_context_chars)
             sources = extract_sources(hits)
-            confidence = _estimate_confidence(request.query, hits, request.filters)
+            confidence = _estimate_confidence(request.query, hits, request.filters, matched_assets)
             refusal = _assess_insufficient_context(
                 query=request.query,
                 query_rewrite=query_rewrite,
                 hits=hits,
                 sources=sources,
                 confidence=confidence,
+                knowledge_assets=matched_assets,
             )
             if refusal.should_refuse:
                 answer_ir = AnswerIR.from_chat(
@@ -272,6 +279,7 @@ def chat_stream(request: ChatRequest):
                     confidence=confidence,
                     answer_status=answer_ir.status,
                 )
+                visual_plan.metadata["knowledge_assets"] = answer_ir.metadata.get("knowledge_assets", [])
                 yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
                 return
 
@@ -297,6 +305,16 @@ def chat_stream(request: ChatRequest):
                         rewritten_query=rewritten_query,
                         query_rewrite=query_rewrite,
                         confidence=confidence,
+                        metadata={"knowledge_assets": [
+                            {
+                                "asset_type": str(asset.get("asset_type") or ""),
+                                "id": str(asset.get("id") or ""),
+                                "label": str(asset.get("label") or ""),
+                                "status": str(asset.get("status") or ""),
+                                "retrieval_terms": asset.get("retrieval_terms", []),
+                            }
+                            for asset in matched_assets
+                        ]},
                     )
                     visual_plan = plan_visual_artifacts(
                         question=request.query,
@@ -305,6 +323,7 @@ def chat_stream(request: ChatRequest):
                         confidence=confidence,
                         answer_status=answer_ir.status,
                     )
+                    visual_plan.metadata["knowledge_assets"] = answer_ir.metadata.get("knowledge_assets", [])
                     done_data = {
                         "type": "done",
                         "sources": sources,

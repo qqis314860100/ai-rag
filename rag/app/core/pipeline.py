@@ -177,11 +177,13 @@ class RagPipeline:
         allowed_security_levels: list[str],
         filters: dict | None = None,
         history: list[dict[str, str]] | None = None,
+        knowledge_assets: list[dict] | None = None,
     ) -> dict:
         total_start = time.time()
+        matched_assets = _select_knowledge_assets(query, knowledge_assets)
 
         # 0. Query rewrite for chapter/number patterns and multi-turn references
-        query_rewrite = _rewrite_query_with_trace(query, history)
+        query_rewrite = _rewrite_query_with_trace(query, history, matched_assets)
         rewritten_query = query_rewrite.rewritten_query
 
         # 1. Search for relevant context (use rewritten query)
@@ -201,13 +203,14 @@ class RagPipeline:
             hits = _keyword_rerank(f"{query} {rewritten_query}", hits, filters)
 
         sources = extract_sources(hits)
-        confidence = _estimate_confidence(query, hits, filters)
+        confidence = _estimate_confidence(query, hits, filters, matched_assets)
         refusal = _assess_insufficient_context(
             query=query,
             query_rewrite=query_rewrite,
             hits=hits,
             sources=sources,
             confidence=confidence,
+            knowledge_assets=matched_assets,
         )
         if refusal.should_refuse:
             return _build_refusal_chat_result(
@@ -221,6 +224,7 @@ class RagPipeline:
                 retrieval_ms=retrieval_ms,
                 llm_ms=0,
                 total_start=total_start,
+                knowledge_assets=matched_assets,
             )
 
         # 2. Build prompt
@@ -239,6 +243,7 @@ class RagPipeline:
             rewritten_query=rewritten_query,
             query_rewrite=query_rewrite,
             confidence=confidence,
+            metadata={"knowledge_assets": _knowledge_asset_trace(matched_assets)},
         )
         visual_plan = plan_visual_artifacts(
             question=query,
@@ -247,6 +252,7 @@ class RagPipeline:
             confidence=confidence,
             answer_status=answer_ir.status,
         )
+        visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(matched_assets)
 
         total_ms = int((time.time() - total_start) * 1000)
 
@@ -260,6 +266,7 @@ class RagPipeline:
                 "retrieval_ms": retrieval_ms,
                 "llm_ms": llm_ms,
                 "total_ms": total_ms,
+                "knowledge_asset_count": len(matched_assets),
             },
             "answer_ir": answer_ir.model_dump(),
             "visual_plan": visual_plan.model_dump(),
@@ -274,7 +281,50 @@ class EvidenceAssessment:
     metadata: dict = field(default_factory=dict)
 
 
-def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = None) -> float:
+def _asset_terms(asset: dict) -> list[str]:
+    values = [
+        str(asset.get("label") or ""),
+        str(asset.get("summary") or ""),
+    ]
+    retrieval_terms = asset.get("retrieval_terms")
+    if isinstance(retrieval_terms, list):
+        values.extend(str(term) for term in retrieval_terms)
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def _select_knowledge_assets(query: str, knowledge_assets: list[dict] | None = None) -> list[dict]:
+    if not knowledge_assets:
+        return []
+    normalized_query = query.lower()
+    matched: list[dict] = []
+    for asset in knowledge_assets:
+        terms = _asset_terms(asset)
+        if any(len(term) >= 2 and term.lower() in normalized_query for term in terms):
+            matched.append(asset)
+    return matched[:8]
+
+
+def _knowledge_asset_trace(assets: list[dict]) -> list[dict]:
+    return [
+        {
+            "asset_type": str(asset.get("asset_type") or ""),
+            "id": str(asset.get("id") or ""),
+            "label": str(asset.get("label") or ""),
+            "status": str(asset.get("status") or ""),
+            "retrieval_terms": asset.get("retrieval_terms") if isinstance(asset.get("retrieval_terms"), list) else [],
+        }
+        for asset in assets
+    ]
+
+
+def _knowledge_asset_expansion_text(assets: list[dict]) -> str:
+    terms: list[str] = []
+    for asset in assets:
+        terms.extend(_asset_terms(asset)[:8])
+    return " ".join(_dedupe_preserve_order(terms)[:24])
+
+
+def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = None, knowledge_assets: list[dict] | None = None) -> float:
     if not hits:
         return 0.0
 
@@ -283,13 +333,15 @@ def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = No
     context_score = _context_availability_score(hits[:3])
     source_score = _source_count_score(len(hits))
     filter_score = _filter_match_score(filters, hits[:3])
+    asset_score = min(1.0, len(knowledge_assets or []) / 3)
 
     confidence = (
-        top1 * 0.35
+        top1 * 0.32
         + keyword_score * 0.25
         + context_score * 0.20
         + source_score * 0.10
-        + filter_score * 0.10
+        + filter_score * 0.08
+        + asset_score * 0.05
     )
 
     if top1 < 0.2:
@@ -311,6 +363,7 @@ def _assess_insufficient_context(
     hits: list[dict],
     sources: list[dict],
     confidence: float,
+    knowledge_assets: list[dict] | None = None,
 ) -> EvidenceAssessment:
     reasons: list[str] = []
     warnings: list[AnswerWarning] = []
@@ -357,6 +410,7 @@ def _assess_insufficient_context(
                 "confidence": confidence,
                 "min_answer_confidence": MIN_ANSWER_CONFIDENCE,
             },
+            "knowledge_assets": _knowledge_asset_trace(knowledge_assets or []),
         },
     )
 
@@ -373,6 +427,7 @@ def _build_refusal_chat_result(
     retrieval_ms: int,
     llm_ms: int,
     total_start: float,
+    knowledge_assets: list[dict] | None = None,
 ) -> dict:
     answer_ir = AnswerIR.from_chat(
         answer=REFUSAL_ANSWER,
@@ -392,6 +447,7 @@ def _build_refusal_chat_result(
         confidence=confidence,
         answer_status=answer_ir.status,
     )
+    visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(knowledge_assets or [])
     total_ms = int((time.time() - total_start) * 1000)
 
     return {
@@ -448,6 +504,7 @@ def _rewrite_query(query: str) -> str:
 def _rewrite_query_with_trace(
     query: str,
     history: list[dict[str, str]] | None = None,
+    knowledge_assets: list[dict] | None = None,
 ) -> AnswerQueryRewrite:
     """Resolve lightweight multi-turn references before retrieval.
 
@@ -506,6 +563,18 @@ def _rewrite_query_with_trace(
         if term_expansion.changed:
             strategies.append("terminology_expansion")
             reasons.append("命中术语库并扩展别名、缩写和同义表达")
+
+    asset_expansion = _knowledge_asset_expansion_text(knowledge_assets or [])
+    if asset_expansion:
+        rewritten_query = " ".join(_dedupe_preserve_order([rewritten_query, asset_expansion]))
+        signals.append("knowledge_asset_expansion")
+        for asset in knowledge_assets or []:
+            asset_type = str(asset.get("asset_type") or "asset")
+            asset_id = str(asset.get("id") or "")
+            if asset_id:
+                signals.append(f"asset:{asset_type}:{asset_id}")
+        strategies.append("knowledge_asset_expansion")
+        reasons.append("命中已发布知识资产并扩展检索语义")
 
     changed = rewritten_query != original_query
     if not strategies and not changed:

@@ -86,6 +86,7 @@ interface RagChatRequest {
     tags?: string[];
   };
   history?: Array<{ role: string; content: string }>;
+  knowledge_assets?: RagKnowledgeAssetContext[];
   stream?: boolean;
 }
 
@@ -98,6 +99,7 @@ interface RagChatResponse {
     retrieval_ms: number;
     llm_ms: number;
     total_ms: number;
+    knowledge_asset_count?: number;
   };
   answer_ir?: RagAnswerIR | null;
   visual_plan?: RagVisualPlan | null;
@@ -168,6 +170,16 @@ export interface RagVisualPlan {
   can_generate?: boolean;
   artifacts?: RagVisualArtifactPlan[];
   warnings?: RagAnswerWarning[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagKnowledgeAssetContext {
+  asset_type: string;
+  id: string;
+  label: string;
+  summary?: string;
+  retrieval_terms?: string[];
+  status?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -387,6 +399,7 @@ export async function chatWithRag(
   topK?: number,
   filters?: RagChatRequest["filters"],
   history?: Array<{ role: string; content: string }>,
+  knowledgeAssets?: RagKnowledgeAssetContext[],
   requestId?: string
 ): Promise<RagChatResponse> {
   return ragFetch<RagChatResponse>(
@@ -397,6 +410,7 @@ export async function chatWithRag(
       allowed_security_levels: allowedSecurityLevels,
       filters: filters ?? {},
       history: history ?? [],
+      knowledge_assets: knowledgeAssets ?? [],
     },
     requestId
   );
@@ -464,6 +478,7 @@ export function chatWithRagStream(
   topK?: number,
   filters?: RagChatRequest["filters"],
   history?: Array<{ role: string; content: string }>,
+  knowledgeAssets?: RagKnowledgeAssetContext[],
   requestId?: string
 ): Promise<Response> {
   const cfg = getConfig();
@@ -481,6 +496,7 @@ export function chatWithRagStream(
       allowed_security_levels: allowedSecurityLevels,
       filters: filters ?? {},
       history: history ?? [],
+      knowledge_assets: knowledgeAssets ?? [],
     }),
   });
 }
