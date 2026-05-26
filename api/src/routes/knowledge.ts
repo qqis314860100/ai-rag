@@ -33,6 +33,7 @@ import { getSessionById } from "../db/chatSessions";
 import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
 import { createKnowledgeFaqDraftFromMessage } from "../services/knowledgeFaqDraftService";
+import { buildKnowledgeGovernanceView } from "../services/knowledgeGovernanceService";
 import { buildKnowledgeGraph } from "../services/knowledgeGraphService";
 import {
   archiveKnowledgeCard,
@@ -332,6 +333,18 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       sendSuccess(res, buildKnowledgeGraph(), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/governance",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      sendSuccess(res, buildKnowledgeGovernanceView(), req.requestId);
     } catch (err) {
       next(err);
     }

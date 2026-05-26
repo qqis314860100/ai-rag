@@ -15,6 +15,7 @@ import {
   Save,
   Search,
   Send,
+  ShieldCheck,
   Tags,
   X,
 } from "lucide-react";
@@ -64,6 +65,21 @@ interface KnowledgeFaqListResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+interface KnowledgeGovernanceView {
+  summary: {
+    pending_count: number;
+    low_evidence_count: number;
+    expired_source_count: number;
+    frequent_card_count: number;
+    risk_review_count: number;
+  };
+  pending: Array<{ id: string; title: string; status: KnowledgeCardStatus; evidence_count: number }>;
+  low_evidence: Array<{ id: string; title: string; status: KnowledgeCardStatus; evidence_count: number; kind: string }>;
+  expired_sources: Array<{ owner_id: string; owner_title: string; owner_kind: string; source_title: string }>;
+  frequent_cards: Array<{ id: string; title: string; status: KnowledgeCardStatus; usage_count: number; evidence_count: number }>;
+  risk_review: Array<{ card_id: string; title: string; status: KnowledgeCardStatus; risk_title: string; risk_level: string; evidence_count: number }>;
 }
 
 interface CardFormState {
@@ -185,6 +201,7 @@ export default function KnowledgeAssetsPage() {
   const [faqs, setFaqs] = useState<KnowledgeFaq[]>([]);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [governance, setGovernance] = useState<KnowledgeGovernanceView | null>(null);
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -219,6 +236,14 @@ export default function KnowledgeAssetsPage() {
       })
       .catch(() => {
         if (mounted) setFaqs([]);
+      });
+
+    api.get<ApiResponse<KnowledgeGovernanceView>>("/knowledge/governance")
+      .then((res) => {
+        if (mounted) setGovernance(res.data);
+      })
+      .catch(() => {
+        if (mounted) setGovernance(null);
       });
 
     api.get<ApiResponse<PaginatedResponse<Document>>>("/documents?page=1&page_size=80")
@@ -391,6 +416,23 @@ export default function KnowledgeAssetsPage() {
             </button>
           ))}
         </div>
+
+        {governance && (
+          <div className="mt-4 grid gap-2 md:grid-cols-5">
+            {[
+              ["待审核", governance.summary.pending_count],
+              ["低证据", governance.summary.low_evidence_count],
+              ["来源异常", governance.summary.expired_source_count],
+              ["高频引用", governance.summary.frequent_card_count],
+              ["风险复核", governance.summary.risk_review_count],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-border bg-surface-page px-3 py-2">
+                <p className="text-[11px] font-semibold text-text-muted">{label}</p>
+                <p className="mt-1 text-lg font-semibold text-text">{value}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(360px,500px)_1fr]">
@@ -654,6 +696,40 @@ export default function KnowledgeAssetsPage() {
             </div>
 
             <aside className="space-y-4">
+              {governance && (
+                <div className="rounded-lg border border-border bg-white p-4 shadow-sm-soft">
+                  <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-text">
+                    <ShieldCheck className="h-4 w-4 text-accent" />
+                    治理提醒
+                  </h3>
+                  <div className="space-y-2">
+                    {governance.pending.slice(0, 3).map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => setSelectedId(item.id)}
+                        className="w-full rounded-md border border-border bg-surface-page px-3 py-2 text-left hover:border-accent"
+                      >
+                        <p className="truncate text-xs font-semibold text-text">{item.title}</p>
+                        <p className="mt-1 text-[11px] text-text-muted">{statusLabels[item.status]} · {item.evidence_count} 条证据</p>
+                      </button>
+                    ))}
+                    {governance.risk_review.slice(0, 3).map((item) => (
+                      <button
+                        key={`${item.card_id}-${item.risk_title}`}
+                        onClick={() => setSelectedId(item.card_id)}
+                        className="w-full rounded-md border border-warning/20 bg-warning-soft px-3 py-2 text-left"
+                      >
+                        <p className="truncate text-xs font-semibold text-warning">{item.risk_title}</p>
+                        <p className="mt-1 truncate text-[11px] text-warning/80">{item.title} · {item.risk_level}</p>
+                      </button>
+                    ))}
+                    {governance.pending.length === 0 && governance.risk_review.length === 0 && (
+                      <p className="rounded-md bg-surface-page px-3 py-4 text-sm text-text-muted">暂无待处理治理项</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-lg border border-border bg-white p-4 shadow-sm-soft">
                 <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-text">
                   <Link2 className="h-4 w-4 text-accent" />
