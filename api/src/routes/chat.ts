@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
-import type { DiagramIR, DiagramValidationResult, RagAnswerIR, RagAnswerQueryRewrite, RagVisualArtifactPlan, RagVisualPlan } from "../services/ragClient";
+import { buildImageArtifactContract, chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
+import type { DiagramIR, DiagramValidationResult, RagAnswerIR, RagAnswerQueryRewrite, RagImageArtifactContract, RagVisualArtifactPlan, RagVisualPlan } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
@@ -55,6 +55,16 @@ function buildDiagramContent(answer: string, sources: Array<Record<string, unkno
     );
   });
   return blocks.join("\n\n");
+}
+
+function parseMessageSources(message: ReturnType<typeof getMessageById>): Array<Record<string, unknown>> {
+  if (!message) return [];
+  try {
+    const parsed = JSON.parse(message.sources_json || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter(isRecord) : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeDiagramType(value: unknown): "mindmap" | "flowchart" {
@@ -509,6 +519,10 @@ async function createAutoArtifactsFromVisualPlan(
   }
 
   return artifacts;
+}
+
+function imageArtifactStatus(contract: RagImageArtifactContract): "pending" | "failed" {
+  return contract.allowed ? "pending" : "failed";
 }
 
 function requireReadableSession(req: Request, sessionId: string): ReturnType<typeof getSessionById> {
@@ -1182,6 +1196,55 @@ router.post("/chat/messages/:id/artifacts/generate", async (req: Request, res: R
     const messageId = req.params.id as string;
     const diagramType = normalizeDiagramType(req.body?.diagram_type ?? req.body?.type);
     const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, req.body?.title);
+    sendSuccess(res, formatArtifact(artifact), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/chat/messages/:id/artifacts/image/contract - 创建受控图片产物契约，不直接生成图片
+router.post("/chat/messages/:id/artifacts/image/contract", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const messageId = req.params.id as string;
+    const { existing } = requireReadableAssistantMessage(req, messageId, "创建图片产物契约");
+    const sources = parseMessageSources(existing);
+    const question = getPreviousUserQuestion(existing.session_id, messageId);
+    const contract = await buildImageArtifactContract(
+      question,
+      existing.content,
+      sources,
+      true,
+      req.requestId
+    );
+    const artifact = createArtifact({
+      sessionId: existing.session_id,
+      messageId,
+      type: "image",
+      renderer: contract.renderer || "image-contract",
+      title: typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : "图片产物契约",
+      summary: contract.allowed ? "图片生成请求已进入受控异步契约。" : "图片生成请求未满足安全或证据条件。",
+      reason: contract.allowed ? "用户显式触发图片产物，已完成 prompt 脱敏和权限继承检查。" : contract.failure_fallback,
+      status: imageArtifactStatus(contract),
+      confidence: 0,
+      payload: contract,
+      sourceIds: contract.inherited_source_ids ?? [],
+      metadata: {
+        renderer: contract.renderer || "image-contract",
+        async_required: contract.async_required,
+        allowed: contract.allowed,
+        inherited_document_ids: contract.inherited_document_ids ?? [],
+        redaction_report: contract.redaction_report ?? {},
+        safety_warnings: contract.safety_warnings ?? [],
+      },
+    });
+
+    auditFromRequest(req, "chat.artifact.image_contract", "chat_message", messageId, {
+      artifact_id: artifact.id,
+      allowed: contract.allowed,
+      source_count: contract.inherited_source_ids?.length ?? 0,
+      redaction_report: contract.redaction_report ?? {},
+    });
+
     sendSuccess(res, formatArtifact(artifact), req.requestId);
   } catch (err) {
     next(err);

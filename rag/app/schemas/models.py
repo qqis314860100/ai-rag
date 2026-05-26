@@ -478,6 +478,28 @@ class DiagramGenerateRequest(BaseModel):
     max_steps: int = Field(default=8, ge=2, le=12)
 
 
+class ImageArtifactContractRequest(BaseModel):
+    question: str = ""
+    answer: str
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    requested_by_user: bool = False
+
+
+class ImageArtifactContract(BaseModel):
+    schema_version: str = "image-artifact-contract/v1"
+    renderer: str = "image-contract"
+    status: str = "contract_only"
+    allowed: bool = False
+    async_required: bool = True
+    sanitized_prompt: str = ""
+    inherited_source_ids: list[str] = Field(default_factory=list)
+    inherited_document_ids: list[str] = Field(default_factory=list)
+    redaction_report: dict[str, int] = Field(default_factory=dict)
+    safety_warnings: list[AnswerWarning] = Field(default_factory=list)
+    failure_fallback: str = "返回文本说明和引用证据，不生成图片。"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

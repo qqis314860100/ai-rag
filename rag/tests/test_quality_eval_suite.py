@@ -1,6 +1,6 @@
 from app.core import pipeline as pipeline_module
 from app.core.pipeline import RagPipeline, REFUSAL_ANSWER, _estimate_confidence, _rewrite_query_with_trace
-from app.evaluation import DiagramIR, build_llm_diagram_ir, plan_visual_artifacts, validate_diagram_ir
+from app.evaluation import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts, validate_diagram_ir
 from app.schemas.models import AnswerIR
 
 
@@ -209,3 +209,33 @@ def test_quality_eval_visual_planner_refuses_low_evidence() -> None:
     assert plan.can_generate is False
     assert plan.artifacts == []
     assert plan.warnings[0].code == "visual_plan_not_ready"
+
+
+def test_quality_eval_image_artifact_contract_redacts_and_inherits_sources() -> None:
+    contract = build_image_artifact_contract(
+        question="请生成EOL测试示意图，联系 test@example.com",
+        answer="EOL测试需要连接夹具并记录结果，token-abcdefghijklmnop 不能进入图片提示词。",
+        sources=[_hit(0.9, "EOL测试前确认夹具和线缆。", "chunk-image")],
+        requested_by_user=True,
+    )
+
+    assert contract.allowed is True
+    assert contract.renderer == "image-contract"
+    assert contract.async_required is True
+    assert contract.inherited_source_ids == ["chunk-image"]
+    assert "test@example.com" not in contract.sanitized_prompt
+    assert "token-abcdefghijklmnop" not in contract.sanitized_prompt
+    assert contract.redaction_report["email"] == 1
+    assert contract.redaction_report["api_key"] == 1
+
+
+def test_quality_eval_image_artifact_contract_requires_explicit_user_request() -> None:
+    contract = build_image_artifact_contract(
+        question="EOL测试包括哪些项目？",
+        answer="EOL测试包括绝缘电阻、耐压和DCR测试。",
+        sources=[_hit(0.9, "EOL测试包括绝缘电阻、耐压和DCR测试。", "chunk-image")],
+        requested_by_user=False,
+    )
+
+    assert contract.allowed is False
+    assert contract.safety_warnings[0].code == "image_requires_explicit_request"

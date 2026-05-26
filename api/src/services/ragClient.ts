@@ -171,6 +171,21 @@ export interface RagVisualPlan {
   metadata?: Record<string, unknown>;
 }
 
+export interface RagImageArtifactContract {
+  schema_version?: string;
+  renderer?: string;
+  status?: string;
+  allowed?: boolean;
+  async_required?: boolean;
+  sanitized_prompt?: string;
+  inherited_source_ids?: string[];
+  inherited_document_ids?: string[];
+  redaction_report?: Record<string, number>;
+  safety_warnings?: RagAnswerWarning[];
+  failure_fallback?: string;
+  metadata?: Record<string, unknown>;
+}
+
 type DiagramType = "mindmap" | "flowchart";
 
 interface DiagramNode {
@@ -402,6 +417,25 @@ export async function generateDiagramIR(
       diagram_type: diagramType,
       source_ids: sourceIds,
       max_steps: 10,
+    },
+    requestId
+  );
+}
+
+export async function buildImageArtifactContract(
+  question: string,
+  answer: string,
+  sources: Array<Record<string, unknown>>,
+  requestedByUser: boolean,
+  requestId?: string
+): Promise<RagImageArtifactContract> {
+  return ragFetch<RagImageArtifactContract>(
+    "/rag/artifacts/image/contract",
+    {
+      question,
+      answer,
+      sources,
+      requested_by_user: requestedByUser,
     },
     requestId
   );

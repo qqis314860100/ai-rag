@@ -13,3 +13,4 @@ from .diagram_ir import (
     validate_diagram_ir,
 )
 from .visual_planner import plan_visual_artifacts
+from .image_artifact import build_image_artifact_contract

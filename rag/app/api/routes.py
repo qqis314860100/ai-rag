@@ -12,14 +12,14 @@ from ..core.pipeline import (
     _rewrite_query_with_trace,
     _suggest_followups,
 )
-from ..evaluation import DiagramIR, build_llm_diagram_ir, plan_visual_artifacts
+from ..evaluation import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
     SearchRequest, SearchResult,
     DebugSearchRequest, DebugSearchResult,
     ChatRequest, ChatResult,
-    DiagramGenerateRequest, AnswerIR,
+    DiagramGenerateRequest, ImageArtifactContract, ImageArtifactContractRequest, AnswerIR,
     ReindexRequest, ReindexResult,
 )
 
@@ -176,6 +176,20 @@ def generate_diagram(request: DiagramGenerateRequest):
         raise
     except Exception as e:
         logger.exception("Diagram generation failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/artifacts/image/contract", response_model=ImageArtifactContract)
+def image_artifact_contract(request: ImageArtifactContractRequest):
+    try:
+        return build_image_artifact_contract(
+            question=request.question,
+            answer=request.answer,
+            sources=request.sources,
+            requested_by_user=request.requested_by_user,
+        )
+    except Exception as e:
+        logger.exception("Image artifact contract failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
