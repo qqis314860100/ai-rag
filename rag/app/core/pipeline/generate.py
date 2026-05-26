@@ -17,6 +17,7 @@ def _build_answer_chat_result(
     sources: list[dict],
     confidence: float,
     retrieval_ms: int,
+    stage_timings_ms: dict[str, int] | None = None,
     total_start: float,
     history: list[dict[str, str]] | None,
     knowledge_assets: list[dict],
@@ -24,8 +25,10 @@ def _build_answer_chat_result(
     temperature: float,
     llm_chat_fn: Callable,
 ) -> dict:
+    stage_timings_ms = dict(stage_timings_ms or {})
     messages = build_messages(query, hits, history, max_context_chars)
 
+    generate_start = time.time()
     llm_start = time.time()
     llm_result = llm_chat_fn(messages, temperature=temperature)
     llm_ms = llm_result.get("latency_ms", int((time.time() - llm_start) * 1000))
@@ -39,6 +42,9 @@ def _build_answer_chat_result(
         confidence=confidence,
         metadata={"knowledge_assets": _knowledge_asset_trace(knowledge_assets)},
     )
+    generate_ms = int((time.time() - generate_start) * 1000)
+
+    artifact_start = time.time()
     visual_plan = plan_visual_artifacts(
         question=query,
         answer=llm_result["content"],
@@ -47,8 +53,15 @@ def _build_answer_chat_result(
         answer_status=answer_ir.status,
     )
     visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(knowledge_assets)
+    artifact_ms = int((time.time() - artifact_start) * 1000)
 
     total_ms = int((time.time() - total_start) * 1000)
+    stage_timings_ms.update({
+        "generate_ms": generate_ms,
+        "artifact_ms": artifact_ms,
+        "llm_ms": llm_ms,
+        "total_ms": total_ms,
+    })
 
     return {
         "message_id": "",
@@ -57,10 +70,16 @@ def _build_answer_chat_result(
         "confidence": confidence,
         "followups": _suggest_followups(query, hits),
         "trace": {
+            "rewrite_ms": stage_timings_ms.get("rewrite_ms", 0),
+            "retrieve_ms": stage_timings_ms.get("retrieve_ms", retrieval_ms),
             "retrieval_ms": retrieval_ms,
+            "refusal_ms": stage_timings_ms.get("refusal_ms", 0),
+            "generate_ms": generate_ms,
+            "artifact_ms": artifact_ms,
             "llm_ms": llm_ms,
             "total_ms": total_ms,
             "knowledge_asset_count": len(knowledge_assets),
+            "stage_timings_ms": stage_timings_ms,
         },
         "answer_ir": answer_ir.model_dump(),
         "visual_plan": visual_plan.model_dump(),
@@ -78,9 +97,11 @@ def _build_refusal_chat_result(
     refusal: EvidenceAssessment,
     retrieval_ms: int,
     llm_ms: int,
+    stage_timings_ms: dict[str, int] | None = None,
     total_start: float,
     knowledge_assets: list[dict] | None = None,
 ) -> dict:
+    stage_timings_ms = dict(stage_timings_ms or {})
     answer_ir = AnswerIR.from_chat(
         answer=REFUSAL_ANSWER,
         sources=sources,
@@ -92,6 +113,7 @@ def _build_refusal_chat_result(
         warnings=refusal.warnings,
         metadata=refusal.metadata,
     )
+    artifact_start = time.time()
     visual_plan = plan_visual_artifacts(
         question=query,
         answer=REFUSAL_ANSWER,
@@ -100,7 +122,14 @@ def _build_refusal_chat_result(
         answer_status=answer_ir.status,
     )
     visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(knowledge_assets or [])
+    artifact_ms = int((time.time() - artifact_start) * 1000)
     total_ms = int((time.time() - total_start) * 1000)
+    stage_timings_ms.update({
+        "generate_ms": 0,
+        "artifact_ms": artifact_ms,
+        "llm_ms": llm_ms,
+        "total_ms": total_ms,
+    })
 
     return {
         "message_id": "",
@@ -109,9 +138,15 @@ def _build_refusal_chat_result(
         "confidence": confidence,
         "followups": _suggest_followups(query, hits) if sources else [],
         "trace": {
+            "rewrite_ms": stage_timings_ms.get("rewrite_ms", 0),
+            "retrieve_ms": stage_timings_ms.get("retrieve_ms", retrieval_ms),
             "retrieval_ms": retrieval_ms,
+            "refusal_ms": stage_timings_ms.get("refusal_ms", 0),
+            "generate_ms": 0,
+            "artifact_ms": artifact_ms,
             "llm_ms": llm_ms,
             "total_ms": total_ms,
+            "stage_timings_ms": stage_timings_ms,
         },
         "answer_ir": answer_ir.model_dump(),
         "visual_plan": visual_plan.model_dump(),

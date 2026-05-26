@@ -302,9 +302,15 @@ class ChatRequest(BaseModel):
 
 
 class ChatTrace(BaseModel):
+    rewrite_ms: int = 0
+    retrieve_ms: int = 0
     retrieval_ms: int = 0
+    refusal_ms: int = 0
+    generate_ms: int = 0
+    artifact_ms: int = 0
     llm_ms: int = 0
     total_ms: int = 0
+    stage_timings_ms: dict[str, int] = Field(default_factory=dict)
 
 
 AnswerStatus = Literal["answered", "partial", "insufficient_context", "error"]

@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 
@@ -66,6 +67,10 @@ for _code_ext in (
     ".sql",
 ):
     ParserRegistry.register(_code_ext, TxtParser())
+
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.time() - start) * 1000)
 
 
 class RagPipeline:
@@ -203,10 +208,14 @@ class RagPipeline:
         knowledge_assets: list[dict] | None = None,
     ) -> dict:
         total_start = time.time()
+        stage_timings_ms: dict[str, int] = {}
+
+        rewrite_start = time.time()
         matched_assets = _select_knowledge_assets(query, knowledge_assets)
 
         query_rewrite = _rewrite_query_with_trace(query, history, matched_assets)
         rewritten_query = query_rewrite.rewritten_query
+        stage_timings_ms["rewrite_ms"] = _elapsed_ms(rewrite_start)
 
         search_start = time.time()
         search_result = self.search(
@@ -215,7 +224,8 @@ class RagPipeline:
             allowed_security_levels=allowed_security_levels,
             filters=filters,
         )
-        retrieval_ms = int((time.time() - search_start) * 1000)
+        retrieval_ms = _elapsed_ms(search_start)
+        stage_timings_ms["retrieve_ms"] = retrieval_ms
         hits = search_result["results"]
 
         # 原问题和扩展 query 一起参与关键词融合，保留用户原词和术语别名命中。
@@ -224,6 +234,7 @@ class RagPipeline:
 
         sources = extract_sources(hits)
         confidence = _estimate_confidence(query, hits, filters, matched_assets)
+        refusal_start = time.time()
         refusal = _assess_insufficient_context(
             query=query,
             query_rewrite=query_rewrite,
@@ -232,8 +243,9 @@ class RagPipeline:
             confidence=confidence,
             knowledge_assets=matched_assets,
         )
+        stage_timings_ms["refusal_ms"] = _elapsed_ms(refusal_start)
         if refusal.should_refuse:
-            return _build_refusal_chat_result(
+            result = _build_refusal_chat_result(
                 query=query,
                 rewritten_query=rewritten_query,
                 query_rewrite=query_rewrite,
@@ -243,11 +255,14 @@ class RagPipeline:
                 refusal=refusal,
                 retrieval_ms=retrieval_ms,
                 llm_ms=0,
+                stage_timings_ms=stage_timings_ms,
                 total_start=total_start,
                 knowledge_assets=matched_assets,
             )
+            logger.info("rag_pipeline_timing %s", json.dumps(result["trace"].get("stage_timings_ms", {}), ensure_ascii=False))
+            return result
 
-        return _build_answer_chat_result(
+        result = _build_answer_chat_result(
             query=query,
             rewritten_query=rewritten_query,
             query_rewrite=query_rewrite,
@@ -255,6 +270,7 @@ class RagPipeline:
             sources=sources,
             confidence=confidence,
             retrieval_ms=retrieval_ms,
+            stage_timings_ms=stage_timings_ms,
             total_start=total_start,
             history=history,
             knowledge_assets=matched_assets,
@@ -262,6 +278,8 @@ class RagPipeline:
             temperature=self.config.rag_temperature,
             llm_chat_fn=llm_chat,
         )
+        logger.info("rag_pipeline_timing %s", json.dumps(result["trace"].get("stage_timings_ms", {}), ensure_ascii=False))
+        return result
 
 
 __all__ = [
