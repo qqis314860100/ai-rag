@@ -17,6 +17,7 @@ import { AppError, ErrorCodes } from "../utils/errors";
 import { auditFromRequest } from "../services/auditService";
 import { requirePermission } from "../middleware/auth";
 import { ingestDocument, reindexDocument } from "../services/ragClient";
+import { importOfflinePackage } from "../services/offlineImportService";
 import { getDb } from "../db";
 import { listComments, createComment, updateComment, softDeleteComment } from "../db/docComments";
 import { buildDocumentPreviewContract, getPreviewMimeType, listPreviewFormatDefinitions } from "../utils/documentPreview";
@@ -81,6 +82,16 @@ const upload = multer({
 
 const router = Router();
 
+function bodyText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function bodyTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
 // GET /api/documents - list documents
 router.get("/documents", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -122,6 +133,50 @@ router.get("/documents/preview-contract", async (req: Request, res: Response, ne
     next(err);
   }
 });
+
+// POST /api/documents/import/offline-package - import MES/PLM/ERP exported files from a controlled local directory
+router.post(
+  "/documents/import/offline-package",
+  requirePermission("document.upload"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const packagePath = bodyText(req.body.package_path);
+      const sourceSystem = bodyText(req.body.source_system).toLowerCase();
+      const category = bodyText(req.body.category) || sourceSystem.toUpperCase();
+      const securityLevel = bodyText(req.body.security_level) || "internal";
+
+      if (!packagePath || !sourceSystem) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "缺少必填字段: package_path, source_system。", 400);
+      }
+      if (!["mes", "plm", "erp"].includes(sourceSystem)) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "source_system 必须是 mes、plm 或 erp。", 400);
+      }
+
+      const result = await importOfflinePackage({
+        packagePath,
+        sourceSystem,
+        category,
+        securityLevel,
+        process: bodyText(req.body.process) || undefined,
+        station: bodyText(req.body.station) || undefined,
+        version: bodyText(req.body.version) || undefined,
+        owner: bodyText(req.body.owner) || undefined,
+        tags: bodyTags(req.body.tags),
+        createdBy: req.user?.id,
+        requestId: req.requestId,
+      });
+
+      auditFromRequest(req, "document.offline_import", "document", undefined, {
+        source_system: sourceSystem,
+        total: result.total,
+        failed: result.items.filter((item) => item.status === "failed").length,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // GET /api/documents/:id - document detail
 router.get("/documents/:id", async (req: Request, res: Response, next: NextFunction) => {
