@@ -3,6 +3,7 @@ from app.evaluation import (
     DiagramIR,
     DiagramNode,
     build_keyword_diagram_ir,
+    build_llm_diagram_ir,
     extract_diagram_keywords,
     validate_diagram_ir,
 )
@@ -88,6 +89,72 @@ def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)
+
+
+def test_build_llm_diagram_ir_uses_structured_business_nodes_only() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        assert response_format == {"type": "json_object"}
+        assert "DIAGRAM_IR_STRUCTURED_OUTPUT" in messages[0]["content"]
+        return {
+            "model": "fake-structured",
+            "content": """
+            {
+              "title": "压力异常排查",
+              "objective": "提炼排查步骤和判断点",
+              "diagram_type": "flowchart",
+              "layout_hint": "top_to_bottom",
+              "nodes": [
+                {"id": "start", "label": "确认压力报警", "kind": "step", "source_ids": ["source-a"]},
+                {"id": "cite-1", "label": "引用 1", "kind": "evidence", "source_ids": ["source-a"]},
+                {"id": "check-valve", "label": "检查阀门复位状态", "kind": "action", "source_ids": ["source-b"]},
+                {"id": "decision", "label": "压力是否恢复", "kind": "decision", "source_ids": ["source-b"]}
+              ],
+              "edges": [
+                {"source": "start", "target": "cite-1", "relation": "supported_by"},
+                {"source": "start", "target": "check-valve", "relation": "sequence"},
+                {"source": "check-valve", "target": "decision", "relation": "condition"}
+              ],
+              "notes": ["只保留业务节点"],
+              "confidence": 0.82
+            }
+            """,
+        }
+
+    ir = build_llm_diagram_ir(
+        title="压力异常排查",
+        content="回答正文：1. 确认压力报警。2. 检查阀门复位状态。3. 判断压力是否恢复。",
+        source_ids=["source-a", "source-b"],
+        diagram_type="flowchart",
+        llm_chat=fake_chat,
+    )
+
+    assert ir.metadata["generation_mode"] == "llm_structured"
+    assert ir.metadata["model"] == "fake-structured"
+    assert ir.diagram_type == "flowchart"
+    assert [node.label for node in ir.nodes] == ["确认压力报警", "检查阀门复位状态", "压力是否恢复"]
+    assert not any(node.kind == "evidence" for node in ir.nodes)
+    assert not any(edge.relation == "supported_by" for edge in ir.edges)
+    assert ir.validation is not None
+    assert ir.validation.missing_source_ids == []
+    assert ir.renderer == "excalidraw"
+    assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
+
+
+def test_build_llm_diagram_ir_falls_back_when_structured_output_is_invalid() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        return {"model": "fake-bad", "content": "无法生成 JSON"}
+
+    ir = build_llm_diagram_ir(
+        title="工艺风险整理",
+        content="回答正文：温度窗口需要保持稳定，压力控制异常会触发安全风险。",
+        source_ids=["source-a"],
+        diagram_type="mindmap",
+        llm_chat=fake_chat,
+    )
+
+    assert ir.metadata["generation_mode"] == "keyword_fallback"
+    assert ir.diagram_type == "mindmap"
+    assert not any(node.kind == "evidence" for node in ir.nodes)
 
 
 def test_extract_diagram_keywords_prefers_repeated_domain_terms() -> None:

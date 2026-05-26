@@ -12,7 +12,7 @@ from ..core.pipeline import (
     _rewrite_query_with_trace,
     _suggest_followups,
 )
-from ..evaluation import DiagramIR, build_keyword_diagram_ir
+from ..evaluation import DiagramIR, build_llm_diagram_ir
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
     IngestRequest, IngestResult,
@@ -165,7 +165,7 @@ def generate_diagram(request: DiagramGenerateRequest):
         if not request.content.strip():
             raise HTTPException(status_code=400, detail="content is required")
 
-        return build_keyword_diagram_ir(
+        return build_llm_diagram_ir(
             title=request.title.strip() or "AI 整理",
             content=request.content,
             source_ids=request.source_ids,

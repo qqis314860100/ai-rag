@@ -27,6 +27,7 @@ def chat(
     messages: list[dict[str, str]],
     temperature: float | None = None,
     stream: bool = False,
+    response_format: dict | None = None,
 ) -> dict:
     """
     Returns: { "content": str, "model": str, "latency_ms": int }
@@ -43,13 +44,16 @@ def chat(
 
     try:
         check_budget(input_chars)
-        response = client.chat.completions.create(
-            model=config.deepseek_model,
-            messages=messages,
-            temperature=temp,
-            stream=stream,
-            timeout=60,
-        )
+        request_kwargs = {
+            "model": config.deepseek_model,
+            "messages": messages,
+            "temperature": temp,
+            "stream": stream,
+            "timeout": 60,
+        }
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
+        response = client.chat.completions.create(**request_kwargs)
         if stream:
             return {"stream": response, "model": config.deepseek_model, "latency_ms": 0}
         elapsed_ms = int((time.time() - start) * 1000)

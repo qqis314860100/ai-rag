@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, Callable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 class DiagramQualityWarning(BaseModel):
@@ -78,6 +79,35 @@ class DiagramIR(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StructuredDiagramNode(BaseModel):
+    id: str = ""
+    label: str
+    kind: str = "topic"
+    description: str = ""
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class StructuredDiagramEdge(BaseModel):
+    source: str
+    target: str
+    relation: str = "relates_to"
+    label: str = ""
+
+
+class StructuredDiagramOutput(BaseModel):
+    title: str = ""
+    objective: str = ""
+    diagram_type: str = "mindmap"
+    layout_hint: str = "auto"
+    nodes: list[StructuredDiagramNode] = Field(default_factory=list)
+    edges: list[StructuredDiagramEdge] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+StructuredDiagramChat = Callable[..., dict[str, Any]]
+
+
 _STOPWORDS = {
     "这个",
     "那个",
@@ -118,8 +148,9 @@ _PARAMETER_PATTERN = r"\d+(?:\.\d+)?\s?(?:V|mA|A|MΩ|GΩ|Ω|秒|s|PPM|%RH|%)|≥
 _MAX_MINDMAP_CATEGORIES = 5
 _MAX_KEYWORDS_PER_CATEGORY = 4
 _ALLOWED_DIAGRAM_TYPES = {"mindmap", "flowchart", "graph"}
-_ALLOWED_NODE_KINDS = {"root", "category", "keyword", "evidence", "step", "decision", "action", "topic"}
+_ALLOWED_NODE_KINDS = {"root", "category", "keyword", "evidence", "step", "decision", "action", "topic", "equipment", "parameter", "risk"}
 _ALLOWED_EDGE_RELATIONS = {"contains", "supported_by", "sequence", "condition", "flows_to", "relates_to"}
+_STRUCTURED_OUTPUT_FORMAT = {"type": "json_object"}
 
 
 def _clean_text(value: str, max_length: int = 80) -> str:
@@ -973,6 +1004,316 @@ def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str])
         "source_evidence": evidence,
     }
     return ir
+
+
+def _diagram_source_map(source_ids: list[str]) -> str:
+    if not source_ids:
+        return "无可用 source_id，节点 source_ids 必须返回空数组。"
+    return "\n".join(f"- 引用 {index + 1}: {source_id}" for index, source_id in enumerate(source_ids))
+
+
+def _build_structured_diagram_messages(
+    title: str,
+    content: str,
+    source_ids: list[str],
+    diagram_type: str,
+    max_steps: int,
+) -> list[dict[str, str]]:
+    schema = {
+        "title": "string",
+        "objective": "string",
+        "diagram_type": "mindmap|flowchart",
+        "layout_hint": "radial|top_to_bottom|left_to_right|auto",
+        "nodes": [
+            {
+                "id": "stable kebab-case id",
+                "label": "short business label",
+                "kind": "root|category|keyword|topic|step|decision|action|equipment|parameter|risk",
+                "description": "one short evidence-backed explanation",
+                "source_ids": ["one or more source ids from the provided mapping"],
+            }
+        ],
+        "edges": [
+            {
+                "source": "source node id",
+                "target": "target node id",
+                "relation": "contains|sequence|condition|flows_to|relates_to",
+                "label": "optional short label",
+            }
+        ],
+        "notes": ["short generation notes"],
+        "confidence": 0.0,
+    }
+    system = (
+        "DIAGRAM_IR_STRUCTURED_OUTPUT\n"
+        "你是企业电池产线 RAG 回答的图解结构化抽取器，只能基于回答正文和引用片段生成 DiagramIR JSON。\n"
+        "硬性规则：\n"
+        "1. 只输出一个 JSON object，不要输出 Markdown、解释或代码块。\n"
+        "2. 节点必须是回答中的业务概念、步骤、参数、风险或动作，禁止创建 evidence/source/citation/引用 节点。\n"
+        "3. 引用只能写入节点 source_ids，source_ids 只能来自用户提供的映射。\n"
+        "4. 图要精简，节点数量不超过用户要求，标签短而具体，不要复述整段证据。\n"
+        "5. mindmap 需要一个 root 节点，并用 contains 连接分类或主题；flowchart 使用 sequence/condition/flows_to 表达流程。\n"
+        "6. 如果证据不足以生成某个节点，不要编造。"
+    )
+    user = (
+        f"目标标题：{title}\n"
+        f"目标图类型：{diagram_type}\n"
+        f"最大节点数：{max_steps}\n"
+        f"source_id 映射：\n{_diagram_source_map(source_ids)}\n\n"
+        f"必须符合这个 JSON 结构：\n{json.dumps(schema, ensure_ascii=False, indent=2)}\n\n"
+        f"待整理内容：\n{content[:10000]}"
+    )
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _parse_json_object(content: str) -> dict[str, Any]:
+    text = content.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S)
+    if fenced:
+        text = fenced.group(1)
+    elif not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("diagram response must be a JSON object")
+    return parsed
+
+
+def _safe_node_id(value: str, fallback: str, used_ids: set[str]) -> str:
+    base = re.sub(r"[^A-Za-z0-9_-]+", "-", value.strip().lower()).strip("-_")
+    if not base:
+        base = fallback
+    node_id = base[:48]
+    suffix = 2
+    while node_id in used_ids:
+        trimmed = base[:42] or fallback
+        node_id = f"{trimmed}-{suffix}"
+        suffix += 1
+    used_ids.add(node_id)
+    return node_id
+
+
+def _normalize_llm_node_kind(kind: str, label: str, diagram_type: str) -> str:
+    normalized = kind.strip().lower().replace("-", "_")
+    aliases = {
+        "source": "evidence",
+        "citation": "evidence",
+        "reference": "evidence",
+        "concept": "topic",
+        "process": "step",
+        "condition": "decision",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized == "evidence":
+        return "evidence"
+    if diagram_type == "flowchart":
+        if normalized == "decision" or re.search(_DECISION_PATTERN, label):
+            return "decision"
+        if normalized == "action" or re.search(_ACTION_PATTERN, label):
+            return "action"
+        return "step"
+    if normalized in _ALLOWED_NODE_KINDS:
+        return normalized
+    category, _label = _category_for_keyword(label)
+    return category if category in _ALLOWED_NODE_KINDS else "topic"
+
+
+def _normalize_llm_edge_relation(relation: str, diagram_type: str) -> str:
+    normalized = relation.strip().lower().replace("-", "_")
+    aliases = {
+        "next": "sequence",
+        "then": "sequence",
+        "depends_on": "condition",
+        "supports": "supported_by",
+        "support": "supported_by",
+        "includes": "contains",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized == "supported_by":
+        return ""
+    if normalized in _ALLOWED_EDGE_RELATIONS:
+        return normalized
+    return "contains" if diagram_type == "mindmap" else "flows_to"
+
+
+def _filtered_source_ids(values: list[str], allowed_source_ids: list[str]) -> list[str]:
+    allowed = set(allowed_source_ids)
+    result: list[str] = []
+    for value in values:
+        source_id = str(value).strip()
+        if source_id and source_id in allowed and source_id not in result:
+            result.append(source_id)
+    return result
+
+
+def _structured_output_to_diagram_ir(
+    output: StructuredDiagramOutput,
+    title: str,
+    content: str,
+    source_ids: list[str],
+    diagram_type: str,
+    max_steps: int,
+    model: str = "",
+) -> DiagramIR:
+    max_nodes = min(max(max_steps, 2), 12)
+    used_ids: set[str] = set()
+    id_map: dict[str, str] = {}
+    nodes: list[DiagramNode] = []
+
+    for index, node in enumerate(output.nodes):
+        label = _clean_text(node.label, 56)
+        if not label:
+            continue
+        kind = _normalize_llm_node_kind(node.kind, label, diagram_type)
+        if kind == "evidence":
+            continue
+        if len(nodes) >= max_nodes:
+            break
+        fallback = "root" if diagram_type == "mindmap" and not nodes else f"node-{index + 1}"
+        node_id = _safe_node_id(node.id or label, fallback, used_ids)
+        if node.id:
+            id_map[node.id] = node_id
+        id_map[label] = node_id
+        nodes.append(
+            DiagramNode(
+                id=node_id,
+                label=label,
+                kind=kind,
+                description=_clean_text(node.description, 140),
+                source_ids=_filtered_source_ids(node.source_ids, source_ids),
+                metadata={"generated_by": "llm_structured"},
+            )
+        )
+
+    if diagram_type == "mindmap" and not any(node.kind == "root" for node in nodes):
+        root_id = _safe_node_id("root", "root", used_ids)
+        nodes.insert(
+            0,
+            DiagramNode(
+                id=root_id,
+                label=_clean_text(output.title or title, 44) or title,
+                kind="root",
+                source_ids=[],
+                metadata={"generated_by": "llm_structured", "synthetic": True},
+            ),
+        )
+
+    node_ids = {node.id for node in nodes}
+    edges: list[DiagramEdge] = []
+    seen_edges: set[tuple[str, str, str]] = set()
+    for edge in output.edges:
+        source = id_map.get(edge.source, edge.source)
+        target = id_map.get(edge.target, edge.target)
+        relation = _normalize_llm_edge_relation(edge.relation, diagram_type)
+        if not relation or source not in node_ids or target not in node_ids or source == target:
+            continue
+        edge_key = (source, target, relation)
+        if edge_key in seen_edges:
+            continue
+        seen_edges.add(edge_key)
+        edges.append(
+            DiagramEdge(
+                source=source,
+                target=target,
+                relation=relation,
+                label=_clean_text(edge.label, 36),
+                metadata={"generated_by": "llm_structured"},
+            )
+        )
+
+    if diagram_type == "mindmap":
+        root = next((node for node in nodes if node.kind == "root"), nodes[0] if nodes else None)
+        if root:
+            connected = {edge.target for edge in edges if edge.source == root.id}
+            for node in nodes:
+                if node.id != root.id and node.id not in connected:
+                    edges.append(DiagramEdge(source=root.id, target=node.id, relation="contains", metadata={"generated_by": "llm_structured", "synthetic": True}))
+    elif not edges and len(nodes) > 1:
+        for source, target in zip(nodes, nodes[1:]):
+            relation = "condition" if target.kind == "decision" else "sequence"
+            edges.append(DiagramEdge(source=source.id, target=target.id, relation=relation, metadata={"generated_by": "llm_structured", "synthetic": True}))
+
+    if not nodes:
+        raise ValueError("LLM structured diagram contains no usable business nodes")
+
+    layout_hint = output.layout_hint.strip() or ("radial" if diagram_type == "mindmap" else "top_to_bottom")
+    ir = DiagramIR(
+        title=_clean_text(output.title or title, 64) or title,
+        objective=_clean_text(output.objective, 140) or "基于回答和引用证据提炼精简业务节点，生成结构化 Diagram IR。",
+        diagram_type=diagram_type,
+        layout_hint=layout_hint,
+        nodes=nodes,
+        edges=edges,
+        notes=[
+            *[_clean_text(note, 120) for note in output.notes if _clean_text(note, 120)],
+            "LLM 仅输出业务节点，引用证据保留在节点 source_ids 和 source_evidence 中。",
+        ],
+        confidence=output.confidence,
+        metadata={
+            "generation_mode": "llm_structured",
+            "model": model,
+            "source_count": len(source_ids),
+            "requested_node_limit": max_nodes,
+        },
+    )
+    if diagram_type == "mindmap":
+        ir = _apply_mindmap_layout(ir)
+    else:
+        ir = _apply_flowchart_layout(ir)
+    return _attach_artifact_payload(ir, content, source_ids)
+
+
+def build_llm_diagram_ir(
+    title: str,
+    content: str,
+    source_ids: list[str] | None = None,
+    diagram_type: str = "flowchart",
+    max_steps: int = 8,
+    llm_chat: StructuredDiagramChat | None = None,
+) -> DiagramIR:
+    source_ids = source_ids or []
+    normalized_diagram_type = diagram_type if diagram_type in {"mindmap", "flowchart"} else "mindmap"
+    messages = _build_structured_diagram_messages(
+        title=title,
+        content=content,
+        source_ids=source_ids,
+        diagram_type=normalized_diagram_type,
+        max_steps=max_steps,
+    )
+    try:
+        if llm_chat is None:
+            from ..llm.client import chat as llm_chat
+        response = llm_chat(
+            messages,
+            temperature=0.1,
+            response_format=_STRUCTURED_OUTPUT_FORMAT,
+        )
+        output = StructuredDiagramOutput.model_validate(_parse_json_object(str(response.get("content") or "")))
+        output.diagram_type = normalized_diagram_type
+        return _structured_output_to_diagram_ir(
+            output=output,
+            title=title,
+            content=content,
+            source_ids=source_ids,
+            diagram_type=normalized_diagram_type,
+            max_steps=max_steps,
+            model=str(response.get("model") or ""),
+        )
+    except (ValueError, json.JSONDecodeError, ValidationError, TypeError) as exc:
+        fallback = build_keyword_diagram_ir(
+            title=title,
+            content=content,
+            source_ids=source_ids,
+            diagram_type=normalized_diagram_type,
+            max_steps=max_steps,
+        )
+        fallback.metadata["generation_mode"] = "keyword_fallback"
+        fallback.metadata["fallback_reason"] = str(exc)[:240]
+        fallback.notes.append("LLM structured output 不可用，本次使用关键词规则降级生成。")
+        return fallback
 
 
 def build_keyword_diagram_ir(

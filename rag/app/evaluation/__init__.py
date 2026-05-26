@@ -6,6 +6,7 @@ from .diagram_ir import (
     DiagramQualityWarning,
     DiagramValidationResult,
     build_keyword_diagram_ir,
+    build_llm_diagram_ir,
     build_placeholder_diagram_ir,
     extract_diagram_keywords,
     extract_diagram_steps,
