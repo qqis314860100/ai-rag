@@ -19,7 +19,7 @@ from ..llm.prompt_builder import (
     extract_sources,
     format_chunks_for_debug,
 )
-from ..schemas.models import AnswerIR
+from ..schemas.models import AnswerIR, AnswerQueryRewrite
 
 logger = logging.getLogger(__name__)
 
@@ -170,8 +170,9 @@ class RagPipeline:
     ) -> dict:
         total_start = time.time()
 
-        # 0. Query rewrite for chapter/number patterns
-        rewritten_query = _rewrite_query(query)
+        # 0. Query rewrite for chapter/number patterns and multi-turn references
+        query_rewrite = _rewrite_query_with_trace(query, history)
+        rewritten_query = query_rewrite.rewritten_query
 
         # 1. Search for relevant context (use rewritten query)
         search_start = time.time()
@@ -205,6 +206,7 @@ class RagPipeline:
             sources=sources,
             original_query=query,
             rewritten_query=rewritten_query,
+            query_rewrite=query_rewrite,
             confidence=confidence,
         )
 
@@ -256,23 +258,161 @@ def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = No
 
 
 def _rewrite_query(query: str) -> str:
-    """Expand chapter numbers and key terms for better retrieval."""
-    import re
+    """返回兼容旧调用方的重写查询字符串。"""
+    return _rewrite_query_with_trace(query).rewritten_query
+
+
+def _rewrite_query_with_trace(
+    query: str,
+    history: list[dict[str, str]] | None = None,
+) -> AnswerQueryRewrite:
+    """Resolve lightweight multi-turn references before retrieval.
+
+    这里保持规则可解释，避免在检索前引入一次额外 LLM 调用。重写结果会进入
+    AnswerIR，便于后续 API 持久化和调试面板展示。
+    """
+    original_query = _normalize_query_text(query)
+    history_turns = _count_history_turns(history)
+    topic = _extract_recent_history_topic(history)
+    rewritten_query = original_query
+    signals: list[str] = []
+    strategies: list[str] = []
+    reasons: list[str] = []
+
+    if topic:
+        signals.append("history_topic")
+
+    if _is_low_information_query(original_query) and not topic:
+        return AnswerQueryRewrite(
+            original_query=original_query,
+            rewritten_query=rewritten_query,
+            changed=False,
+            strategy="low_information",
+            reason="问题信息量过低，且没有可用于补全的历史上下文",
+            signals=["low_information"],
+            history_turns=history_turns,
+        )
+
+    if topic and _has_reference_pronoun(original_query):
+        candidate = _replace_reference_with_topic(original_query, topic)
+        if candidate != rewritten_query:
+            rewritten_query = candidate
+            signals.append("pronoun")
+            strategies.append("history_pronoun_resolution")
+            reasons.append("用最近一轮用户问题补全指代对象")
+    elif topic and _is_elliptical_followup(original_query):
+        rewritten_query = f"{topic} {original_query}"
+        signals.append("ellipsis")
+        strategies.append("history_ellipsis_completion")
+        reasons.append("用最近一轮用户问题补全省略主题")
+
+    expanded_query, expanded = _expand_chapter_query(rewritten_query)
+    if expanded:
+        rewritten_query = expanded_query
+        signals.append("chapter_number")
+        strategies.append("chapter_number_expansion")
+        reasons.append("章节编号被展开以提高召回")
+
+    changed = rewritten_query != original_query
+    if not strategies and not changed:
+        strategies.append("none")
+        reasons.append("问题已包含明确主题，无需改写")
+
+    strategy = strategies[0] if len(strategies) == 1 else "compound"
+    return AnswerQueryRewrite(
+        original_query=original_query,
+        rewritten_query=rewritten_query,
+        changed=changed,
+        strategy=strategy,
+        reason="；".join(reasons),
+        signals=_dedupe_preserve_order(signals),
+        history_turns=history_turns,
+    )
+
+
+def _expand_chapter_query(query: str) -> tuple[str, bool]:
     parts = [query]
-    # "第5章" → add "5" "5. 安全" variants
     m = re.search(r"第\s*(\d+)\s*章", query)
     if m:
         num = m.group(1)
         parts.append(f"{num}")
         parts.append(f"章节 {num}")
-    # "第五章" → same
     m = re.search(r"第\s*([一二三四五六七八九十]+)\s*章", query)
     if m:
-        cn_map = {"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8","九":"9","十":"10"}
+        cn_map = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"}
         num = cn_map.get(m.group(1), "")
         if num:
             parts.append(f"第{num}章")
-    return " ".join(parts)
+    expanded = " ".join(_dedupe_preserve_order(parts))
+    return expanded, expanded != query
+
+
+def _normalize_query_text(query: str) -> str:
+    return re.sub(r"\s+", " ", query).strip()
+
+
+def _count_history_turns(history: list[dict[str, str]] | None) -> int:
+    return sum(1 for item in history or [] if item.get("role") in {"user", "assistant"} and str(item.get("content") or "").strip())
+
+
+def _extract_recent_history_topic(history: list[dict[str, str]] | None) -> str:
+    if not history:
+        return ""
+    for item in reversed(history[-8:]):
+        if item.get("role") != "user":
+            continue
+        topic = _extract_rewrite_topic(str(item.get("content") or ""))
+        if topic:
+            return topic
+    return ""
+
+
+def _extract_rewrite_topic(text: str) -> str:
+    cleaned = _normalize_query_text(text)
+    cleaned = re.sub(r"[？?！!。；;，,、]+", " ", cleaned)
+    cleaned = re.sub(r"(请问|请|帮我|帮忙|一下|详细|介绍|说明|列出|查询|告诉我)", " ", cleaned)
+    cleaned = re.sub(r"(是什么|有哪些|多少|如何|怎么处理|怎么办|怎么|为什么|是否|吗|呢)\s*$", " ", cleaned)
+    cleaned = re.sub(r"(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中)", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" 的")
+    if len(cleaned) < 4:
+        return ""
+    return cleaned[:40]
+
+
+def _is_low_information_query(query: str) -> bool:
+    cleaned = re.sub(r"[？?！!。；;，,、\s]+", "", query)
+    cleaned = re.sub(r"(请问|请|一下|这个|那个|这些|那些|它|其|该|上述|前述|前面|还有|继续|呢|吗|什么|怎么|如何|为什么)", "", cleaned)
+    return len(cleaned) < 2
+
+
+def _has_reference_pronoun(query: str) -> bool:
+    return bool(re.search(r"(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中|\bthis\b|\bthat\b|\bit\b|\bthey\b)", query, re.IGNORECASE))
+
+
+def _is_elliptical_followup(query: str) -> bool:
+    normalized = _normalize_query_text(query)
+    if len(re.sub(r"\s+", "", normalized)) <= 14 and re.search(r"(呢|吗|？|\?)$", normalized):
+        return True
+    return bool(re.search(r"^(还有|另外|继续|再说|展开|那|那么)", normalized))
+
+
+def _replace_reference_with_topic(query: str, topic: str) -> str:
+    normalized = _normalize_query_text(query)
+    replaced = re.sub(r"^(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中)", topic, normalized)
+    if replaced != normalized:
+        return replaced
+    return re.sub(r"(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中)", topic, normalized, count=1)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
 def _build_ingest_metadata(file_path: str, metadata: dict | None = None) -> dict:

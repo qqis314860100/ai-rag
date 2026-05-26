@@ -3,7 +3,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from ..core.pipeline import RagPipeline, _estimate_confidence, _keyword_rerank, _rewrite_query, _suggest_followups
+from ..core.pipeline import RagPipeline, _estimate_confidence, _keyword_rerank, _rewrite_query_with_trace, _suggest_followups
 from ..evaluation import DiagramIR, build_keyword_diagram_ir
 from ..llm.usage_guard import usage_summary
 from ..schemas.models import (
@@ -180,7 +180,8 @@ def chat_stream(request: ChatRequest):
     async def generate():
         try:
             # 1. Search
-            rewritten_query = _rewrite_query(request.query)
+            query_rewrite = _rewrite_query_with_trace(request.query, request.history)
+            rewritten_query = query_rewrite.rewritten_query
             search_result = pipeline.search(
                 query=rewritten_query,
                 top_k=request.top_k,
@@ -192,7 +193,7 @@ def chat_stream(request: ChatRequest):
                 hits = _keyword_rerank(request.query, hits, request.filters)
 
             # Send search metadata
-            yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits)})}\n\n"
+            yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})}\n\n"
 
             # 2. Build prompt
             from ..llm.prompt_builder import build_messages, extract_sources

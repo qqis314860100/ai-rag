@@ -306,6 +306,8 @@ class AnswerQueryRewrite(BaseModel):
     changed: bool = False
     strategy: str = "none"
     reason: str = ""
+    signals: list[str] = Field(default_factory=list)
+    history_turns: int = 0
 
 
 class AnswerCitation(BaseModel):
@@ -376,6 +378,7 @@ class AnswerIR(BaseModel):
         original_query: str,
         rewritten_query: str,
         confidence: float,
+        query_rewrite: AnswerQueryRewrite | Mapping[str, Any] | None = None,
         status: AnswerStatus | None = None,
         warnings: list[AnswerWarning] | None = None,
     ) -> "AnswerIR":
@@ -404,19 +407,25 @@ class AnswerIR(BaseModel):
                 severity="info",
                 citation_ids=[citation.id for citation in citations],
             ))
+        if isinstance(query_rewrite, AnswerQueryRewrite):
+            rewrite = query_rewrite
+        elif isinstance(query_rewrite, Mapping):
+            rewrite = AnswerQueryRewrite.model_validate(query_rewrite)
+        else:
+            rewrite = AnswerQueryRewrite(
+                original_query=original_query,
+                rewritten_query=rewritten_query,
+                changed=rewritten_query != original_query,
+                strategy="chapter_number_expansion" if rewritten_query != original_query else "none",
+                reason="章节编号被展开以提高召回" if rewritten_query != original_query else "",
+            )
 
         return cls(
             status=derived_status,
             answer=answer,
             claims=claims,
             citations=citations,
-            query_rewrite=AnswerQueryRewrite(
-                original_query=original_query,
-                rewritten_query=rewritten_query,
-                changed=rewritten_query != original_query,
-                strategy="chapter_number_expansion" if rewritten_query != original_query else "none",
-                reason="章节编号被展开以提高召回" if rewritten_query != original_query else "",
-            ),
+            query_rewrite=rewrite,
             confidence=normalized_confidence,
             warnings=derived_warnings,
         )

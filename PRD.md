@@ -110,7 +110,7 @@
 ### 结构化精准问答与图解
 
 - [x] `rag`: 定义 `AnswerIR` Pydantic schema，覆盖回答状态、claims、citations、query_rewrite、confidence、warnings，并保持现有 ChatResult 兼容。
-- [ ] `rag`: 增强多轮问题重写能力，输出可追踪的重写结果，覆盖指代、省略、无歧义不改写和低信息输入。
+- [x] `rag`: 增强多轮问题重写能力，输出可追踪的重写结果，覆盖指代、省略、无歧义不改写和低信息输入。
 - [ ] `api`: 将原始问题、重写问题、AnswerIR 摘要和引用覆盖信息持久化到回答 metadata，供前端和调试面板读取。
 - [ ] `rag`: 增加拒答与低证据策略，低信息输入、无有效引用、证据不足或上下文冲突时返回结构化 `insufficient_context`。
 - [ ] `rag`: 定义新版 `DiagramIR` schema 和校验器，支持 `can_generate`、节点/边合法性、引用覆盖、布局建议和质量告警。
