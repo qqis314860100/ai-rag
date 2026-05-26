@@ -1,6 +1,18 @@
 from app.core import pipeline as pipeline_module
+from app.core.terminology import expand_query_with_terms
 from app.core.pipeline import RagPipeline, REFUSAL_ANSWER, _estimate_confidence, _rewrite_query_with_trace
-from app.evaluation import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts, validate_diagram_ir
+from app.evaluation import (
+    DiagramIR,
+    build_image_artifact_contract,
+    build_llm_diagram_ir,
+    build_published_asset_retrieval_terms,
+    evaluate_faq_candidate,
+    evaluate_knowledge_card_candidate,
+    plan_visual_artifacts,
+    recommend_related_topics,
+    should_block_knowledge_asset_persistence,
+    validate_diagram_ir,
+)
 from app.schemas.models import AnswerIR
 
 
@@ -239,3 +251,119 @@ def test_quality_eval_image_artifact_contract_requires_explicit_user_request() -
 
     assert contract.allowed is False
     assert contract.safety_warnings[0].code == "image_requires_explicit_request"
+
+
+def test_quality_eval_term_recall_records_ocv_expansion() -> None:
+    expansion = expand_query_with_terms("OCV异常复测怎么处理？")
+
+    assert expansion.changed is True
+    assert "开路电压" in expansion.expanded_query
+    assert expansion.hits[0].canonical_term == "OCV"
+    assert expansion.hits[0].source == "built_in_battery_line_glossary"
+
+
+def test_quality_eval_knowledge_card_draft_requires_answer_ir_sources() -> None:
+    query = "DCR偏差排查路径是什么？"
+    sources = [_hit(0.9, "DCR偏差时先检查探针接触力，再复核夹具定位和线缆连接。", "chunk-dcr")]
+    answer_ir = AnswerIR.from_chat(
+        answer="结论：DCR偏差时先检查探针接触力，再复核夹具定位和线缆连接。[来源 1]",
+        sources=sources,
+        original_query=query,
+        rewritten_query=query,
+        confidence=0.86,
+    )
+
+    draft = evaluate_knowledge_card_candidate(answer_ir)
+
+    assert draft.status == "ready"
+    assert draft.asset_type == "knowledge_card"
+    assert draft.source_ids == ["chunk-dcr"]
+    assert "DCR" in draft.related_terms
+
+
+def test_quality_eval_faq_candidate_reuses_only_frequent_source_backed_answer() -> None:
+    query = "OCV偏高是否一定代表SOC偏高？"
+    sources = [_hit(0.88, "OCV偏高需要结合静置时间、温度补偿和SOC曲线判断。", "chunk-ocv")]
+    answer_ir = AnswerIR.from_chat(
+        answer="结论：不一定，需要结合静置时间、温度补偿和SOC曲线判断。[来源 1]",
+        sources=sources,
+        original_query=query,
+        rewritten_query=query,
+        confidence=0.82,
+    )
+
+    ready = evaluate_faq_candidate(query, answer_ir, similar_question_count=4)
+    blocked = evaluate_faq_candidate(query, answer_ir, similar_question_count=1)
+
+    assert ready.status == "ready"
+    assert ready.asset_type == "faq"
+    assert blocked.status == "blocked"
+    assert blocked.warnings[0].code == "faq_frequency_too_low"
+
+
+def test_quality_eval_relation_recommendation_uses_published_assets() -> None:
+    query = "Busbar焊接导致DCR偏高时怎么排查？"
+    answer_ir = AnswerIR.from_chat(
+        answer="结论：先复核Busbar焊接外观，再检查DCR测试夹具和连接阻抗。[来源 1]",
+        sources=[_hit(0.87, "Busbar焊接异常会导致连接阻抗升高并影响DCR。", "chunk-busbar")],
+        original_query=query,
+        rewritten_query=query,
+        confidence=0.83,
+    )
+
+    recommendations = recommend_related_topics(answer_ir, [
+        {
+            "id": "asset-busbar",
+            "status": "published",
+            "title": "Busbar焊接质量",
+            "related_terms": ["Busbar", "DCR"],
+            "related_topics": ["连接阻抗", "焊接质量"],
+        },
+        {
+            "id": "asset-draft",
+            "status": "ai_draft",
+            "title": "未发布草稿",
+            "related_terms": ["DCR"],
+            "related_topics": ["不应推荐"],
+        },
+    ])
+
+    assert [item.topic for item in recommendations] == ["焊接质量", "连接阻抗"]
+    assert recommendations[0].source_ids == ["chunk-busbar"]
+    assert recommendations[0].matched_asset_ids == ["asset-busbar"]
+
+
+def test_quality_eval_published_asset_terms_can_feed_retrieval() -> None:
+    terms = build_published_asset_retrieval_terms({
+        "id": "asset-dcr",
+        "status": "published",
+        "title": "DCR偏差排查",
+        "summary": "连接阻抗、夹具定位和Busbar焊接复核。",
+        "related_terms": ["DCR", "Busbar"],
+        "related_topics": ["连接阻抗"],
+        "source_ids": ["chunk-dcr"],
+    })
+
+    assert "DCR" in terms
+    assert "Busbar" in terms
+    assert "连接阻抗" in terms
+    assert build_published_asset_retrieval_terms({"status": "ai_draft", "title": "草稿", "source_ids": ["chunk-1"]}) == []
+
+
+def test_quality_eval_blocks_erroneous_knowledge_persistence() -> None:
+    answer_ir = AnswerIR.from_chat(
+        answer="无法确认该结论，没有足够信息支持沉淀。",
+        sources=[],
+        original_query="随便问一个不存在的工艺参数",
+        rewritten_query="随便问一个不存在的工艺参数",
+        confidence=0.2,
+        status="insufficient_context",
+    )
+
+    draft = evaluate_knowledge_card_candidate(answer_ir)
+
+    assert should_block_knowledge_asset_persistence(answer_ir) is True
+    assert draft.status == "blocked"
+    assert {"answer_not_ready", "confidence_too_low", "missing_citations", "uncertain_answer"}.issubset(
+        {warning.code for warning in draft.warnings}
+    )
