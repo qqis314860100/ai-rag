@@ -349,7 +349,7 @@
 - [x] `rag`: 将 `rag/app/evaluation/` 重命名为 `rag/app/artifacts/`，同步修正所有 import；在 `rag/app/artifacts/README.md` 写清楚和 `rag/evals/` 的边界。命名错位会让新人持续找错地方加代码。
 - [x] `web`: 清理 `web/src/**/*.js` 死代码（与 `.tsx` 同名共存的 56 个 `.js`），先确认 `tsconfig.json` 输出目录不是 `src/`，再批量删除并跑 `pnpm build:web` 验证。
 - [x] `repo`: 修正 README/package.json/`.env.example` 三处 RAG 端口口径（统一为 8000 或 8001，二选一），并在 README 注明启动后健康检查地址。
-- [ ] `repo`: 将根目录 `人类阅读的/` 重命名为 `docs/参考资料/`，并把根目录 `企业知识库RAG精准问答+多轮会话记忆 全套落地流程方案.md` 移入；根目录只保留 README/AGENTS/CLAUDE/PRD/progress。
+- [x] `repo`: 将根目录 `人类阅读的/` 重命名为 `docs/参考资料/`，并把根目录 `企业知识库RAG精准问答+多轮会话记忆 全套落地流程方案.md` 移入；根目录只保留 README/AGENTS/CLAUDE/PRD/progress。
 - [ ] `api`: 拆分 `api/src/routes/chat.ts`（1433 行）为 `routes/chat/{sessions,messages,notes,sources,artifacts}.ts`，`index.ts` 只做装配；行为不变，跑 `api/tests/run-tests.sh` 验证。
 - [ ] `rag`: 拆分 `rag/app/core/pipeline.py`（899 行）为 `pipeline/{rewrite,retrieve,generate,refusal}.py`，`__init__.py` 顺序编排；`rag/evals/` 全量回归。
 - [ ] `api`: 拆分 `api/src/db/index.ts`（555 行）按主题分文件（identity / documents / chat / artifacts / knowledge / platform），`index.ts` 只做 `initDb` 装配。
