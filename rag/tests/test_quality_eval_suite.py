@@ -367,3 +367,19 @@ def test_quality_eval_blocks_erroneous_knowledge_persistence() -> None:
     assert {"answer_not_ready", "confidence_too_low", "missing_citations", "uncertain_answer"}.issubset(
         {warning.code for warning in draft.warnings}
     )
+
+
+def test_quality_eval_blocks_conflicting_evidence_for_knowledge_card() -> None:
+    answer_ir = AnswerIR.from_chat(
+        answer="结论：两份来源对DCR偏差阈值存在冲突，不能直接采用。[来源 1]",
+        sources=[_hit(0.88, "DCR偏差阈值为±5%。", "chunk-dcr")],
+        original_query="DCR偏差阈值是多少？",
+        rewritten_query="DCR偏差阈值是多少？",
+        confidence=0.82,
+        metadata={"refusal_reasons": ["context_conflict"]},
+    )
+
+    draft = evaluate_knowledge_card_candidate(answer_ir)
+
+    assert draft.status == "blocked"
+    assert "evidence_conflict" in {warning.code for warning in draft.warnings}

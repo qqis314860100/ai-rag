@@ -152,6 +152,11 @@ def _blocking_warnings(answer_ir: AnswerIR) -> list[AnswerWarning]:
             code="answer_ir_warning_blocked",
             message="AnswerIR 已包含阻断级风险提示。",
         ))
+    if _has_evidence_conflict(answer_ir):
+        warnings.append(AnswerWarning(
+            code="evidence_conflict",
+            message="回答存在证据冲突或上下文冲突，不能自动沉淀为知识资产。",
+        ))
 
     if _looks_like_uncertain_answer(answer_ir.answer):
         warnings.append(AnswerWarning(
@@ -208,6 +213,17 @@ def _compact_summary(text: str) -> str:
 
 def _looks_like_uncertain_answer(answer: str) -> bool:
     return any(marker in answer for marker in ("无法确认", "不知道", "没有足够信息", "仅供参考", "可能是"))
+
+
+def _has_evidence_conflict(answer_ir: AnswerIR) -> bool:
+    conflict_codes = {"context_conflict", "evidence_conflict", "source_conflict", "conflicting_evidence"}
+    existing_codes = {warning.code for warning in answer_ir.warnings}
+    metadata_reasons = {
+        str(item)
+        for item in _as_list(answer_ir.metadata.get("refusal_reasons"))
+    }
+    refusal_reason = str(answer_ir.metadata.get("refusal_reason") or "")
+    return bool(conflict_codes.intersection(existing_codes | metadata_reasons | {refusal_reason}))
 
 
 def _dedupe_warnings(warnings: list[AnswerWarning]) -> list[AnswerWarning]:
