@@ -99,6 +99,54 @@ interface RagChatResponse {
     llm_ms: number;
     total_ms: number;
   };
+  answer_ir?: RagAnswerIR | null;
+}
+
+export interface RagAnswerQueryRewrite {
+  original_query?: string;
+  rewritten_query?: string;
+  changed?: boolean;
+  strategy?: string;
+  reason?: string;
+  signals?: string[];
+  history_turns?: number;
+}
+
+export interface RagAnswerCitation {
+  id?: string;
+  source_index?: number;
+  chunk_id?: string;
+  document_id?: string;
+  document_title?: string;
+  section_path?: string;
+  page_number?: number;
+  score?: number;
+}
+
+export interface RagAnswerClaim {
+  id?: string;
+  text?: string;
+  citation_ids?: string[];
+  confidence?: number;
+  kind?: string;
+}
+
+export interface RagAnswerWarning {
+  code?: string;
+  message?: string;
+  severity?: string;
+  citation_ids?: string[];
+}
+
+export interface RagAnswerIR {
+  schema_version?: string;
+  status?: string;
+  claims?: RagAnswerClaim[];
+  citations?: RagAnswerCitation[];
+  query_rewrite?: RagAnswerQueryRewrite;
+  confidence?: number;
+  warnings?: RagAnswerWarning[];
+  metadata?: Record<string, unknown>;
 }
 
 type DiagramType = "mindmap" | "flowchart";

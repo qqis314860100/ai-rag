@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { chatWithRag, chatWithRagStream, generateDiagramIR } from "../services/ragClient";
+import type { RagAnswerIR, RagAnswerQueryRewrite } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest } from "../middleware/auth";
@@ -79,6 +80,100 @@ type DiagramEligibility = {
   reason?: string;
   question?: string;
 };
+
+type AnswerMessageMetadataInput = {
+  originalQuestion: string;
+  sources?: unknown[];
+  confidence?: number;
+  followups?: string[];
+  trace?: Record<string, unknown>;
+  answerIr?: RagAnswerIR | null;
+  queryRewrite?: RagAnswerQueryRewrite | null;
+};
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sourceIdentity(source: Record<string, unknown>, fallbackIndex: number): string {
+  return stringValue(source.id) || stringValue(source.chunk_id) || `source-${fallbackIndex}`;
+}
+
+function uniqueValues(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function buildCitationCoverage(answerIr: RagAnswerIR | null | undefined, sources: unknown[]) {
+  const sourceRecords = sources.filter(isRecord);
+  const sourceIds = uniqueValues(sourceRecords.map((source, index) => sourceIdentity(source, index + 1)));
+  const citations = answerIr?.citations ?? [];
+  const citationIds = uniqueValues(
+    citations.map((citation, index) => citation.id || citation.chunk_id || `source-${citation.source_index || index + 1}`)
+  );
+  const claims = answerIr?.claims ?? [];
+  const citedIdSet = new Set(citationIds);
+  const coveredClaims = claims.filter((claim) => (claim.citation_ids ?? []).some((id) => citedIdSet.has(id)));
+  const missingCitationClaimIds = claims
+    .filter((claim) => (claim.citation_ids ?? []).length === 0 || !(claim.citation_ids ?? []).some((id) => citedIdSet.has(id)))
+    .map((claim, index) => claim.id || `claim-${index + 1}`);
+
+  return {
+    returned_source_count: sourceRecords.length,
+    returned_source_ids: sourceIds,
+    cited_source_count: citationIds.length,
+    cited_source_ids: citationIds,
+    claim_count: claims.length,
+    covered_claim_count: coveredClaims.length,
+    claim_coverage_ratio: claims.length > 0 ? coveredClaims.length / claims.length : 0,
+    source_coverage_ratio: sourceIds.length > 0 ? citationIds.filter((id) => sourceIds.includes(id)).length / sourceIds.length : 0,
+    missing_citation_claim_ids: missingCitationClaimIds,
+  };
+}
+
+function buildAnswerIrSummary(answerIr: RagAnswerIR | null | undefined) {
+  if (!answerIr) return null;
+
+  return {
+    schema_version: answerIr.schema_version,
+    status: answerIr.status,
+    confidence: answerIr.confidence,
+    claim_count: answerIr.claims?.length ?? 0,
+    citation_count: answerIr.citations?.length ?? 0,
+    warning_count: answerIr.warnings?.length ?? 0,
+    primary_claim: answerIr.claims?.[0]?.text ?? "",
+    warnings: (answerIr.warnings ?? []).map((warning) => ({
+      code: warning.code,
+      severity: warning.severity,
+      citation_ids: warning.citation_ids ?? [],
+    })),
+  };
+}
+
+function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<string, unknown> {
+  const queryRewrite = input.answerIr?.query_rewrite ?? input.queryRewrite ?? null;
+  const rewrittenQuestion = queryRewrite?.rewritten_query || input.originalQuestion;
+
+  return {
+    confidence: input.confidence,
+    followups: input.followups,
+    trace: input.trace,
+    query: {
+      original_question: queryRewrite?.original_query || input.originalQuestion,
+      rewritten_question: rewrittenQuestion,
+      rewrite_changed: queryRewrite?.changed ?? rewrittenQuestion !== input.originalQuestion,
+      rewrite_strategy: queryRewrite?.strategy ?? "none",
+      rewrite_reason: queryRewrite?.reason ?? "",
+      rewrite_signals: queryRewrite?.signals ?? [],
+      history_turns: queryRewrite?.history_turns ?? 0,
+    },
+    answer_ir_summary: buildAnswerIrSummary(input.answerIr),
+    citation_coverage: buildCitationCoverage(input.answerIr, input.sources ?? []),
+  };
+}
 
 const MIN_ARTIFACT_CONFIDENCE = 0.66;
 const DOMAIN_SHORT_QUERY_PATTERN = /\b(?:OCV|EOL|CCD|SOC|SOP|RAG|PPM|MES|PLC|BMS|Busbar)\b/i;
@@ -400,6 +495,8 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         confidence?: number;
         followups?: string[];
         trace?: { retrieval_ms?: number; hit_count?: number };
+        queryRewrite?: RagAnswerQueryRewrite;
+        answerIr?: RagAnswerIR | null;
       } = {};
       let streamFailed = false;
 
@@ -431,6 +528,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                 } else if (parsed.type === "meta") {
                   meta = {
                     ...meta,
+                    queryRewrite: parsed.query_rewrite,
                     trace: {
                       retrieval_ms: parsed.retrieval_ms,
                       hit_count: parsed.hit_count,
@@ -442,6 +540,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                     sources: parsed.sources,
                     confidence: parsed.confidence,
                     followups: parsed.followups,
+                    answerIr: parsed.answer_ir,
                   };
                 } else if (parsed.type === "error") {
                   streamFailed = true;
@@ -463,16 +562,22 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         return;
       }
 
+      const assistantMetadata = buildAnswerMessageMetadata({
+        originalQuestion: message,
+        answerIr: meta.answerIr,
+        queryRewrite: meta.queryRewrite,
+        sources: meta.sources,
+        confidence: meta.confidence,
+        followups: meta.followups,
+        trace: meta.trace,
+      });
+
       const assistantMessage = createMessage({
         sessionId,
         role: "assistant",
         content: fullAnswer,
-        sources: meta.sources as Array<Record<string, unknown>> | undefined,
-        metadata: {
-          confidence: meta.confidence,
-          followups: meta.followups,
-          trace: meta.trace,
-        },
+        sources: meta.sources,
+        metadata: assistantMetadata,
         latencyMs: 0,
       });
 
@@ -489,7 +594,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       });
 
       // Send final event with message_id and session_id
-      res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata })}\n\n`);
       res.end();
       return;
     }
@@ -505,16 +610,21 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
     );
 
     // Save assistant message
+    const assistantMetadata = buildAnswerMessageMetadata({
+      originalQuestion: message,
+      answerIr: chatResult.answer_ir,
+      sources: chatResult.sources,
+      confidence: chatResult.confidence,
+      followups: chatResult.followups,
+      trace: chatResult.trace,
+    });
+
     const assistantMessage = createMessage({
       sessionId,
       role: "assistant",
       content: chatResult.answer,
       sources: chatResult.sources,
-      metadata: {
-        confidence: chatResult.confidence,
-        followups: chatResult.followups,
-        trace: chatResult.trace,
-      },
+      metadata: assistantMetadata,
       latencyMs: chatResult.trace?.total_ms,
     });
 
@@ -540,6 +650,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         confidence: chatResult.confidence,
         followups: chatResult.followups,
         trace: chatResult.trace,
+        metadata: assistantMetadata,
       },
       req.requestId
     );

@@ -11,7 +11,7 @@ from ..schemas.models import (
     SearchRequest, SearchResult,
     DebugSearchRequest, DebugSearchResult,
     ChatRequest, ChatResult,
-    DiagramGenerateRequest,
+    DiagramGenerateRequest, AnswerIR,
     ReindexRequest, ReindexResult,
 )
 
@@ -202,15 +202,34 @@ def chat_stream(request: ChatRequest):
 
             # 3. Stream LLM
             from ..llm.client import chat_stream as llm_stream
-            total_tokens = 0
+            full_answer = ""
             for sse_chunk in llm_stream(messages, temperature=pipeline.config.rag_temperature):
-                # Parse to inject sources on done event
-                if '"type": "done"' in sse_chunk:
+                event_data: dict | None = None
+                if sse_chunk.startswith("data: "):
+                    try:
+                        event_data = json.loads(sse_chunk[len("data: "):].strip())
+                    except Exception:
+                        event_data = None
+
+                if event_data and event_data.get("type") == "token":
+                    full_answer += str(event_data.get("content") or "")
+                    yield sse_chunk
+                elif event_data and event_data.get("type") == "done":
+                    confidence = _estimate_confidence(request.query, hits, request.filters)
+                    answer_ir = AnswerIR.from_chat(
+                        answer=full_answer,
+                        sources=sources,
+                        original_query=request.query,
+                        rewritten_query=rewritten_query,
+                        query_rewrite=query_rewrite,
+                        confidence=confidence,
+                    )
                     done_data = {
                         "type": "done",
                         "sources": sources,
-                        "confidence": _estimate_confidence(request.query, hits, request.filters),
+                        "confidence": confidence,
                         "followups": _suggest_followups(request.query, hits),
+                        "answer_ir": answer_ir.model_dump(),
                     }
                     yield f"data: {_sse_json(done_data)}\n\n"
                 else:
