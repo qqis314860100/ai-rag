@@ -3,7 +3,7 @@ from collections.abc import Callable
 
 from ...artifacts import plan_visual_artifacts
 from ...llm.prompt_builder import build_messages
-from ...schemas.models import AnswerIR, AnswerQueryRewrite
+from ...schemas.models import AnswerIR, AnswerQueryRewrite, AnswerWarning
 from .refusal import EvidenceAssessment, REFUSAL_ANSWER
 from .rewrite import _knowledge_asset_trace
 
@@ -24,9 +24,11 @@ def _build_answer_chat_result(
     max_context_chars: int,
     temperature: float,
     llm_chat_fn: Callable,
+    evidence_warnings: list[AnswerWarning] | None = None,
+    evidence_metadata: dict | None = None,
 ) -> dict:
     stage_timings_ms = dict(stage_timings_ms or {})
-    messages = build_messages(query, hits, history, max_context_chars)
+    messages = build_messages(query, hits, history, max_context_chars, evidence_warnings=evidence_warnings)
 
     generate_start = time.time()
     llm_start = time.time()
@@ -40,7 +42,11 @@ def _build_answer_chat_result(
         rewritten_query=rewritten_query,
         query_rewrite=query_rewrite,
         confidence=confidence,
-        metadata={"knowledge_assets": _knowledge_asset_trace(knowledge_assets)},
+        warnings=evidence_warnings,
+        metadata={
+            "knowledge_assets": _knowledge_asset_trace(knowledge_assets),
+            **(evidence_metadata or {}),
+        },
     )
     generate_ms = int((time.time() - generate_start) * 1000)
 

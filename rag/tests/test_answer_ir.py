@@ -66,6 +66,20 @@ def test_answer_ir_refusal_phrase_zeroes_answer_confidence_with_sources() -> Non
     assert len(ir.citations) == 1
 
 
+def test_answer_ir_keeps_partial_answer_when_only_some_details_are_missing() -> None:
+    ir = AnswerIR.from_chat(
+        answer="知识库可确认 Pack 级绝缘与耐压测试包含 Y 电容，直流耐压测试更适合。知识库未提供区分泄漏电流类型的具体算法。",
+        sources=[_source()],
+        original_query="如何区分 Y 电容泄漏电流与绝缘缺陷泄漏电流？",
+        rewritten_query="如何区分 Y 电容泄漏电流与绝缘缺陷泄漏电流？",
+        confidence=0.72,
+    )
+
+    assert ir.status == "answered"
+    assert ir.confidence == 0.72
+    assert ir.claims
+
+
 def test_chat_result_keeps_legacy_payload_compatible_without_answer_ir() -> None:
     result = ChatResult(
         answer="旧客户端仍然只读取 answer/sources/confidence。",

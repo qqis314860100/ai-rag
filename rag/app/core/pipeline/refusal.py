@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 from ...schemas.models import AnswerQueryRewrite, AnswerWarning
-from .retrieve import _has_context_conflict
+from .retrieve import _context_conflict_candidates
 from .rewrite import _dedupe_preserve_order, _knowledge_asset_trace
 
 REFUSAL_ANSWER = "根据当前知识库信息，我暂时无法确认该问题。"
@@ -51,11 +51,12 @@ def _assess_insufficient_context(
             citation_ids=[str(source.get("id") or source.get("chunk_id") or "") for source in sources if source.get("id") or source.get("chunk_id")],
         ))
 
-    if _has_context_conflict(query, hits):
-        reasons.append("context_conflict")
+    conflict_candidates = _context_conflict_candidates(query, hits)
+    if conflict_candidates:
         warnings.append(AnswerWarning(
             code="context_conflict",
-            message="检索上下文存在互相冲突的表述，需要人工核对原文。",
+            message="检索上下文存在可能冲突的表述，回答时需要基于引用谨慎区分。",
+            severity="info",
         ))
 
     return EvidenceAssessment(
@@ -71,5 +72,10 @@ def _assess_insufficient_context(
                 "min_answer_confidence": MIN_ANSWER_CONFIDENCE,
             },
             "knowledge_assets": _knowledge_asset_trace(knowledge_assets or []),
+            "conflict_assessment": {
+                "status": "candidate" if conflict_candidates else "none",
+                "hard_refusal": False,
+                "candidates": conflict_candidates,
+            },
         },
     )

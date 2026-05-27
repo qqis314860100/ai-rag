@@ -234,6 +234,7 @@ def chat_stream(request: ChatRequest):
 
     async def generate():
         try:
+            yield f"data: {_sse_json({'type': 'stage', 'stage': 'accepted', 'message': 'RAG 流式请求已接收。'})}\n\n"
             # 1. Search
             matched_assets = [
                 asset for asset in request.knowledge_assets
@@ -255,9 +256,7 @@ def chat_stream(request: ChatRequest):
             # Send search metadata
             yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})}\n\n"
 
-            # 2. Build prompt
             from ..llm.prompt_builder import build_messages, extract_sources
-            messages = build_messages(request.query, hits, request.history, pipeline.config.rag_max_context_chars)
             sources = extract_sources(hits)
             confidence = _estimate_confidence(request.query, hits, request.filters, matched_assets)
             refusal = _assess_insufficient_context(
@@ -292,6 +291,15 @@ def chat_stream(request: ChatRequest):
                 yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': answer_ir.confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
                 return
 
+            # 2. Build prompt
+            messages = build_messages(
+                request.query,
+                hits,
+                request.history,
+                pipeline.config.rag_max_context_chars,
+                evidence_warnings=refusal.warnings,
+            )
+
             # 3. Stream LLM
             from ..llm.client import chat_stream as llm_stream
             full_answer = ""
@@ -314,6 +322,7 @@ def chat_stream(request: ChatRequest):
                         rewritten_query=rewritten_query,
                         query_rewrite=query_rewrite,
                         confidence=confidence,
+                        warnings=refusal.warnings,
                         metadata={"knowledge_assets": [
                             {
                                 "asset_type": str(asset.get("asset_type") or ""),
@@ -323,7 +332,7 @@ def chat_stream(request: ChatRequest):
                                 "retrieval_terms": asset.get("retrieval_terms", []),
                             }
                             for asset in matched_assets
-                        ]},
+                        ], **refusal.metadata},
                     )
                     visual_plan = plan_visual_artifacts(
                         question=request.query,

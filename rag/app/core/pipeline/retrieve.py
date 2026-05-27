@@ -94,10 +94,10 @@ def _keyword_rerank(query: str, hits: list[dict], filters: dict | None = None) -
 
 _CONFLICT_PAIRS = (
     (r"(必须|必须要|(?<!不)需要|应当)", r"(无需|不需要|禁止|严禁|不得|不应|不能)"),
-    (r"(可以|允许|可进行|可直接)", r"(禁止|严禁|不得|不能|不允许|不可)"),
+    (r"(可以|(?<!不)允许|可进行|可直接)", r"(禁止|严禁|不得|不能|不允许|不可)"),
     (r"(启用|开启|打开|接通)", r"(停用|关闭|断开|切断)"),
-    (r"(合格|正常|满足|通过)", r"(不合格|异常|不满足|失败)"),
-    (r"(高于|大于|超过|不低于|至少)", r"(低于|小于|不超过|不高于|至多)"),
+    (r"((?<!不)合格|正常|(?<!不)满足|(?<!不)通过)", r"(不合格|异常|不满足|失败|不通过)"),
+    (r"((?<!不)高于|大于|(?<!不)超过|不低于|至少)", r"((?<!不)低于|小于|不超过|不高于|至多)"),
 )
 
 _CONFLICT_MODAL_PATTERN = re.compile(
@@ -124,40 +124,60 @@ _CONFLICT_TOKEN_STOPWORDS = {
 
 
 def _has_context_conflict(query: str, hits: list[dict]) -> bool:
+    return bool(_context_conflict_candidates(query, hits))
+
+
+def _context_conflict_candidates(query: str, hits: list[dict], limit: int = 3) -> list[dict]:
     if len(hits) < 2:
-        return False
+        return []
 
     query_terms = _extract_query_terms(query, limit=8)
     relevant_sentences = [
-        sentence
+        {
+            "text": sentence,
+            "chunk_id": str(hit.get("chunk_id") or ""),
+            "document_title": str(hit.get("document_title") or ""),
+            "section_path": str(hit.get("section_path") or ""),
+        }
         for hit in hits[:4]
         for sentence in _split_claim_sentences(_hit_text(hit, include_content=True))
         if not query_terms or _term_coverage_score(query_terms, sentence) >= 0.08
     ]
     if len(relevant_sentences) < 2:
-        return False
+        return []
 
+    candidates: list[dict] = []
     for pair_index, (positive_pattern, negative_pattern) in enumerate(_CONFLICT_PAIRS):
         positive_claims = [
-            sentence
-            for sentence in relevant_sentences
-            if re.search(positive_pattern, sentence)
+            claim
+            for claim in relevant_sentences
+            if re.search(positive_pattern, claim["text"])
         ]
         negative_claims = [
-            sentence
-            for sentence in relevant_sentences
-            if re.search(negative_pattern, sentence)
+            claim
+            for claim in relevant_sentences
+            if re.search(negative_pattern, claim["text"])
         ]
-        for positive_sentence in positive_claims:
-            for negative_sentence in negative_claims:
+        for positive_claim in positive_claims:
+            for negative_claim in negative_claims:
+                positive_sentence = positive_claim["text"]
+                negative_sentence = negative_claim["text"]
+                if positive_claim["chunk_id"] == negative_claim["chunk_id"] and positive_sentence == negative_sentence:
+                    continue
                 if _is_same_claim_conflict(
                     positive_sentence,
                     negative_sentence,
                     query_terms=query_terms,
                     pair_index=pair_index,
                 ):
-                    return True
-    return False
+                    candidates.append({
+                        "positive": positive_claim,
+                        "negative": negative_claim,
+                        "confidence": "candidate",
+                    })
+                    if len(candidates) >= limit:
+                        return candidates
+    return candidates
 
 
 def _split_claim_sentences(text: str) -> list[str]:

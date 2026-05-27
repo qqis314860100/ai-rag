@@ -284,6 +284,8 @@ class RagPipeline:
             max_context_chars=self.config.rag_max_context_chars,
             temperature=self.config.rag_temperature,
             llm_chat_fn=llm_chat,
+            evidence_warnings=refusal.warnings,
+            evidence_metadata=refusal.metadata,
         )
         logger.info("rag_pipeline_timing %s", safe_log_json(result["trace"].get("stage_timings_ms", {})))
         return result

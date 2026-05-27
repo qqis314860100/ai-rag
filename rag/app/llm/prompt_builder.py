@@ -1,14 +1,15 @@
 from ..core.source_metadata import build_source_metadata
-from ..schemas.models import SourceMetadata
+from ..schemas.models import AnswerWarning, SourceMetadata
 
 SYSTEM_PROMPT = """你是企业电池产线知识库助手。
 你只能基于给定的知识库上下文回答问题。
 
 ## 回答规则
-1. 如果上下文信息不足，明确说明"根据当前知识库信息，我暂时无法确认该问题"，不编造。
-2. 涉及工艺参数、安全防护、设备维护时，必须谨慎，不提供未经依据的操作建议。
-3. 答案必须标注引用来源，格式为：[来源 N] 文档：《文档名》章节：章节路径。
-4. 优先回答用户明确问到的知识点，不主动扩展到无关背景；如果问题很具体，先用 1 句话给结论，再列 2-5 条依据。
+1. 只要上下文中有可引用证据，就先回答可确认的部分；缺失的部分单独写“知识库未提供...”，不要用整题拒答开头。
+2. 只有在没有任何有效引用、没有任何可确认信息时，才明确说明"根据当前知识库信息，我暂时无法确认该问题"。
+3. 涉及工艺参数、安全防护、设备维护时，必须谨慎，不提供未经依据的操作建议。
+4. 答案必须标注引用来源，格式为：[来源 N] 文档：《文档名》章节：章节路径。
+5. 优先回答用户明确问到的知识点，不主动扩展到无关背景；如果问题很具体，先用 1 句话给结论，再列 2-5 条依据。
 
 ## 输出格式
 - 当用户只询问单个概念、标准、阈值、原因或结论时，使用"结论 + 依据"的短答结构，不要写长篇综述。
@@ -27,6 +28,7 @@ def build_messages(
     context_chunks: list[dict],
     history: list[dict[str, str]] | None = None,
     max_context_chars: int = 12000,
+    evidence_warnings: list[AnswerWarning] | None = None,
 ) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -65,8 +67,24 @@ def build_messages(
 
     messages.append({
         "role": "system",
-        "content": f"以下是知识库中检索到的相关上下文：\n\n{context_text}\n\n---\n请基于以上上下文回答用户问题。如果上下文不足，请明确说明。",
+        "content": (
+            f"以下是知识库中检索到的相关上下文：\n\n{context_text}\n\n---\n"
+            "请基于以上上下文回答用户问题。有证据的部分正常回答；证据未覆盖的部分说明“知识库未提供...”。"
+            "不要把部分缺失写成整题拒答。"
+        ),
     })
+
+    warning_text = _format_evidence_warnings(evidence_warnings or [])
+    if warning_text:
+        messages.append({
+            "role": "system",
+            "content": (
+                "检索风险提示：\n"
+                f"{warning_text}\n"
+                "这些提示不是最终结论。请只基于引用证据回答：能被一致支持的部分正常回答；"
+                "如果同一对象、动作或参数确有差异，请明确列出差异来源，不要编造折中结论。"
+            ),
+        })
 
     # Add history if present
     if history:
@@ -80,6 +98,16 @@ def build_messages(
     messages.append({"role": "user", "content": query})
 
     return messages
+
+
+def _format_evidence_warnings(warnings: list[AnswerWarning]) -> str:
+    lines: list[str] = []
+    for warning in warnings:
+        if warning.code == "context_conflict":
+            lines.append("- 检索片段可能存在冲突表述，请核对是否为同一对象、动作或参数。")
+        elif warning.severity in {"warning", "error"}:
+            lines.append(f"- {warning.message}")
+    return "\n".join(lines[:4])
 
 
 def format_chunks_for_debug(chunks: list[dict]) -> list[dict]:

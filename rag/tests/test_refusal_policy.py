@@ -80,7 +80,7 @@ def test_chat_refuses_weak_evidence_with_structured_reason(monkeypatch) -> None:
     assert result["sources"][0]["chunk_id"] == "chunk-1"
 
 
-def test_chat_refuses_context_conflict(monkeypatch) -> None:
+def test_chat_warns_context_conflict_without_hard_refusal(monkeypatch) -> None:
     def fake_search(self, query, top_k, allowed_security_levels, filters=None):
         return {
             "latency_ms": 3,
@@ -90,11 +90,17 @@ def test_chat_refuses_context_conflict(monkeypatch) -> None:
             ],
         }
 
-    def fail_llm_chat(messages, temperature=0.2):
-        raise AssertionError("上下文冲突时不应调用 LLM")
+    captured_messages: list[dict] = []
+
+    def fake_llm_chat(messages, temperature=0.2):
+        captured_messages.extend(messages)
+        return {
+            "content": "资料存在差异：部分来源要求接地前检查接地线连续性，另有来源表述为不需要检查；请以受控版本为准。",
+            "latency_ms": 5,
+        }
 
     monkeypatch.setattr(RagPipeline, "search", fake_search)
-    monkeypatch.setattr(pipeline_module, "llm_chat", fail_llm_chat)
+    monkeypatch.setattr(pipeline_module, "llm_chat", fake_llm_chat)
 
     result = RagPipeline().chat(
         query="绝缘测试夹具接地前是否需要检查接地线连续性？",
@@ -102,11 +108,14 @@ def test_chat_refuses_context_conflict(monkeypatch) -> None:
         allowed_security_levels=["internal"],
     )
 
-    assert result["answer_ir"]["status"] == "insufficient_context"
-    assert result["confidence"] == 0
-    assert result["answer_ir"]["confidence"] == 0
-    assert "context_conflict" in result["answer_ir"]["metadata"]["refusal_reasons"]
-    assert result["followups"]
+    warning_codes = [warning["code"] for warning in result["answer_ir"]["warnings"]]
+    assert result["answer"] != REFUSAL_ANSWER
+    assert result["answer_ir"]["status"] in ("answered", "partial")
+    assert result["confidence"] > 0
+    assert "context_conflict" in warning_codes
+    assert result["answer_ir"]["metadata"]["refusal_reasons"] == []
+    assert result["answer_ir"]["metadata"]["conflict_assessment"]["status"] == "candidate"
+    assert any("检索风险提示" in message["content"] for message in captured_messages)
 
 
 def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypatch) -> None:
@@ -149,6 +158,37 @@ def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypa
     assert "context_conflict" not in warning_codes
 
 
+def test_chat_allows_negative_status_terms_without_self_conflict(monkeypatch) -> None:
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+        return {
+            "latency_ms": 3,
+            "results": [
+                _hit(0.82, "模组EOL测试不合格的模组进入待处理区，需记录条码和测试项目。", "chunk-a"),
+                _hit(0.78, "气密终检不合格时，Pack需要复检并隔离等待处理。", "chunk-b"),
+            ],
+        }
+
+    def fake_llm_chat(messages, temperature=0.2):
+        return {
+            "content": "模组EOL测试包括测试执行、结果判定和不合格品处理；不合格模组需进入待处理区并记录条码和项目。",
+            "latency_ms": 5,
+        }
+
+    monkeypatch.setattr(RagPipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline_module, "llm_chat", fake_llm_chat)
+
+    result = RagPipeline().chat(
+        query="模组 EOL 测试",
+        top_k=2,
+        allowed_security_levels=["internal"],
+    )
+
+    assert result["answer"] != REFUSAL_ANSWER
+    assert result["answer_ir"]["status"] in ("answered", "partial")
+    warning_codes = [warning["code"] for warning in result["answer_ir"]["warnings"]]
+    assert "context_conflict" not in warning_codes
+
+
 def test_stream_chat_emits_structured_refusal_without_llm(monkeypatch) -> None:
     def fake_search(query, top_k, allowed_security_levels, filters=None):
         return {"latency_ms": 2, "results": []}
@@ -171,7 +211,8 @@ def test_stream_chat_emits_structured_refusal_without_llm(monkeypatch) -> None:
         for line in response.text.splitlines()
         if line.startswith("data: ")
     ]
-    assert events[1] == {"type": "token", "content": REFUSAL_ANSWER}
-    assert events[2]["type"] == "done"
-    assert events[2]["answer_ir"]["status"] == "insufficient_context"
-    assert "low_information" in events[2]["answer_ir"]["metadata"]["refusal_reasons"]
+    refusal_token = next(event for event in events if event.get("type") == "token")
+    done_event = next(event for event in events if event.get("type") == "done")
+    assert refusal_token == {"type": "token", "content": REFUSAL_ANSWER}
+    assert done_event["answer_ir"]["status"] == "insufficient_context"
+    assert "low_information" in done_event["answer_ir"]["metadata"]["refusal_reasons"]
