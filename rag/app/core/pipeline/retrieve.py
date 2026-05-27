@@ -93,12 +93,34 @@ def _keyword_rerank(query: str, hits: list[dict], filters: dict | None = None) -
 
 
 _CONFLICT_PAIRS = (
-    (r"(必须|必须要|(?<!不)需要|应当)", r"(无需|不需要|禁止|不得|不应|不能)"),
-    (r"(可以|允许|可进行|可直接)", r"(禁止|不得|不能|不允许|不可)"),
+    (r"(必须|必须要|(?<!不)需要|应当)", r"(无需|不需要|禁止|严禁|不得|不应|不能)"),
+    (r"(可以|允许|可进行|可直接)", r"(禁止|严禁|不得|不能|不允许|不可)"),
     (r"(启用|开启|打开|接通)", r"(停用|关闭|断开|切断)"),
     (r"(合格|正常|满足|通过)", r"(不合格|异常|不满足|失败)"),
     (r"(高于|大于|超过|不低于|至少)", r"(低于|小于|不超过|不高于|至多)"),
 )
+
+_CONFLICT_MODAL_PATTERN = re.compile(
+    r"(必须要|必须|应当|无需|不需要|需要|禁止|严禁|不得|不应|不能|不允许|不可|"
+    r"可以|允许|可进行|可直接|启用|开启|打开|接通|停用|关闭|断开|切断|"
+    r"合格|正常|满足|通过|不合格|异常|不满足|失败|"
+    r"高于|大于|超过|不低于|至少|低于|小于|不超过|不高于|至多)"
+)
+
+_CONFLICT_TOKEN_STOPWORDS = {
+    "测试",
+    "过程",
+    "过程中",
+    "进行",
+    "确认",
+    "相关",
+    "要求",
+    "标准",
+    "注意",
+    "事项",
+    "安全",
+    "操作",
+}
 
 
 def _has_context_conflict(query: str, hits: list[dict]) -> bool:
@@ -106,20 +128,92 @@ def _has_context_conflict(query: str, hits: list[dict]) -> bool:
         return False
 
     query_terms = _extract_query_terms(query, limit=8)
-    relevant_texts = [
-        _hit_text(hit, include_content=True)
+    relevant_sentences = [
+        sentence
         for hit in hits[:4]
-        if not query_terms or _term_coverage_score(query_terms, _hit_text(hit, include_content=True)) >= 0.15
+        for sentence in _split_claim_sentences(_hit_text(hit, include_content=True))
+        if not query_terms or _term_coverage_score(query_terms, sentence) >= 0.08
     ]
-    if len(relevant_texts) < 2:
+    if len(relevant_sentences) < 2:
         return False
 
-    for positive_pattern, negative_pattern in _CONFLICT_PAIRS:
-        positive_seen = any(re.search(positive_pattern, text) for text in relevant_texts)
-        negative_seen = any(re.search(negative_pattern, text) for text in relevant_texts)
-        if positive_seen and negative_seen:
-            return True
+    for pair_index, (positive_pattern, negative_pattern) in enumerate(_CONFLICT_PAIRS):
+        positive_claims = [
+            sentence
+            for sentence in relevant_sentences
+            if re.search(positive_pattern, sentence)
+        ]
+        negative_claims = [
+            sentence
+            for sentence in relevant_sentences
+            if re.search(negative_pattern, sentence)
+        ]
+        for positive_sentence in positive_claims:
+            for negative_sentence in negative_claims:
+                if _is_same_claim_conflict(
+                    positive_sentence,
+                    negative_sentence,
+                    query_terms=query_terms,
+                    pair_index=pair_index,
+                ):
+                    return True
     return False
+
+
+def _split_claim_sentences(text: str) -> list[str]:
+    chunks = re.split(r"[。！？!?；;，,\n]+", text)
+    return [chunk.strip() for chunk in chunks if len(chunk.strip()) >= 6]
+
+
+def _is_same_claim_conflict(
+    positive_sentence: str,
+    negative_sentence: str,
+    *,
+    query_terms: list[str],
+    pair_index: int,
+) -> bool:
+    positive_tokens = _claim_tokens(positive_sentence)
+    negative_tokens = _claim_tokens(negative_sentence)
+    if not positive_tokens or not negative_tokens:
+        return False
+
+    shared_tokens = positive_tokens & negative_tokens
+    if not shared_tokens:
+        return False
+
+    query_token_set = set(query_terms)
+    if query_token_set:
+        query_overlap = shared_tokens & query_token_set
+        if not query_overlap and _term_coverage_score(query_terms, positive_sentence + negative_sentence) < 0.18:
+            return False
+
+    overlap_ratio = len(shared_tokens) / max(min(len(positive_tokens), len(negative_tokens)), 1)
+    shared_specific_tokens = [
+        token for token in shared_tokens
+        if len(token) >= 3 or re.search(r"[A-Za-z0-9]", token)
+    ]
+
+    # 安全章节经常同时出现“必须培训”和“禁止进入”等不同动作，只有对象/动作高度一致才视为冲突。
+    if pair_index in (0, 1):
+        return overlap_ratio >= 0.5 and len(shared_specific_tokens) >= 2
+    return overlap_ratio >= 0.45 and bool(shared_specific_tokens)
+
+
+def _claim_tokens(sentence: str) -> set[str]:
+    normalized = _CONFLICT_MODAL_PATTERN.sub(" ", sentence.lower())
+    tokens: set[str] = set()
+
+    for token in re.findall(r"[a-z][a-z0-9_-]{1,}", normalized):
+        if token not in _CONFLICT_TOKEN_STOPWORDS:
+            tokens.add(token)
+
+    for phrase in re.findall(r"[\u4e00-\u9fff]{2,}", normalized):
+        for size in (4, 3, 2):
+            for index in range(0, len(phrase) - size + 1):
+                token = phrase[index:index + size]
+                if token not in _CONFLICT_TOKEN_STOPWORDS:
+                    tokens.add(token)
+    return tokens
 
 
 _QUERY_STOPWORDS = (

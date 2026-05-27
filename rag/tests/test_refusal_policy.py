@@ -109,6 +109,46 @@ def test_chat_refuses_context_conflict(monkeypatch) -> None:
     assert result["followups"]
 
 
+def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypatch) -> None:
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+        return {
+            "latency_ms": 3,
+            "results": [
+                _hit(
+                    0.86,
+                    "EOL测试柜涉及高压操作，操作人员必须经过高压安全培训。测试过程中严禁人员进入测试区域。",
+                    "chunk-a",
+                ),
+                _hit(
+                    0.83,
+                    "Pack EOL下线前需要确认绝缘防护，禁止在高压指示灯亮起时打开防护门。",
+                    "chunk-b",
+                ),
+            ],
+        }
+
+    def fake_llm_chat(messages, temperature=0.2):
+        return {
+            "content": "EOL测试安全注意事项包括高压安全培训、确认绝缘防护、禁止人员进入测试区域，并避免高压指示灯亮起时打开防护门。",
+            "latency_ms": 5,
+        }
+
+    monkeypatch.setattr(RagPipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline_module, "llm_chat", fake_llm_chat)
+
+    result = RagPipeline().chat(
+        query="EOL测试安全注意事项有哪些？",
+        top_k=2,
+        allowed_security_levels=["internal"],
+    )
+
+    assert result["answer"] != REFUSAL_ANSWER
+    assert result["answer_ir"]["status"] in ("answered", "partial")
+    assert result["confidence"] > 0
+    warning_codes = [warning["code"] for warning in result["answer_ir"]["warnings"]]
+    assert "context_conflict" not in warning_codes
+
+
 def test_stream_chat_emits_structured_refusal_without_llm(monkeypatch) -> None:
     def fake_search(query, top_k, allowed_security_levels, filters=None):
         return {"latency_ms": 2, "results": []}
