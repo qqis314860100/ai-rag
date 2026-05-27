@@ -51,6 +51,21 @@ def test_answer_ir_marks_missing_citations_as_insufficient_context() -> None:
     assert ir.warnings[0].code == "no_citations"
 
 
+def test_answer_ir_refusal_phrase_zeroes_answer_confidence_with_sources() -> None:
+    ir = AnswerIR.from_chat(
+        answer="根据当前知识库信息，我暂时无法确认该问题。",
+        sources=[_source()],
+        original_query="EOL测试",
+        rewritten_query="EOL测试",
+        confidence=0.82,
+    )
+
+    assert ir.status == "insufficient_context"
+    assert ir.confidence == 0
+    assert ir.claims == []
+    assert len(ir.citations) == 1
+
+
 def test_chat_result_keeps_legacy_payload_compatible_without_answer_ir() -> None:
     result = ChatResult(
         answer="旧客户端仍然只读取 answer/sources/confidence。",

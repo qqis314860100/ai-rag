@@ -73,6 +73,8 @@ def test_chat_refuses_weak_evidence_with_structured_reason(monkeypatch) -> None:
 
     warning_codes = [warning["code"] for warning in result["answer_ir"]["warnings"]]
     assert result["answer_ir"]["status"] == "insufficient_context"
+    assert result["confidence"] == 0
+    assert result["answer_ir"]["confidence"] == 0
     assert "insufficient_evidence" in warning_codes
     assert result["answer_ir"]["metadata"]["refusal_reason"] == "insufficient_evidence"
     assert result["sources"][0]["chunk_id"] == "chunk-1"
@@ -101,6 +103,8 @@ def test_chat_refuses_context_conflict(monkeypatch) -> None:
     )
 
     assert result["answer_ir"]["status"] == "insufficient_context"
+    assert result["confidence"] == 0
+    assert result["answer_ir"]["confidence"] == 0
     assert "context_conflict" in result["answer_ir"]["metadata"]["refusal_reasons"]
     assert result["followups"]
 

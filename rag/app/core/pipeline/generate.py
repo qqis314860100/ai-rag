@@ -49,7 +49,7 @@ def _build_answer_chat_result(
         question=query,
         answer=llm_result["content"],
         sources=sources,
-        confidence=confidence,
+        confidence=answer_ir.confidence,
         answer_status=answer_ir.status,
     )
     visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(knowledge_assets)
@@ -67,7 +67,7 @@ def _build_answer_chat_result(
         "message_id": "",
         "answer": llm_result["content"],
         "sources": sources,
-        "confidence": confidence,
+        "confidence": answer_ir.confidence,
         "followups": _suggest_followups(query, hits),
         "trace": {
             "rewrite_ms": stage_timings_ms.get("rewrite_ms", 0),
@@ -118,7 +118,7 @@ def _build_refusal_chat_result(
         question=query,
         answer=REFUSAL_ANSWER,
         sources=sources,
-        confidence=confidence,
+        confidence=answer_ir.confidence,
         answer_status=answer_ir.status,
     )
     visual_plan.metadata["knowledge_assets"] = _knowledge_asset_trace(knowledge_assets or [])
@@ -135,7 +135,7 @@ def _build_refusal_chat_result(
         "message_id": "",
         "answer": REFUSAL_ANSWER,
         "sources": sources,
-        "confidence": confidence,
+        "confidence": answer_ir.confidence,
         "followups": _suggest_followups(query, hits) if sources else [],
         "trace": {
             "rewrite_ms": stage_timings_ms.get("rewrite_ms", 0),

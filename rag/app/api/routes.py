@@ -285,11 +285,11 @@ def chat_stream(request: ChatRequest):
                     question=request.query,
                     answer=REFUSAL_ANSWER,
                     sources=sources,
-                    confidence=confidence,
+                    confidence=answer_ir.confidence,
                     answer_status=answer_ir.status,
                 )
                 visual_plan.metadata["knowledge_assets"] = answer_ir.metadata.get("knowledge_assets", [])
-                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
+                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': answer_ir.confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
                 return
 
             # 3. Stream LLM
@@ -329,14 +329,14 @@ def chat_stream(request: ChatRequest):
                         question=request.query,
                         answer=full_answer,
                         sources=sources,
-                        confidence=confidence,
+                        confidence=answer_ir.confidence,
                         answer_status=answer_ir.status,
                     )
                     visual_plan.metadata["knowledge_assets"] = answer_ir.metadata.get("knowledge_assets", [])
                     done_data = {
                         "type": "done",
                         "sources": sources,
-                        "confidence": confidence,
+                        "confidence": answer_ir.confidence,
                         "followups": _suggest_followups(request.query, hits),
                         "answer_ir": answer_ir.model_dump(),
                         "visual_plan": visual_plan.model_dump(),

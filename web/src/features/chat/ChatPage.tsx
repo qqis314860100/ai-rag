@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "./components/ChatThread";
 import { SessionList } from "./components/SessionList";
@@ -118,6 +118,7 @@ export default function ChatPage() {
   const sawLoadingForPendingSessionRef = useRef(false);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const scrollPositionsRef = useRef<Record<string, ChatScrollSnapshot>>(readChatScrollPositions());
+  const lastAssetStatusFetchKey = useRef("");
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
 
@@ -309,17 +310,25 @@ export default function ChatPage() {
     sawLoadingForPendingSessionRef.current = false;
   }, [activeSessionId]);
 
-  useEffect(() => {
-    const assistantIds = messages
+  const persistedAssistantMessageKey = useMemo(() => {
+    return messages
       .filter((message) => message.role === "assistant" && !message.streaming)
       .map(getActionMessageId)
-      .filter((messageId) => !isTemporaryActionMessageId(messageId));
+      .filter((messageId) => !isTemporaryActionMessageId(messageId))
+      .join(",");
+  }, [messages]);
+
+  useEffect(() => {
+    const assistantIds = persistedAssistantMessageKey ? persistedAssistantMessageKey.split(",") : [];
     if (assistantIds.length === 0) {
+      lastAssetStatusFetchKey.current = "";
       setAssetDraftStatusByMessage({});
       return;
     }
+    if (lastAssetStatusFetchKey.current === persistedAssistantMessageKey) return;
 
     let active = true;
+    lastAssetStatusFetchKey.current = persistedAssistantMessageKey;
     api.get<{ data: Record<string, { card?: string; faq?: string }> }>(
       `/knowledge/assets/status-by-message?message_ids=${assistantIds.map(encodeURIComponent).join(",")}`
     )
@@ -333,7 +342,7 @@ export default function ChatPage() {
     return () => {
       active = false;
     };
-  }, [messages]);
+  }, [persistedAssistantMessageKey]);
 
   useLayoutEffect(() => {
     const pendingSession = pendingScrollSessionRef.current;

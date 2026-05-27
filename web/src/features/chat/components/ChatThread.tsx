@@ -83,6 +83,17 @@ function isAnswerReadyForRefinement(message: ChatMessage) {
   return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
 }
 
+function answerStatus(message: ChatMessage) {
+  const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
+  return typeof answerSummary?.status === "string" ? answerSummary.status : "";
+}
+
+function isConfirmedAnswer(message: ChatMessage) {
+  const status = answerStatus(message);
+  if (status && status !== "answered") return false;
+  return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
+}
+
 type DiagramState = {
   loading: boolean;
   data?: ChatArtifact;
@@ -519,6 +530,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
         const userBranchActionsDisabled = loading || !canPersistUserActions;
         const canRefineAssistantAnswer = canPersistAssistantActions && isAnswerReadyForRefinement(msg);
+        const confirmedAnswer = !isUser && isConfirmedAnswer(msg);
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
         const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
@@ -697,10 +709,10 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     >
                       <FileSearch className="h-3.5 w-3.5 text-accent" />
                       <span className="text-xs text-text-secondary">
-                        查看证据
+                        {confirmedAnswer ? "查看证据" : "查看相关资料"}
                         <span className="font-semibold text-accent ml-1">{msg.sources.length}</span> 条
                       </span>
-                      {msg.confidence !== undefined && msg.confidence > 0 && (
+                      {confirmedAnswer && msg.confidence !== undefined && msg.confidence > 0 && (
                         <span className={`text-[11px] font-semibold ml-1 px-1.5 py-0.5 rounded-full ${
                           msg.confidence >= 0.8 ? "bg-success/10 text-success" :
                           msg.confidence >= 0.6 ? "bg-accent/10 text-accent" :

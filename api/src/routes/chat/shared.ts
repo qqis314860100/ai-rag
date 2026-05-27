@@ -180,12 +180,20 @@ function buildAnswerIrSummary(answerIr: RagAnswerIR | null | undefined) {
   };
 }
 
+function displayConfidence(input: AnswerMessageMetadataInput): number {
+  if (input.answerIr?.status && input.answerIr.status !== "answered") return 0;
+  if (typeof input.answerIr?.confidence === "number") return input.answerIr.confidence;
+  return input.confidence ?? 0;
+}
+
 export function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<string, unknown> {
   const queryRewrite = input.answerIr?.query_rewrite ?? input.queryRewrite ?? null;
   const rewrittenQuestion = queryRewrite?.rewritten_query || input.originalQuestion;
+  const confidence = displayConfidence(input);
 
   return {
-    confidence: input.confidence,
+    confidence,
+    retrieval_confidence: input.confidence ?? null,
     followups: input.followups,
     trace: input.trace,
     query: {

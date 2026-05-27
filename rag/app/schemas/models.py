@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Mapping
 from pydantic import AliasChoices, BaseModel, Field
 from ..core.source_metadata import build_source_metadata
@@ -404,13 +405,14 @@ class AnswerIR(BaseModel):
         citations = [AnswerCitation.from_source(source, index) for index, source in enumerate(sources, 1)]
         normalized_confidence = _clamp_confidence(confidence)
         derived_status = status or _derive_answer_status(answer, citations, normalized_confidence)
+        answer_confidence = 0.0 if derived_status == "insufficient_context" else normalized_confidence
         claim_text = _extract_primary_claim(answer)
         claims = [
             AnswerClaim(
                 id="claim-1",
                 text=claim_text,
                 citation_ids=[citation.id for citation in citations],
-                confidence=normalized_confidence,
+                confidence=answer_confidence,
             )
         ] if claim_text and derived_status != "insufficient_context" else []
         derived_warnings = list(warnings or [])
@@ -419,7 +421,7 @@ class AnswerIR(BaseModel):
                 code="no_citations",
                 message="当前回答没有可用引用，不能作为可追溯结论。",
             ))
-        if normalized_confidence > 0 and normalized_confidence < 0.6:
+        if answer_confidence > 0 and answer_confidence < 0.6:
             derived_warnings.append(AnswerWarning(
                 code="low_confidence",
                 message="当前回答置信度较低，需要人工核对原文。",
@@ -445,7 +447,7 @@ class AnswerIR(BaseModel):
             claims=claims,
             citations=citations,
             query_rewrite=rewrite,
-            confidence=normalized_confidence,
+            confidence=answer_confidence,
             warnings=derived_warnings,
             metadata=metadata or {},
         )
@@ -563,8 +565,15 @@ def _clamp_confidence(value: Any) -> float:
     return max(0.0, min(1.0, _coerce_float(value)))
 
 
+REFUSAL_ANSWER_PATTERN = re.compile(
+    r"(?:暂时无法确认|无法确认|无法回答|没有足够(?:信息|证据)|信息不足|不能确定|请补充|问题不够具体)"
+)
+
+
 def _derive_answer_status(answer: str, citations: list[AnswerCitation], confidence: float) -> AnswerStatus:
     if not answer.strip() or not citations:
+        return "insufficient_context"
+    if REFUSAL_ANSWER_PATTERN.search(answer):
         return "insufficient_context"
     if confidence > 0 and confidence < 0.6:
         return "partial"
