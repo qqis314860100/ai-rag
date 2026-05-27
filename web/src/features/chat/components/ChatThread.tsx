@@ -546,18 +546,19 @@ export default function ChatThread({ messages, loading, streamingContent, stream
               {isUser ? (
                 editingMsgId === msg.id ? (
                   /* Edit mode */
-                  <div className="flex flex-col gap-2">
+                  <div className="relative w-[min(80vw,28rem)] rounded-[22px] border border-accent/70 bg-[#F3F1EE] px-4 pb-12 pt-3 shadow-sm-soft">
                     <textarea value={editValue} onChange={(e) => setEditValue(e.target.value)}
+                      rows={4}
                       onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgId(null); }}
-                      className="w-full min-h-[80px] px-4 py-3 text-[15px] leading-relaxed border border-border rounded-2xl bg-surface-page focus:outline-none focus:border-accent resize-none"
+                      className="block max-h-[40vh] min-h-[6.5rem] w-full resize-none overflow-y-auto bg-transparent p-0 text-[15px] leading-relaxed text-text outline-none placeholder:text-text-muted"
                       autoFocus />
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
                       <button onClick={() => setEditingMsgId(null)}
-                        className="p-2 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors" title="取消">
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-white/70 hover:text-text" title="取消">
                         <X className="h-4 w-4" />
                       </button>
                       <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} disabled={!editValue.trim()}
-                        className="p-2 rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-40 transition-colors" title="确认">
+                        className="flex h-9 w-9 items-center justify-center rounded-full bg-[#3F3B37] text-white shadow-sm-soft transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40" title="确认">
                         <Check className="h-4 w-4" />
                       </button>
                     </div>
