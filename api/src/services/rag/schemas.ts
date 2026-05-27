@@ -1,0 +1,213 @@
+import { z } from "zod";
+import { AppError, ErrorCodes } from "../../utils/errors";
+
+const unknownRecordSchema = z.record(z.unknown());
+
+const ragSearchResultSchema = z.object({
+  chunk_id: z.string(),
+  document_id: z.string(),
+  document_title: z.string(),
+  section_path: z.string().optional(),
+  page_number: z.number().optional(),
+  content: z.string(),
+  score: z.number(),
+  metadata: unknownRecordSchema.default({}),
+}).passthrough();
+
+const ragAnswerWarningSchema = z.object({
+  code: z.string().optional(),
+  message: z.string().optional(),
+  severity: z.string().optional(),
+  citation_ids: z.array(z.string()).optional(),
+}).passthrough();
+
+const ragAnswerIRSchema = z.object({
+  schema_version: z.string().optional(),
+  status: z.string().optional(),
+  claims: z.array(z.object({
+    id: z.string().optional(),
+    text: z.string().optional(),
+    citation_ids: z.array(z.string()).optional(),
+    confidence: z.number().optional(),
+    kind: z.string().optional(),
+  }).passthrough()).optional(),
+  citations: z.array(z.object({
+    id: z.string().optional(),
+    source_index: z.number().optional(),
+    chunk_id: z.string().optional(),
+    document_id: z.string().optional(),
+    document_title: z.string().optional(),
+    section_path: z.string().optional(),
+    page_number: z.number().optional(),
+    score: z.number().optional(),
+  }).passthrough()).optional(),
+  query_rewrite: z.object({
+    original_query: z.string().optional(),
+    rewritten_query: z.string().optional(),
+    changed: z.boolean().optional(),
+    strategy: z.string().optional(),
+    reason: z.string().optional(),
+    signals: z.array(z.string()).optional(),
+    history_turns: z.number().optional(),
+  }).passthrough().optional(),
+  confidence: z.number().optional(),
+  warnings: z.array(ragAnswerWarningSchema).optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
+const ragVisualPlanSchema = z.object({
+  schema_version: z.string().optional(),
+  can_generate: z.boolean().optional(),
+  artifacts: z.array(z.object({
+    type: z.string(),
+    artifact_type: z.string().optional(),
+    auto_generate: z.boolean().optional(),
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    confidence: z.number().optional(),
+    priority: z.number().optional(),
+    source_ids: z.array(z.string()).optional(),
+    metadata: unknownRecordSchema.optional(),
+  }).passthrough()).optional(),
+  warnings: z.array(ragAnswerWarningSchema).optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
+export const ragChatResponseSchema = z.object({
+  answer: z.string(),
+  sources: z.array(ragSearchResultSchema),
+  confidence: z.number().optional(),
+  followups: z.array(z.string()).optional(),
+  trace: z.object({
+    retrieval_ms: z.number(),
+    llm_ms: z.number(),
+    total_ms: z.number(),
+    knowledge_asset_count: z.number().optional(),
+  }).passthrough().optional(),
+  answer_ir: ragAnswerIRSchema.nullable().optional(),
+  visual_plan: ragVisualPlanSchema.nullable().optional(),
+}).passthrough();
+
+const diagramWarningSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  severity: z.string().optional(),
+  node_ids: z.array(z.string()).optional(),
+  edge_ids: z.array(z.string()).optional(),
+  source_ids: z.array(z.string()).optional(),
+}).passthrough();
+
+const diagramLaneSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  order: z.number().optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
+const diagramNodeSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.string(),
+  description: z.string().optional(),
+  source_ids: z.array(z.string()),
+  metadata: unknownRecordSchema,
+}).passthrough();
+
+const diagramEdgeSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  relation: z.string(),
+  label: z.string().optional(),
+  metadata: unknownRecordSchema,
+}).passthrough();
+
+const FLOWCHART_NODE_KINDS = new Set(["start", "end", "input", "output", "step", "action", "decision", "subflow"]);
+
+export const diagramIRSchema = z.object({
+  title: z.string(),
+  objective: z.string(),
+  type: z.string(),
+  diagram_type: z.string().optional(),
+  layout_hint: z.string(),
+  nodes: z.array(diagramNodeSchema),
+  edges: z.array(diagramEdgeSchema),
+  lanes: z.array(diagramLaneSchema).optional(),
+  notes: z.array(z.string()),
+  renderer: z.string().optional(),
+  reason: z.string().optional(),
+  confidence: z.number().optional(),
+  can_generate: z.boolean().optional(),
+  quality_score: z.number().optional(),
+  quality_warnings: z.array(diagramWarningSchema).optional(),
+  validation: z.object({
+    can_generate: z.boolean().optional(),
+    quality_score: z.number().optional(),
+    warnings: z.array(diagramWarningSchema).optional(),
+    errors: z.array(diagramWarningSchema).optional(),
+    required_source_ids: z.array(z.string()).optional(),
+    covered_source_ids: z.array(z.string()).optional(),
+    missing_source_ids: z.array(z.string()).optional(),
+    citation_coverage_ratio: z.number().optional(),
+    node_count: z.number().optional(),
+    edge_count: z.number().optional(),
+  }).passthrough().nullable().optional(),
+  source_evidence: z.array(unknownRecordSchema).optional(),
+  excalidraw_scene: unknownRecordSchema.nullable().optional(),
+  metadata: unknownRecordSchema,
+}).passthrough().superRefine((diagram, ctx) => {
+  if (diagram.type !== "flowchart" || !diagram.lanes || diagram.lanes.length === 0) return;
+
+  const laneIds = new Set<string>();
+  diagram.lanes.forEach((lane, index) => {
+    if (!lane.id.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lanes", index, "id"],
+        message: "泳道 id 不能为空。",
+      });
+      return;
+    }
+    if (laneIds.has(lane.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lanes", index, "id"],
+        message: "泳道 id 必须唯一。",
+      });
+    }
+    laneIds.add(lane.id);
+  });
+
+  diagram.nodes.forEach((node, index) => {
+    if (!FLOWCHART_NODE_KINDS.has(node.kind)) return;
+    const laneId = node.metadata.lane_id;
+    if (typeof laneId !== "string" || !laneId.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nodes", index, "metadata", "lane_id"],
+        message: "带泳道的流程图节点必须声明 metadata.lane_id。",
+      });
+      return;
+    }
+    if (!laneIds.has(laneId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nodes", index, "metadata", "lane_id"],
+        message: "节点 metadata.lane_id 必须引用已声明的泳道。",
+      });
+    }
+  });
+});
+
+export function parseRagContract<T>(label: string, schema: z.ZodType<T>, payload: unknown): T {
+  const parsed = schema.safeParse(payload);
+  if (parsed.success) return parsed.data;
+
+  // RAG 契约错误必须停在 API 边界，避免坏结构继续渗到前端。
+  throw new AppError(ErrorCodes.RAG_SERVICE_ERROR, `${label} 契约校验失败。`, 502, {
+    issues: parsed.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+      code: issue.code,
+    })),
+  });
+}
