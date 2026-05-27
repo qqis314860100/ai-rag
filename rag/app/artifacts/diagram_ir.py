@@ -98,11 +98,23 @@ class StructuredDiagramEdge(BaseModel):
     label: str = ""
 
 
+class StructuredFlowSemantics(BaseModel):
+    roles: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+    decisions: list[str] = Field(default_factory=list)
+    branches: list[str] = Field(default_factory=list)
+    loops: list[str] = Field(default_factory=list)
+    final_results: list[str] = Field(default_factory=list)
+
+
 class StructuredDiagramOutput(BaseModel):
     title: str = ""
     objective: str = ""
     type: str = Field(default="mindmap", validation_alias=AliasChoices("type", "diagram_type"))
     layout_hint: str = "auto"
+    can_generate: bool = True
+    reason: str = ""
+    flow_semantics: StructuredFlowSemantics = Field(default_factory=StructuredFlowSemantics)
     nodes: list[StructuredDiagramNode] = Field(default_factory=list)
     edges: list[StructuredDiagramEdge] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -1100,6 +1112,9 @@ def _estimate_diagram_confidence(ir: DiagramIR, evidence: list[dict[str, Any]]) 
 
 
 def _build_generation_reason(ir: DiagramIR, evidence: list[dict[str, Any]]) -> str:
+    if not ir.can_generate and not ir.nodes:
+        refusal_reason = _clean_text(str(ir.metadata.get("refusal_reason") or ""), 180)
+        return refusal_reason or "回答和引用证据不足以形成明确流程，本次不生成流程图。"
     if ir.type == "mindmap":
         keyword_count = int(ir.metadata.get("keyword_count") or len([node for node in ir.nodes if node.kind == "keyword"]))
         category_count = len(ir.metadata.get("categories", [])) if isinstance(ir.metadata.get("categories"), list) else 0
@@ -1218,6 +1233,16 @@ def _build_structured_diagram_messages(
         "objective": "string",
         "type": "mindmap|flowchart",
         "layout_hint": "radial|top_to_bottom|left_to_right|auto",
+        "can_generate": True,
+        "reason": "short reason; required when can_generate is false",
+        "flow_semantics": {
+            "roles": ["operators, systems, reviewers or equipment owners mentioned by evidence"],
+            "actions": ["ordered evidence-backed actions"],
+            "decisions": ["explicit yes/no or pass/fail questions"],
+            "branches": ["main, pass, fail or exception branch summaries"],
+            "loops": ["retry, rework or fallback return paths"],
+            "final_results": ["business outcomes or terminal states"],
+        },
         "nodes": [
             {
                 "id": "stable kebab-case id",
@@ -1243,12 +1268,14 @@ def _build_structured_diagram_messages(
         "你是企业电池产线 RAG 回答的图解结构化抽取器，只能基于回答正文和引用片段生成 DiagramIR JSON。\n"
         "硬性规则：\n"
         "1. 只输出一个 JSON object，不要输出 Markdown、解释或代码块。\n"
-        "2. 节点必须是回答中的业务概念、步骤、参数、风险或动作，禁止创建 evidence/source/citation/引用 节点。\n"
-        "3. 引用只能写入节点 source_ids，source_ids 只能来自用户提供的映射。\n"
-        "4. 图要精简，节点数量不超过用户要求，标签短而具体，不要复述整段证据。\n"
-        "5. mindmap 需要一个 root 节点，并用 contains 连接分类或主题。\n"
-        "6. flowchart 优先使用 start/end/input/output/step/action/decision/subflow 节点；sequence 表达主线，condition 表达判断分支，loop 表达回流重试，fallback 表达异常或失败兜底，flows_to 仅用于旧结构兼容。\n"
-        "7. 如果证据不足以生成某个节点，不要编造。"
+        "2. 先在 flow_semantics 中抽取角色、动作、判断、分支、循环和最终结果，再据此生成 nodes/edges。\n"
+        "3. 节点必须是回答中的业务概念、步骤、参数、风险或动作，禁止创建 evidence/source/citation/引用 节点。\n"
+        "4. 引用只能写入节点 source_ids，source_ids 只能来自用户提供的映射。\n"
+        "5. 图要精简，节点数量不超过用户要求，标签短而具体，不要复述整段证据。\n"
+        "6. mindmap 需要一个 root 节点，并用 contains 连接分类或主题。\n"
+        "7. flowchart 必须先确认存在明确流程；优先使用 start/end/input/output/step/action/decision/subflow 节点；sequence 表达主线，condition 表达判断分支，loop 表达回流重试，fallback 表达异常或失败兜底，flows_to 仅用于旧结构兼容。\n"
+        "8. flowchart 的 decision 节点 label 必须是明确问题，分支边 label 要写“是/否/通过/不通过/异常/失败”等业务结果；最终结果要落到 end/output/action 节点。\n"
+        "9. 如果无法从回答和引用中形成角色、动作、判断/分支或最终结果，返回 can_generate=false、reason、空 nodes 和空 edges，不要编造流程。"
     )
     user = (
         f"目标标题：{title}\n"
@@ -1382,6 +1409,19 @@ def _filtered_source_ids(values: list[str], allowed_source_ids: list[str]) -> li
     return result
 
 
+def _flow_semantics_metadata(flow_semantics: StructuredFlowSemantics) -> dict[str, list[str]]:
+    normalized: dict[str, list[str]] = {}
+    for key, values in flow_semantics.model_dump().items():
+        cleaned_values: list[str] = []
+        for value in values:
+            cleaned = _clean_text(str(value), 96)
+            if cleaned:
+                cleaned_values.append(cleaned)
+        if cleaned_values:
+            normalized[key] = cleaned_values
+    return normalized
+
+
 def _structured_output_to_diagram_ir(
     output: StructuredDiagramOutput,
     title: str,
@@ -1392,6 +1432,38 @@ def _structured_output_to_diagram_ir(
     model: str = "",
 ) -> DiagramIR:
     max_nodes = min(max(max_steps, 2), 12)
+    semantic_extraction = _flow_semantics_metadata(output.flow_semantics)
+    if output.can_generate is False:
+        refusal_reason = _clean_text(output.reason, 180)
+        if not refusal_reason:
+            refusal_reason = next((_clean_text(note, 180) for note in output.notes if _clean_text(note, 180)), "")
+        if not refusal_reason:
+            refusal_reason = "回答和引用证据不足以形成明确流程，本次不生成流程图。"
+        ir = DiagramIR(
+            title=_clean_text(output.title or title, 64) or title,
+            objective=_clean_text(output.objective, 140) or "基于回答和引用证据判断是否可以生成结构化 Diagram IR。",
+            type=diagram_type,
+            layout_hint=output.layout_hint.strip() or ("radial" if diagram_type == "mindmap" else "top_to_bottom"),
+            can_generate=False,
+            nodes=[],
+            edges=[],
+            notes=[
+                *[_clean_text(note, 120) for note in output.notes if _clean_text(note, 120)],
+                "LLM 判断当前内容无法形成可靠流程图，未生成业务节点。",
+            ],
+            confidence=output.confidence,
+            metadata={
+                "generation_mode": "llm_structured",
+                "model": model,
+                "source_count": len(source_ids),
+                "requested_node_limit": max_nodes,
+                "structured_refusal": True,
+                "refusal_reason": refusal_reason,
+                "semantic_extraction": semantic_extraction,
+            },
+        )
+        return _attach_artifact_payload(ir, content, source_ids)
+
     used_ids: set[str] = set()
     id_map: dict[str, str] = {}
     nodes: list[DiagramNode] = []
@@ -1490,6 +1562,7 @@ def _structured_output_to_diagram_ir(
             "model": model,
             "source_count": len(source_ids),
             "requested_node_limit": max_nodes,
+            "semantic_extraction": semantic_extraction,
         },
     )
     if diagram_type == "mindmap":

@@ -142,6 +142,9 @@ def test_build_llm_diagram_ir_uses_structured_business_nodes_only() -> None:
 
 def test_build_llm_diagram_ir_preserves_flowchart_semantics_and_legacy_relations() -> None:
     def fake_chat(messages, temperature=None, response_format=None):
+        assert "角色、动作、判断、分支、循环和最终结果" in messages[0]["content"]
+        assert "can_generate=false" in messages[0]["content"]
+        assert "flow_semantics" in messages[1]["content"]
         assert "start|end|input|output|step|action|decision|subflow" in messages[1]["content"]
         assert "loop|fallback|flows_to" in messages[1]["content"]
         return {
@@ -191,6 +194,54 @@ def test_build_llm_diagram_ir_preserves_flowchart_semantics_and_legacy_relations
     assert not any(warning.code == "unknown_edge_relation" for warning in ir.validation.warnings)
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)
+
+
+def test_build_llm_diagram_ir_respects_structured_refusal_without_keyword_fallback() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        assert response_format == {"type": "json_object"}
+        return {
+            "model": "fake-flow-refusal",
+            "content": """
+            {
+              "title": "闲聊无法出流程",
+              "objective": "判断是否可以生成流程图",
+              "type": "flowchart",
+              "layout_hint": "top_to_bottom",
+              "can_generate": false,
+              "reason": "回答和引用只有评价性描述，没有可排序的动作、判断分支或最终结果。",
+              "flow_semantics": {
+                "roles": [],
+                "actions": [],
+                "decisions": [],
+                "branches": [],
+                "loops": [],
+                "final_results": []
+              },
+              "nodes": [],
+              "edges": [],
+              "notes": ["低信息拒绝生成"],
+              "confidence": 0.2
+            }
+            """,
+        }
+
+    ir = build_llm_diagram_ir(
+        title="闲聊无法出流程",
+        content="回答正文：这个问题没有提供 SOP、异常处理或审批步骤，只能给出概念性说明。",
+        source_ids=["source-a"],
+        diagram_type="flowchart",
+        llm_chat=fake_chat,
+    )
+
+    assert ir.can_generate is False
+    assert ir.nodes == []
+    assert ir.edges == []
+    assert ir.metadata["generation_mode"] == "llm_structured"
+    assert ir.metadata["structured_refusal"] is True
+    assert "动作、判断分支或最终结果" in ir.reason
+    assert ir.metadata["artifact_payload"]["can_generate"] is False
+    assert ir.excalidraw_scene is not None
+    assert ir.excalidraw_scene["elements"] == []
 
 
 def test_build_llm_diagram_ir_falls_back_when_structured_output_is_invalid() -> None:
