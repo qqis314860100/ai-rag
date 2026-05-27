@@ -21,10 +21,10 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert ir.type == "flowchart"
     assert ir.layout_hint == "top_to_bottom"
     assert ir.schema_version == "diagram-ir/v2"
-    assert ir.can_generate is True
+    assert ir.can_generate is False
     assert ir.quality_score > 0
     assert ir.validation is not None
-    assert ir.validation.can_generate is True
+    assert ir.validation.can_generate is False
     assert ir.validation.layout_suggestion.direction == "top_to_bottom"
     assert [node.id for node in ir.nodes][:3] == ["step-1", "step-2", "step-3"]
     assert any(node.kind == "decision" for node in ir.nodes)
@@ -43,13 +43,14 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert any(element["type"] == "arrow" for element in ir.excalidraw_scene["elements"])
     assert any(element["type"] == "text" and element["containerId"] == "node-step-1" for element in ir.excalidraw_scene["elements"])
     assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
-    assert ir.metadata["artifact_payload"]["can_generate"] is True
+    assert ir.metadata["artifact_payload"]["can_generate"] is False
     assert ir.metadata["artifact_payload"]["quality_score"] == ir.quality_score
     assert ir.metadata["artifact_payload"]["citation_coverage"]["coverage_ratio"] == 1.0
     assert ir.metadata["artifact_payload"]["element_count"] == len(ir.excalidraw_scene["elements"])
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)
+    assert any(error.code == "decision_branch_outgoing_required" for error in ir.validation.errors)
 
 
 def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
@@ -286,3 +287,74 @@ def test_validate_diagram_ir_rejects_invalid_edges_and_tracks_source_coverage() 
     assert result.layout_suggestion.direction == "top_to_bottom"
     assert any(error.code == "edge_endpoint_missing" for error in result.errors)
     assert any(warning.code == "missing_source_coverage" for warning in result.warnings)
+
+
+def test_validate_diagram_ir_enforces_flowchart_quality_gates() -> None:
+    ir = DiagramIR(
+        title="返工流程",
+        type="flowchart",
+        nodes=[
+            DiagramNode(id="start", label="开始接收异常", kind="start", source_ids=["source-a"]),
+            DiagramNode(id="judge", label="是否复检通过", kind="decision", source_ids=[]),
+            DiagramNode(id="repair", label="进入返修", kind="subflow", source_ids=["source-a"]),
+            DiagramNode(id="done", label="结束归档", kind="end", source_ids=["source-a"]),
+        ],
+        edges=[
+            DiagramEdge(source="start", target="judge", relation="sequence"),
+            DiagramEdge(source="judge", target="repair", relation="fallback", label="不通过"),
+            DiagramEdge(source="repair", target="judge", relation="loop"),
+            DiagramEdge(source="judge", target="done", relation="condition"),
+        ],
+        metadata={"requested_node_limit": 3},
+    )
+
+    result = validate_diagram_ir(ir, ["source-a"])
+    error_codes = {error.code for error in result.errors}
+
+    assert result.can_generate is False
+    assert "decision_branch_outgoing_required" in error_codes
+    assert "loop_edge_missing_label" in error_codes
+    assert "business_node_missing_source" in error_codes
+    assert "flowchart_node_limit_exceeded" in error_codes
+
+
+def test_build_llm_diagram_ir_records_node_limit_split_hint() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        return {
+            "model": "fake-node-limit",
+            "content": """
+            {
+              "title": "长流程",
+              "objective": "测试节点上限提示",
+              "type": "flowchart",
+              "layout_hint": "top_to_bottom",
+              "nodes": [
+                {"id": "start", "label": "开始接收工单", "kind": "start", "source_ids": ["source-a"]},
+                {"id": "check", "label": "检查夹具状态", "kind": "action", "source_ids": ["source-a"]},
+                {"id": "repair", "label": "进入返修子流程", "kind": "subflow", "source_ids": ["source-a"]},
+                {"id": "done", "label": "结束归档", "kind": "end", "source_ids": ["source-a"]}
+              ],
+              "edges": [
+                {"source": "start", "target": "check", "relation": "sequence"}
+              ],
+              "confidence": 0.8
+            }
+            """,
+        }
+
+    ir = build_llm_diagram_ir(
+        title="长流程",
+        content="回答正文：开始接收工单后检查夹具状态，再进入返修子流程并结束归档。",
+        source_ids=["source-a"],
+        diagram_type="flowchart",
+        max_steps=2,
+        llm_chat=fake_chat,
+    )
+
+    assert len(ir.nodes) == 2
+    assert ir.metadata["requested_node_limit"] == 2
+    assert ir.metadata["original_node_count"] == 4
+    assert ir.metadata["node_limit_exceeded"] is True
+    assert any("拆分为子流程" in note for note in ir.notes)
+    assert ir.validation is not None
+    assert any(warning.code == "flowchart_node_limit_exceeded" for warning in ir.validation.warnings)

@@ -324,7 +324,7 @@
 
 - [x] `rag`: 扩展 `DiagramIR` 流程图节点和边语义，支持 start/end/input/output/step/action/decision/subflow，以及 sequence/condition/loop/fallback，并保持旧 DiagramIR 兼容。
 - [x] `rag`: 升级流程图 LLM structured output prompt，要求先提取角色、动作、判断、分支、循环和最终结果；无法形成流程时返回 `can_generate=false`。
-- [ ] `rag`: 增强流程图质量校验，强制 decision 至少两条带标签出边、loop 显式标注、业务节点绑定证据、节点数量超限时提示拆子流程。
+- [x] `rag`: 增强流程图质量校验，强制 decision 至少两条带标签出边、loop 显式标注、业务节点绑定证据、节点数量超限时提示拆子流程。
 - [ ] `api`: 在 artifact 生成链路增加流程图质量门槛，低质量或低证据流程图不进入回答区，并将失败原因保存到 artifact metadata。
 - [ ] `web`: 升级流程图渲染布局，支持 top-down 主线、左右分支、异常/失败分支、回流线和分支标签，前端不写业务抽取规则。
 - [ ] `rag` / `api` / `web`: 增加最小泳道图能力，RAG 输出 lane metadata，API 校验角色归属，前端按角色分栏渲染多角色流程。

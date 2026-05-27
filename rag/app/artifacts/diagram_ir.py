@@ -169,6 +169,7 @@ _MAX_MINDMAP_CATEGORIES = 5
 _MAX_KEYWORDS_PER_CATEGORY = 4
 _ALLOWED_DIAGRAM_TYPES = {"mindmap", "flowchart", "graph"}
 _FLOWCHART_NODE_KINDS = {"start", "end", "input", "output", "step", "action", "decision", "subflow"}
+_FLOWCHART_EVIDENCE_NODE_KINDS = _FLOWCHART_NODE_KINDS | {"topic", "equipment", "parameter", "risk"}
 _ALLOWED_NODE_KINDS = {
     "root",
     "category",
@@ -182,6 +183,17 @@ _ALLOWED_NODE_KINDS = {
 }
 _ALLOWED_EDGE_RELATIONS = {"contains", "supported_by", "sequence", "condition", "loop", "fallback", "flows_to", "relates_to"}
 _STRUCTURED_OUTPUT_FORMAT = {"type": "json_object"}
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        parsed = int(value.strip())
+        return parsed if parsed > 0 else None
+    return None
 
 
 def _clean_text(value: str, max_length: int = 80) -> str:
@@ -1004,6 +1016,7 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
     node_ids: set[str] = set()
     duplicate_node_ids: set[str] = set()
     covered_sources: set[str] = set()
+    business_nodes_without_evidence: list[str] = []
 
     for node in ir.nodes:
         node_id = node.id.strip()
@@ -1018,6 +1031,13 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
         if node.kind not in _ALLOWED_NODE_KINDS:
             warnings.append(_diagram_warning("unknown_node_kind", "未知节点类型会触发默认样式兜底。", node_ids=[node.id]))
         covered_sources.update(source_id for source_id in node.source_ids if source_id)
+        if (
+            ir.type == "flowchart"
+            and required_sources
+            and node.kind in _FLOWCHART_EVIDENCE_NODE_KINDS
+            and not (set(node.source_ids) & required_sources)
+        ):
+            business_nodes_without_evidence.append(node.id)
 
     if duplicate_node_ids:
         errors.append(_diagram_warning(
@@ -1029,6 +1049,8 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
 
     seen_edges: set[tuple[str, str, str]] = set()
     duplicate_edges: set[str] = set()
+    outgoing_edges: dict[str, list[tuple[DiagramEdge, str]]] = {}
+    loop_edges_without_label: list[str] = []
     for index, edge in enumerate(ir.edges):
         edge_id = f"{edge.source}->{edge.target}:{edge.relation}:{index}"
         if not edge.source.strip() or not edge.target.strip():
@@ -1047,6 +1069,9 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
             warnings.append(_diagram_warning("self_edge", "连线不应指向自身。", edge_ids=[edge_id], node_ids=[edge.source]))
         if edge.relation not in _ALLOWED_EDGE_RELATIONS:
             warnings.append(_diagram_warning("unknown_edge_relation", "未知连线关系会触发默认连线样式兜底。", edge_ids=[edge_id]))
+        outgoing_edges.setdefault(edge.source, []).append((edge, edge_id))
+        if ir.type == "flowchart" and edge.relation == "loop" and not edge.label.strip():
+            loop_edges_without_label.append(edge_id)
         edge_key = (edge.source, edge.target, edge.relation)
         if edge_key in seen_edges:
             duplicate_edges.add(edge_id)
@@ -1062,6 +1087,49 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
         warnings.append(_diagram_warning("flowchart_without_edges", "流程图有多个节点但没有连线，流程关系不完整。"))
     if ir.type == "mindmap" and not any(node.kind == "root" for node in ir.nodes):
         warnings.append(_diagram_warning("mindmap_without_root", "思维导图缺少 root 节点，布局稳定性会下降。"))
+    if ir.type == "flowchart":
+        decision_branch_errors: list[str] = []
+        decision_branch_edge_ids: list[str] = []
+        for node in ir.nodes:
+            if node.kind != "decision":
+                continue
+            branches = outgoing_edges.get(node.id, [])
+            labeled_branches = [(edge, edge_id) for edge, edge_id in branches if edge.label.strip()]
+            if len(labeled_branches) < 2:
+                decision_branch_errors.append(node.id)
+                decision_branch_edge_ids.extend(edge_id for _edge, edge_id in branches)
+        if decision_branch_errors:
+            errors.append(_diagram_warning(
+                "decision_branch_outgoing_required",
+                "decision 节点必须至少有两条带标签出边，标签需表达是/否、通过/不通过、异常/正常等业务结果。",
+                severity="error",
+                node_ids=decision_branch_errors,
+                edge_ids=decision_branch_edge_ids,
+            ))
+        if loop_edges_without_label:
+            errors.append(_diagram_warning(
+                "loop_edge_missing_label",
+                "loop 连线必须显式标注回流、返工、重试或复检条件。",
+                severity="error",
+                edge_ids=loop_edges_without_label,
+            ))
+        if business_nodes_without_evidence:
+            errors.append(_diagram_warning(
+                "business_node_missing_source",
+                "流程图业务节点必须绑定至少一条可用来源证据 source_id。",
+                severity="error",
+                node_ids=business_nodes_without_evidence,
+            ))
+        requested_node_limit = _positive_int(ir.metadata.get("requested_node_limit"))
+        original_node_count = _positive_int(ir.metadata.get("original_node_count"))
+        if requested_node_limit and (len(ir.nodes) > requested_node_limit or (original_node_count or 0) > requested_node_limit):
+            severity = "error" if len(ir.nodes) > requested_node_limit else "warning"
+            target = errors if severity == "error" else warnings
+            target.append(_diagram_warning(
+                "flowchart_node_limit_exceeded",
+                "流程图节点数量超过上限，建议拆分为子流程或 subflow 后再生成。",
+                severity=severity,
+            ))
 
     covered_required_sources = covered_sources & required_sources if required_sources else covered_sources
     missing_sources = sorted(required_sources - covered_sources)
@@ -1275,7 +1343,9 @@ def _build_structured_diagram_messages(
         "6. mindmap 需要一个 root 节点，并用 contains 连接分类或主题。\n"
         "7. flowchart 必须先确认存在明确流程；优先使用 start/end/input/output/step/action/decision/subflow 节点；sequence 表达主线，condition 表达判断分支，loop 表达回流重试，fallback 表达异常或失败兜底，flows_to 仅用于旧结构兼容。\n"
         "8. flowchart 的 decision 节点 label 必须是明确问题，分支边 label 要写“是/否/通过/不通过/异常/失败”等业务结果；最终结果要落到 end/output/action 节点。\n"
-        "9. 如果无法从回答和引用中形成角色、动作、判断/分支或最终结果，返回 can_generate=false、reason、空 nodes 和空 edges，不要编造流程。"
+        "9. flowchart 的每个业务节点都必须绑定 source_ids；每个 decision 至少两条带标签出边；每条 loop 边必须标注回流、返工、重试或复检条件。\n"
+        "10. 如果流程超过最大节点数，优先合并为 subflow；仍无法表达时返回 can_generate=false，并在 reason 说明需要拆分子流程。\n"
+        "11. 如果无法从回答和引用中形成角色、动作、判断/分支或最终结果，返回 can_generate=false、reason、空 nodes 和空 edges，不要编造流程。"
     )
     user = (
         f"目标标题：{title}\n"
@@ -1433,6 +1503,12 @@ def _structured_output_to_diagram_ir(
 ) -> DiagramIR:
     max_nodes = min(max(max_steps, 2), 12)
     semantic_extraction = _flow_semantics_metadata(output.flow_semantics)
+    original_node_count = 0
+    for node in output.nodes:
+        label = _clean_text(node.label, 56)
+        if label and _normalize_llm_node_kind(node.kind, label, diagram_type) != "evidence":
+            original_node_count += 1
+    node_limit_exceeded = original_node_count > max_nodes
     if output.can_generate is False:
         refusal_reason = _clean_text(output.reason, 180)
         if not refusal_reason:
@@ -1457,6 +1533,8 @@ def _structured_output_to_diagram_ir(
                 "model": model,
                 "source_count": len(source_ids),
                 "requested_node_limit": max_nodes,
+                "original_node_count": original_node_count,
+                "node_limit_exceeded": node_limit_exceeded,
                 "structured_refusal": True,
                 "refusal_reason": refusal_reason,
                 "semantic_extraction": semantic_extraction,
@@ -1555,6 +1633,11 @@ def _structured_output_to_diagram_ir(
         notes=[
             *[_clean_text(note, 120) for note in output.notes if _clean_text(note, 120)],
             "LLM 仅输出业务节点，引用证据保留在节点 source_ids 和 source_evidence 中。",
+            *(
+                ["结构化节点数量超过上限，已截断；建议拆分为子流程或使用 subflow 表达。"]
+                if node_limit_exceeded
+                else []
+            ),
         ],
         confidence=output.confidence,
         metadata={
@@ -1562,6 +1645,8 @@ def _structured_output_to_diagram_ir(
             "model": model,
             "source_count": len(source_ids),
             "requested_node_limit": max_nodes,
+            "original_node_count": original_node_count,
+            "node_limit_exceeded": node_limit_exceeded,
             "semantic_extraction": semantic_extraction,
         },
     )

@@ -75,12 +75,14 @@ def test_quality_eval_flow_answer_diagram_has_top_down_sequence() -> None:
                 {"id": "select", "label": "选择待测模组", "kind": "step", "source_ids": ["source-a"]},
                 {"id": "connect", "label": "连接测试夹具", "kind": "action", "source_ids": ["source-a"]},
                 {"id": "judge", "label": "测试结果是否合格", "kind": "decision", "source_ids": ["source-b"]},
+                {"id": "rework", "label": "转入异常复核", "kind": "subflow", "source_ids": ["source-b"]},
                 {"id": "record", "label": "记录并上传结果", "kind": "action", "source_ids": ["source-b"]}
               ],
               "edges": [
                 {"source": "select", "target": "connect", "relation": "sequence"},
                 {"source": "connect", "target": "judge", "relation": "condition"},
-                {"source": "judge", "target": "record", "relation": "sequence"}
+                {"source": "judge", "target": "record", "relation": "condition", "label": "合格"},
+                {"source": "judge", "target": "rework", "relation": "fallback", "label": "不合格"}
               ],
               "notes": ["保留流程主干"],
               "confidence": 0.86
@@ -100,7 +102,7 @@ def test_quality_eval_flow_answer_diagram_has_top_down_sequence() -> None:
     assert ir.quality_score >= 0.8
     assert ir.validation is not None
     assert ir.validation.layout_suggestion.direction == "top_to_bottom"
-    assert [edge.source for edge in ir.edges] == ["select", "connect", "judge"]
+    assert [edge.source for edge in ir.edges] == ["select", "connect", "judge", "judge"]
     assert any(node.kind == "decision" for node in ir.nodes)
     assert ir.excalidraw_scene is not None
     assert ir.excalidraw_scene["type"] == "excalidraw"
