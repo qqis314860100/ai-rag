@@ -185,7 +185,7 @@ _MAX_MINDMAP_CATEGORIES = 5
 _MAX_KEYWORDS_PER_CATEGORY = 4
 _ALLOWED_DIAGRAM_TYPES = {"mindmap", "flowchart", "graph"}
 _FLOWCHART_NODE_KINDS = {"start", "end", "input", "output", "step", "action", "decision", "subflow"}
-_FLOWCHART_EVIDENCE_NODE_KINDS = _FLOWCHART_NODE_KINDS | {"topic", "equipment", "parameter", "risk"}
+_FLOWCHART_EVIDENCE_NODE_KINDS = (_FLOWCHART_NODE_KINDS - {"start", "end"}) | {"topic", "equipment", "parameter", "risk"}
 _ALLOWED_NODE_KINDS = {
     "root",
     "category",
@@ -1162,10 +1162,10 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
                 decision_branch_errors.append(node.id)
                 decision_branch_edge_ids.extend(edge_id for _edge, edge_id in branches)
         if decision_branch_errors:
-            errors.append(_diagram_warning(
+            warnings.append(_diagram_warning(
                 "decision_branch_outgoing_required",
-                "decision 节点必须至少有两条带标签出边，标签需表达是/否、通过/不通过、异常/正常等业务结果。",
-                severity="error",
+                "decision 节点建议至少有两条带标签出边；单分支时仍可展示，但需要在后续提炼中补齐是/否或异常/正常路径。",
+                severity="warning",
                 node_ids=decision_branch_errors,
                 edge_ids=decision_branch_edge_ids,
             ))

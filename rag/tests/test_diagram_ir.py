@@ -21,10 +21,10 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert ir.type == "flowchart"
     assert ir.layout_hint == "top_to_bottom"
     assert ir.schema_version == "diagram-ir/v2"
-    assert ir.can_generate is False
+    assert ir.can_generate is True
     assert ir.quality_score > 0
     assert ir.validation is not None
-    assert ir.validation.can_generate is False
+    assert ir.validation.can_generate is True
     assert ir.validation.layout_suggestion.direction == "top_to_bottom"
     assert [node.id for node in ir.nodes][:3] == ["step-1", "step-2", "step-3"]
     assert any(node.kind == "decision" for node in ir.nodes)
@@ -43,14 +43,14 @@ def test_build_keyword_diagram_ir_keeps_flow_structure() -> None:
     assert any(element["type"] == "arrow" for element in ir.excalidraw_scene["elements"])
     assert any(element["type"] == "text" and element["containerId"] == "node-step-1" for element in ir.excalidraw_scene["elements"])
     assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
-    assert ir.metadata["artifact_payload"]["can_generate"] is False
+    assert ir.metadata["artifact_payload"]["can_generate"] is True
     assert ir.metadata["artifact_payload"]["quality_score"] == ir.quality_score
     assert ir.metadata["artifact_payload"]["citation_coverage"]["coverage_ratio"] == 1.0
     assert ir.metadata["artifact_payload"]["element_count"] == len(ir.excalidraw_scene["elements"])
     assert all("layout" in node.metadata for node in ir.nodes)
     assert all("render" in node.metadata for node in ir.nodes)
     assert all("render" in edge.metadata for edge in ir.edges)
-    assert any(error.code == "decision_branch_outgoing_required" for error in ir.validation.errors)
+    assert any(warning.code == "decision_branch_outgoing_required" for warning in ir.validation.warnings)
 
 
 def test_build_keyword_diagram_ir_groups_mindmap_keywords() -> None:
@@ -368,9 +368,10 @@ def test_validate_diagram_ir_enforces_flowchart_quality_gates() -> None:
 
     result = validate_diagram_ir(ir, ["source-a"])
     error_codes = {error.code for error in result.errors}
+    warning_codes = {warning.code for warning in result.warnings}
 
     assert result.can_generate is False
-    assert "decision_branch_outgoing_required" in error_codes
+    assert "decision_branch_outgoing_required" in warning_codes
     assert "loop_edge_missing_label" in error_codes
     assert "business_node_missing_source" in error_codes
     assert "flowchart_node_limit_exceeded" in error_codes
