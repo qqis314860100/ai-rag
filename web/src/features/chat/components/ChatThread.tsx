@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, Sparkles, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
 import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
 import ArtifactCard from "./ArtifactCard";
@@ -120,7 +120,7 @@ function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
   return (
     <div className="flex flex-col items-center py-12 px-4 text-center animate-fade-in-up">
       <div className="w-16 h-16 rounded-2xl bg-accent-soft flex items-center justify-center mb-6 shadow-sm-soft">
-        <Sparkles className="h-7 w-7 text-accent" />
+        <FileSearch className="h-7 w-7 text-accent" />
       </div>
       <h2 className="text-lg font-semibold text-text tracking-tight">电池产线知识库</h2>
       <p className="mt-2 max-w-lg text-[15px] text-text-secondary leading-relaxed">
@@ -619,18 +619,18 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     )}
                   </div>
                   {!msg.streaming && canRefineAssistantAnswer && (
-                    <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-divider/70 pt-3">
+                    <div className="mt-4 flex flex-wrap items-center justify-end gap-1.5 border-t border-divider/70 pt-3">
                       <span className="mr-auto inline-flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
-                        <Sparkles className="h-3.5 w-3.5 text-accent" />
-                        可继续整理
+                        <FileCheck className="h-3.5 w-3.5 text-accent" />
+                        整理回答
                       </span>
                       <button
                         type="button"
                         onClick={() => onFollowUp("请把上一条回答整理成 3 条关键结论，并保留必要的引用依据。")}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent"
                         title="让 AI 基于本条回答继续总结"
                       >
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <FileCheck className="h-3.5 w-3.5" />
                         总结
                       </button>
                       {(["card", "faq"] as const).map((assetType) => {
@@ -642,7 +642,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                             type="button"
                             onClick={() => onCreateKnowledgeAssetDraft?.(persistedMessageId, assetType)}
                             disabled={!onCreateKnowledgeAssetDraft || Boolean(status)}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                             title={status ? `${assetType === "card" ? "知识卡" : "FAQ"}：${assetStatusLabel(status)}` : `沉淀为${assetType === "card" ? "知识卡" : "FAQ"}草稿`}
                           >
                             <Icon className="h-3.5 w-3.5" />
@@ -661,7 +661,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                             type="button"
                             onClick={() => void generateDiagram(msg, type, state?.data || existingArtifact)}
                             disabled={state?.loading}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary shadow-sm-soft transition-all hover:-translate-y-0.5 hover:border-accent/50 hover:text-accent disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                             title={getDiagramButtonLabel(type, Boolean(state?.data || existingArtifact))}
                           >
                             {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}

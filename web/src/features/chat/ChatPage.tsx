@@ -103,7 +103,10 @@ export default function ChatPage() {
   const [assetDraftStatusByMessage, setAssetDraftStatusByMessage] = useState<Record<string, { card?: string; faq?: string }>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(() =>
-    typeof window === "undefined" ? true : window.matchMedia("(min-width: 1280px)").matches
+    typeof window === "undefined" ? true : window.matchMedia("(min-width: 1536px)").matches
+  );
+  const [compactRightPanel, setCompactRightPanel] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia("(max-width: 639px)").matches
   );
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
@@ -241,6 +244,24 @@ export default function ChatPage() {
       setRightPanelOpen(true);
     }
   }, [selectedSources]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1536px)");
+    const syncRightPanel = () => {
+      if (!media.matches) setRightPanelOpen(false);
+    };
+    syncRightPanel();
+    media.addEventListener("change", syncRightPanel);
+    return () => media.removeEventListener("change", syncRightPanel);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)");
+    const syncCompactPanel = () => setCompactRightPanel(media.matches);
+    syncCompactPanel();
+    media.addEventListener("change", syncCompactPanel);
+    return () => media.removeEventListener("change", syncCompactPanel);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -743,7 +764,7 @@ export default function ChatPage() {
           <button
             onClick={handleToggleHistory}
             className="p-1.5 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text transition-colors"
-            title={historyCollapsed ? "展开会话历史" : "收起会话历史"}
+            title={historyCollapsed ? "展开会话历史" : "切换会话历史"}
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -827,18 +848,19 @@ export default function ChatPage() {
 
       {/* ── Conversation Navigator (336px) ── */}
       {rightPanelOpen && (
-        <div className="fixed inset-0 z-40 bg-black/20 xl:hidden" onClick={() => setRightPanelOpen(false)} />
+        <div className="fixed inset-0 z-40 bg-black/20 2xl:hidden" onClick={() => setRightPanelOpen(false)} />
       )}
       <aside
         className={`shrink-0 overflow-hidden border-l bg-surface transition-all duration-slow ease-out
-          max-xl:fixed max-xl:inset-y-0 max-xl:right-0 max-xl:z-50 max-xl:shadow-xl-soft
+          max-2xl:fixed max-2xl:inset-y-0 max-2xl:right-0 max-2xl:z-50 max-2xl:shadow-xl-soft max-sm:left-0
           ${hasSelectedSources ? "border-accent/25" : "border-divider"}`}
         style={{
-          width: rightPanelOpen ? 336 : 0,
+          width: rightPanelOpen ? (compactRightPanel ? "100vw" : "min(100vw, 336px)") : 0,
           opacity: rightPanelOpen ? 1 : 0,
+          pointerEvents: rightPanelOpen ? "auto" : "none",
         }}
       >
-        <div className="h-full min-h-0" style={{ width: 336 }}>
+        <div className="h-full min-h-0 w-full 2xl:w-[336px]">
           {rightPanelOpen && (
             <ConversationNavigator
               messages={messages}

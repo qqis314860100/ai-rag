@@ -53,6 +53,10 @@ export default function ArtifactCard({ artifact, onOpen }: ArtifactCardProps) {
           : FileText;
   const isReady = artifact.status === "ready";
   const confidence = artifact.confidence > 0 ? `${Math.round(artifact.confidence * 100)}%` : null;
+  const evidenceLabel = [
+    confidence ? `可信度 ${confidence}` : "",
+    artifact.source_ids.length > 0 ? `${artifact.source_ids.length} 条证据` : "",
+  ].filter(Boolean).join(" · ");
 
   return (
     <article className="rounded-xl border border-border bg-white px-3 py-3 shadow-sm-soft">
@@ -62,24 +66,17 @@ export default function ArtifactCard({ artifact, onOpen }: ArtifactCardProps) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold text-accent">{artifactLabel(artifact)}</span>
             <StatusBadge status={artifact.status} />
-            {confidence && (
-              <span className="rounded-md bg-surface-page px-2 py-1 text-[11px] font-medium text-text-muted">
-                可信度 {confidence}
-              </span>
-            )}
-            {artifact.source_ids.length > 0 && (
-              <span className="rounded-md bg-surface-page px-2 py-1 text-[11px] font-medium text-text-muted">
-                {artifact.source_ids.length} 条证据
-              </span>
+            {evidenceLabel && (
+              <span className="text-[11px] font-medium text-text-muted">{evidenceLabel}</span>
             )}
           </div>
-          <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-snug text-text">
+          <h3 className="mt-1.5 line-clamp-1 text-sm font-semibold leading-snug text-text">
+            <span className="mr-1.5 text-[11px] font-semibold text-accent">{artifactLabel(artifact)}</span>
             {artifact.title || "AI 整理产物"}
           </h3>
           {artifact.summary && (
-            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-secondary">
+            <p className="mt-1 line-clamp-1 text-xs leading-relaxed text-text-secondary">
               {artifact.summary}
             </p>
           )}

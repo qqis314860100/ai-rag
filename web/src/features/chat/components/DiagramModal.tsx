@@ -43,9 +43,9 @@ export default function DiagramModal({ diagram, onClose }: DiagramModalProps) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 p-0 backdrop-blur-sm sm:px-4 sm:py-6" onClick={onClose}>
       <div
-        className="mx-auto flex h-full max-h-[880px] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-xl-soft"
+        className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden border border-border bg-white shadow-xl-soft sm:max-h-[880px] sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-divider px-5 py-4">

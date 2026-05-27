@@ -11,7 +11,6 @@ import {
   NotebookPen,
   Pencil,
   Plus,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -333,7 +332,7 @@ export default function ConversationNavigator({
                         )}
                         {item.artifactCount > 0 && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-accent">
-                            <Sparkles className="h-3 w-3" />
+                            <GitBranch className="h-3 w-3" />
                             {item.artifactCount}
                           </span>
                         )}

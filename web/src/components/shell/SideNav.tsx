@@ -20,7 +20,7 @@ export default function SideNav() {
 
   return (
     <nav
-      className="relative flex flex-col border-r border-divider bg-white shrink-0 transition-all duration-slow ease-out z-20"
+      className="relative hidden flex-col border-r border-divider bg-white shrink-0 transition-all duration-slow ease-out z-20 lg:flex"
       style={{ width: expanded ? 220 : 56 }}
     >
       {/* Brand */}
