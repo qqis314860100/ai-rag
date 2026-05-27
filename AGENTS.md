@@ -25,6 +25,7 @@
 - 准备提交：必要时读 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
 - 涉及服务边界：必要时读 [docs/架构标准.md](docs/架构标准.md)
 - 涉及 Codex/Ralph 配置：必要时读 [docs/Codex架构配置.md](docs/Codex架构配置.md)
+- 涉及 UI 设计、图解视觉或高影响前端体验：读 [PRODUCT.md](PRODUCT.md)、[DESIGN.md](DESIGN.md) 和 [docs/企业级 UI 协作工作流.md](docs/企业级 UI 协作工作流.md)
 
 ## 规则来源
 
@@ -45,6 +46,7 @@
 - 查看 diff、日志、测试、构建和大文件时，优先用 `rtk` 压缩输出；信息不足时再回退原生命令。
 - 手工开发不需要 Ralph 流水账；AFK 自动化必须干净工作区、每轮一个队列任务、失败即停。
 - 从项目讨论沉淀的新建人类阅读型文档，文件名和标题都用中文。
+- 高影响 UI、图解弹窗、知识资产页或发布前体验检查，优先使用项目内 `.agents/skills/impeccable` 的 critique/polish/adapt 思路，并以实际截图验收。
 
 ## 架构边界
 

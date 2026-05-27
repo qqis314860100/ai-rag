@@ -6,6 +6,7 @@
 - 当前 PRD 已按页面真实能力重新校准：需要与 API / RAG 同步的前端任务已重开，API 与 RAG 侧此前标记完成的任务也全部重开，只有真实联调验收后才可再次勾选。
 - 最新范围变化：新增“流程图语义与企业图解质量升级”阶段，目标是把流程图从关键词/按钮生成升级为角色、动作、判断、分支、循环、证据驱动的 DiagramIR 链路。
 - 新增架构文档：`docs/流程图语义生成架构方案.md`，作为后续 RAG structured output、API 质量门槛和 Web 纯渲染的共同设计依据。
+- 最新范围变化：项目内安装 Impeccable UI skill，并新增 `PRODUCT.md`、`DESIGN.md`、`docs/企业级 UI 协作工作流.md`；后续高影响 UI 任务需走设计审查、打磨、适配和截图验收。
 - 下一轮建议：执行 PRD 未完成队列中的 `rag`: 扩展 `DiagramIR` 流程图节点和边语义，先打通 start/end/input/output/decision/subflow 与 loop/fallback 的兼容 schema。
 - 最新完成 `web` / `rag`: AI 整理入口已接入真实 Diagram IR 链路，前端按钮会调用 API，再由 RAG 生成 mindmap / flowchart 中间表示并回显节点。
 - 最新完成 `api`: 消息编辑/删除的分支截断语义已加固，branch guards 测试已扩成两轮分支，能验证后续分支会一起被清掉。
