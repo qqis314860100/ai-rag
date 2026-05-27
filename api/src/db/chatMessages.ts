@@ -137,6 +137,9 @@ export function deleteMessageAndTruncateSession(messageId: string): boolean {
 
 export function formatMessage(row: ChatMessageRow) {
   const metadata = JSON.parse(row.metadata_json || "{}");
+  const artifacts = listArtifactsByMessage(row.id)
+    .map(formatArtifact)
+    .filter((artifact) => artifact.metadata.gate_status !== "blocked");
   return {
     id: row.id,
     session_id: row.session_id,
@@ -145,7 +148,7 @@ export function formatMessage(row: ChatMessageRow) {
     sources: JSON.parse(row.sources_json || "[]"),
     confidence: metadata.confidence as number | undefined,
     followups: metadata.followups as string[] | undefined,
-    artifacts: listArtifactsByMessage(row.id).map(formatArtifact),
+    artifacts,
     metadata,
     latency_ms: row.latency_ms,
     created_at: row.created_at,

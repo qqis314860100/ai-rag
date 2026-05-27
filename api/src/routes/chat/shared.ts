@@ -9,6 +9,7 @@ import { getMessageSourceDetail } from "../../db/messageSources";
 import { isNoteScope } from "../../db/chatNotes";
 import type { NoteTarget } from "../../db/chatNotes";
 import { createArtifact, formatArtifact } from "../../db/chatArtifacts";
+import type { ChatArtifactRow } from "../../db/chatArtifacts";
 
 export function canReadSession(req: Request, sessionUserId: string): boolean {
   const userId = req.user?.id || "anonymous";
@@ -82,8 +83,28 @@ export function artifactSummary(payload: { nodes?: unknown[]; edges?: unknown[] 
 
 type DiagramEligibility = {
   eligible: boolean;
+  code?: string;
   reason?: string;
   question?: string;
+};
+
+type DiagramGateStage = "eligibility" | "validation" | "quality";
+
+type DiagramGateFailure = {
+  code: string;
+  stage: DiagramGateStage;
+  message: string;
+  detail: Record<string, unknown>;
+};
+
+type DiagramBuildContext = {
+  existing: NonNullable<ReturnType<typeof getMessageById>>;
+  session: NonNullable<ReturnType<typeof getSessionById>>;
+  formatted: { sources?: Array<Record<string, unknown>>; confidence?: number };
+  sourceIds: string[];
+  confidence: number;
+  eligibility: DiagramEligibility;
+  title: string;
 };
 
 type AnswerMessageMetadataInput = {
@@ -229,6 +250,7 @@ function assessDiagramEligibility(input: {
   if (isLowSignalQuestion(input.question)) {
     return {
       eligible: false,
+      code: "low_signal_question",
       reason: "当前问题信息不足，不能生成图解。请先提出具体的业务问题。",
       question: input.question,
     };
@@ -236,6 +258,7 @@ function assessDiagramEligibility(input: {
   if (looksLikeClarificationAnswer(input.answer)) {
     return {
       eligible: false,
+      code: "clarification_answer",
       reason: "当前回答还在澄清问题，不能生成图解。请补充问题后再整理。",
       question: input.question,
     };
@@ -243,6 +266,7 @@ function assessDiagramEligibility(input: {
   if (input.confidence > 0 && input.confidence < MIN_ARTIFACT_CONFIDENCE) {
     return {
       eligible: false,
+      code: "low_answer_confidence",
       reason: `当前回答可信度较低（${Math.round(input.confidence * 100)}%），暂不生成图解。请先核对或重新提问。`,
       question: input.question,
     };
@@ -250,6 +274,7 @@ function assessDiagramEligibility(input: {
   if (input.sourceIds.length === 0) {
     return {
       eligible: false,
+      code: "missing_sources",
       reason: "当前回答没有可追溯引用，不能生成图解。",
       question: input.question,
     };
@@ -315,6 +340,33 @@ function artifactConfidence(input: {
   return Math.round(Math.min(...candidates) * 100) / 100;
 }
 
+function diagramGateError(failure: DiagramGateFailure): AppError {
+  return new AppError(ErrorCodes.VALIDATION_ERROR, failure.message, 422, {
+    gate_status: "blocked",
+    gate_stage: failure.stage,
+    failure_code: failure.code,
+    failure_reason: failure.message,
+    ...failure.detail,
+  });
+}
+
+function diagramGateFailureFromError(error: unknown): DiagramGateFailure | null {
+  if (!(error instanceof AppError) || error.statusCode !== 422) return null;
+  const detail = error.detail ?? {};
+  const gateStatus = detail.gate_status;
+  const gateStage = detail.gate_stage;
+  const failureCode = detail.failure_code;
+  if (gateStatus !== "blocked" || typeof failureCode !== "string") return null;
+  if (gateStage !== "eligibility" && gateStage !== "validation" && gateStage !== "quality") return null;
+
+  return {
+    code: failureCode,
+    stage: gateStage,
+    message: typeof detail.failure_reason === "string" ? detail.failure_reason : error.message,
+    detail,
+  };
+}
+
 function assertDiagramQuality(diagram: DiagramIR, messageConfidence: number): {
   artifactConfidence: number;
   qualityScore?: number;
@@ -332,28 +384,43 @@ function assertDiagramQuality(diagram: DiagramIR, messageConfidence: number): {
   });
 
   if (canGenerate === false || diagramValidationErrors(diagram).length > 0) {
-    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解结构校验未通过，暂不保存或展示。", 422, {
-      can_generate: canGenerate,
-      quality_score: qualityScore,
-      quality_warnings: diagramQualityWarnings(diagram),
-      validation,
+    throw diagramGateError({
+      code: "diagram_validation_failed",
+      stage: "validation",
+      message: "图解结构校验未通过，暂不保存或展示。",
+      detail: {
+        can_generate: canGenerate,
+        quality_score: qualityScore,
+        quality_warnings: diagramQualityWarnings(diagram),
+        validation,
+      },
     });
   }
   if (qualityScore !== undefined && qualityScore < MIN_DIAGRAM_QUALITY_SCORE) {
-    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解质量分低于保存门槛，暂不保存或展示。", 422, {
-      quality_score: qualityScore,
-      min_quality_score: MIN_DIAGRAM_QUALITY_SCORE,
-      quality_warnings: diagramQualityWarnings(diagram),
-      validation,
+    throw diagramGateError({
+      code: "low_diagram_quality",
+      stage: "quality",
+      message: "图解质量分低于保存门槛，暂不保存或展示。",
+      detail: {
+        quality_score: qualityScore,
+        min_quality_score: MIN_DIAGRAM_QUALITY_SCORE,
+        quality_warnings: diagramQualityWarnings(diagram),
+        validation,
+      },
     });
   }
   if (diagramConfidence !== undefined && diagramConfidence < MIN_DIAGRAM_CONFIDENCE) {
-    throw new AppError(ErrorCodes.VALIDATION_ERROR, "图解置信度低于保存门槛，暂不保存或展示。", 422, {
-      diagram_confidence: diagramConfidence,
-      min_diagram_confidence: MIN_DIAGRAM_CONFIDENCE,
-      quality_score: qualityScore,
-      quality_warnings: diagramQualityWarnings(diagram),
-      validation,
+    throw diagramGateError({
+      code: "low_diagram_confidence",
+      stage: "quality",
+      message: "图解置信度低于保存门槛，暂不保存或展示。",
+      detail: {
+        diagram_confidence: diagramConfidence,
+        min_diagram_confidence: MIN_DIAGRAM_CONFIDENCE,
+        quality_score: qualityScore,
+        quality_warnings: diagramQualityWarnings(diagram),
+        validation,
+      },
     });
   }
 
@@ -385,10 +452,9 @@ export function requireReadableAssistantMessage(req: Request, messageId: string,
   return { existing, session };
 }
 
-export async function buildDiagramForMessage(
+function prepareDiagramBuildContext(
   req: Request,
   messageId: string,
-  diagramType: "mindmap" | "flowchart",
   titleInput?: unknown
 ) {
   const { existing, session } = requireReadableAssistantMessage(req, messageId, "整理");
@@ -403,17 +469,31 @@ export async function buildDiagramForMessage(
     confidence,
     sourceIds,
   });
-  if (!eligibility.eligible) {
-    throw new AppError(ErrorCodes.VALIDATION_ERROR, eligibility.reason || "当前回答不适合生成图解。", 422, {
-      question: eligibility.question,
-      confidence,
-      source_count: sourceIds.length,
-    });
-  }
-
   const title = typeof titleInput === "string" && titleInput.trim()
     ? titleInput.trim()
     : session.title || "AI 整理";
+  return { existing, session, formatted, sourceIds, confidence, eligibility, title };
+}
+
+async function buildDiagramFromContext(
+  req: Request,
+  context: DiagramBuildContext,
+  diagramType: "mindmap" | "flowchart"
+) {
+  const { existing, formatted, sourceIds, confidence, eligibility, title } = context;
+  if (!eligibility.eligible) {
+    throw diagramGateError({
+      code: eligibility.code || "diagram_ineligible",
+      stage: "eligibility",
+      message: eligibility.reason || "当前回答不适合生成图解。",
+      detail: {
+        question: eligibility.question,
+        confidence,
+        source_count: sourceIds.length,
+      },
+    });
+  }
+
   const diagram = await generateDiagramIR(
     title,
     buildDiagramContent(existing.content, formatted.sources || []),
@@ -427,18 +507,82 @@ export async function buildDiagramForMessage(
   return { diagram, existing, sourceIds, title, confidence, quality };
 }
 
+export async function buildDiagramForMessage(
+  req: Request,
+  messageId: string,
+  diagramType: "mindmap" | "flowchart",
+  titleInput?: unknown
+) {
+  const context = prepareDiagramBuildContext(req, messageId, titleInput);
+  return buildDiagramFromContext(req, context, diagramType);
+}
+
+function createFailedDiagramArtifact(
+  req: Request,
+  context: DiagramBuildContext,
+  diagramType: "mindmap" | "flowchart",
+  failure: DiagramGateFailure
+): ChatArtifactRow {
+  const artifact = createArtifact({
+    sessionId: context.existing.session_id,
+    messageId: context.existing.id,
+    type: diagramType,
+    renderer: "diagram-ir",
+    title: context.title,
+    summary: "未达到图解生成门槛。",
+    reason: failure.message,
+    status: "failed",
+    confidence: 0,
+    payload: {
+      type: diagramType,
+      title: context.title,
+      can_generate: false,
+      failure_reason: failure.message,
+    },
+    sourceIds: context.sourceIds,
+    metadata: {
+      type: diagramType,
+      gate_status: "blocked",
+      gate_stage: failure.stage,
+      failure_code: failure.code,
+      failure_reason: failure.message,
+      message_confidence: context.confidence,
+      source_count: context.sourceIds.length,
+      ...failure.detail,
+    },
+  });
+
+  auditFromRequest(req, "chat.artifact.gate_blocked", "chat_message", context.existing.id, {
+    session_id: context.existing.session_id,
+    artifact_id: artifact.id,
+    type: diagramType,
+    gate_stage: failure.stage,
+    failure_code: failure.code,
+    source_count: context.sourceIds.length,
+  });
+
+  return artifact;
+}
+
 export async function generateDiagramArtifact(
   req: Request,
   messageId: string,
   diagramType: "mindmap" | "flowchart",
   titleInput?: unknown
 ) {
-  const { diagram, existing, sourceIds, title, confidence, quality } = await buildDiagramForMessage(
-    req,
-    messageId,
-    diagramType,
-    titleInput
-  );
+  const context = prepareDiagramBuildContext(req, messageId, titleInput);
+  let diagramResult: Awaited<ReturnType<typeof buildDiagramFromContext>>;
+  try {
+    diagramResult = await buildDiagramFromContext(req, context, diagramType);
+  } catch (error) {
+    const failure = diagramGateFailureFromError(error);
+    if (failure) {
+      createFailedDiagramArtifact(req, context, diagramType, failure);
+    }
+    throw error;
+  }
+
+  const { diagram, existing, sourceIds, title, confidence, quality } = diagramResult;
 
   const artifact = createArtifact({
     sessionId: existing.session_id,
