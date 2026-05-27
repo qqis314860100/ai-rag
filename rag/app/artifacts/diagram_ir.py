@@ -58,6 +58,13 @@ class DiagramEdge(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class DiagramLane(BaseModel):
+    id: str
+    label: str
+    order: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class DiagramIR(BaseModel):
     schema_version: str = "diagram-ir/v2"
     title: str
@@ -67,6 +74,7 @@ class DiagramIR(BaseModel):
     can_generate: bool = True
     nodes: list[DiagramNode] = Field(default_factory=list)
     edges: list[DiagramEdge] = Field(default_factory=list)
+    lanes: list[DiagramLane] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     renderer: str = "diagram-ir"
     reason: str = ""
@@ -89,6 +97,8 @@ class StructuredDiagramNode(BaseModel):
     kind: str = "topic"
     description: str = ""
     source_ids: list[str] = Field(default_factory=list)
+    lane_id: str = ""
+    lane_label: str = ""
 
 
 class StructuredDiagramEdge(BaseModel):
@@ -96,6 +106,11 @@ class StructuredDiagramEdge(BaseModel):
     target: str
     relation: str = "relates_to"
     label: str = ""
+
+
+class StructuredDiagramLane(BaseModel):
+    id: str = ""
+    label: str
 
 
 class StructuredFlowSemantics(BaseModel):
@@ -115,6 +130,7 @@ class StructuredDiagramOutput(BaseModel):
     can_generate: bool = True
     reason: str = ""
     flow_semantics: StructuredFlowSemantics = Field(default_factory=StructuredFlowSemantics)
+    lanes: list[StructuredDiagramLane] = Field(default_factory=list)
     nodes: list[StructuredDiagramNode] = Field(default_factory=list)
     edges: list[StructuredDiagramEdge] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
@@ -707,27 +723,37 @@ def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
 
 def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
     flow_nodes = [node for node in ir.nodes if node.kind in _FLOWCHART_NODE_KINDS]
-    viewport_width = 980
+    lane_ids = {lane.id for lane in ir.lanes}
+    has_lanes = len(lane_ids) >= 2
+    viewport_width = max(980, len(ir.lanes) * 360 + 160) if has_lanes else 980
     viewport_height = max(620, len(flow_nodes) * 168 + 140)
     center_x = viewport_width // 2
+    lane_width = 360
+    lane_left = max(80, (viewport_width - len(ir.lanes) * lane_width) // 2) if has_lanes else 0
+    lane_center_by_id = {
+        lane.id: lane_left + lane.order * lane_width + lane_width // 2
+        for lane in ir.lanes
+    }
 
     for index, node in enumerate(flow_nodes):
         y = 86 + index * 168
+        node_center_x = lane_center_by_id.get(str(node.metadata.get("lane_id")), center_x)
         if node.kind == "decision":
-            _set_layout(node, center_x - 160, y - 58, 320, 116, "decision")
+            _set_layout(node, node_center_x - 150, y - 58, 300, 116, "decision")
         elif node.kind in {"start", "end"}:
-            _set_layout(node, center_x - 160, y - 34, 320, 68, node.kind)
+            _set_layout(node, node_center_x - 140, y - 34, 280, 68, node.kind)
         elif node.kind in {"input", "output", "subflow"}:
-            _set_layout(node, center_x - 210, y - 38, 420, 76, node.kind)
+            _set_layout(node, node_center_x - 160, y - 38, 320, 76, node.kind)
         elif node.kind == "action":
-            _set_layout(node, center_x - 210, y - 38, 420, 76, "action")
+            _set_layout(node, node_center_x - 160, y - 38, 320, 76, "action")
         else:
-            _set_layout(node, center_x - 210, y - 38, 420, 76, "step")
+            _set_layout(node, node_center_x - 160, y - 38, 320, 76, "step")
 
     _apply_edge_render(ir.edges)
     ir.metadata["viewport"] = {"width": viewport_width, "height": viewport_height}
     ir.metadata["renderer"] = "positioned-svg"
-    ir.metadata["layout_rule"] = "top_down_process_rectangles_decision_diamonds"
+    ir.metadata["lanes"] = [lane.model_dump() for lane in ir.lanes]
+    ir.metadata["layout_rule"] = "swimlane_flowchart_by_role" if has_lanes else "top_down_process_rectangles_decision_diamonds"
     return ir
 
 
@@ -1017,6 +1043,25 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
     duplicate_node_ids: set[str] = set()
     covered_sources: set[str] = set()
     business_nodes_without_evidence: list[str] = []
+    lane_ids: set[str] = set()
+    duplicate_lane_ids: set[str] = set()
+    for lane in ir.lanes:
+        lane_id = lane.id.strip()
+        if not lane_id:
+            errors.append(_diagram_warning("blank_lane_id", "泳道 id 不能为空。", severity="error"))
+            continue
+        if lane_id in lane_ids:
+            duplicate_lane_ids.add(lane_id)
+        lane_ids.add(lane_id)
+        if not lane.label.strip():
+            errors.append(_diagram_warning("blank_lane_label", "泳道 label 不能为空。", severity="error"))
+
+    if duplicate_lane_ids:
+        errors.append(_diagram_warning(
+            "duplicate_lane_id",
+            "泳道 id 必须唯一。",
+            severity="error",
+        ))
 
     for node in ir.nodes:
         node_id = node.id.strip()
@@ -1038,6 +1083,22 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
             and not (set(node.source_ids) & required_sources)
         ):
             business_nodes_without_evidence.append(node.id)
+        if ir.type == "flowchart" and lane_ids and node.kind in _FLOWCHART_NODE_KINDS:
+            lane_id = str(node.metadata.get("lane_id") or "").strip()
+            if not lane_id:
+                errors.append(_diagram_warning(
+                    "flowchart_node_missing_lane",
+                    "带泳道的流程图中，每个业务节点必须声明 metadata.lane_id。",
+                    severity="error",
+                    node_ids=[node.id],
+                ))
+            elif lane_id not in lane_ids:
+                errors.append(_diagram_warning(
+                    "flowchart_node_unknown_lane",
+                    "节点 metadata.lane_id 必须引用已声明的泳道。",
+                    severity="error",
+                    node_ids=[node.id],
+                ))
 
     if duplicate_node_ids:
         errors.append(_diagram_warning(
@@ -1088,6 +1149,8 @@ def validate_diagram_ir(ir: DiagramIR, required_source_ids: list[str] | None = N
     if ir.type == "mindmap" and not any(node.kind == "root" for node in ir.nodes):
         warnings.append(_diagram_warning("mindmap_without_root", "思维导图缺少 root 节点，布局稳定性会下降。"))
     if ir.type == "flowchart":
+        if len(ir.lanes) == 1:
+            warnings.append(_diagram_warning("single_swimlane", "只有一个泳道时可退化为普通流程图。"))
         decision_branch_errors: list[str] = []
         decision_branch_edge_ids: list[str] = []
         for node in ir.nodes:
@@ -1279,6 +1342,7 @@ def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str])
         "quality_warnings": [warning.model_dump() for warning in ir.quality_warnings],
         "citation_coverage": ir.metadata["citation_coverage"],
         "source_evidence": evidence,
+        "lanes": [lane.model_dump() for lane in ir.lanes],
     }
     return ir
 
@@ -1311,6 +1375,12 @@ def _build_structured_diagram_messages(
             "loops": ["retry, rework or fallback return paths"],
             "final_results": ["business outcomes or terminal states"],
         },
+        "lanes": [
+            {
+                "id": "stable role id, required when the flow has multiple roles",
+                "label": "operator, system, reviewer, equipment owner or other evidence-backed role",
+            }
+        ],
         "nodes": [
             {
                 "id": "stable kebab-case id",
@@ -1318,6 +1388,8 @@ def _build_structured_diagram_messages(
                 "kind": "root|category|keyword|topic|start|end|input|output|step|action|decision|subflow|equipment|parameter|risk",
                 "description": "one short evidence-backed explanation",
                 "source_ids": ["one or more source ids from the provided mapping"],
+                "lane_id": "role lane id when this is a flowchart with multiple roles",
+                "lane_label": "role lane label when lane_id is not available",
             }
         ],
         "edges": [
@@ -1344,8 +1416,9 @@ def _build_structured_diagram_messages(
         "7. flowchart 必须先确认存在明确流程；优先使用 start/end/input/output/step/action/decision/subflow 节点；sequence 表达主线，condition 表达判断分支，loop 表达回流重试，fallback 表达异常或失败兜底，flows_to 仅用于旧结构兼容。\n"
         "8. flowchart 的 decision 节点 label 必须是明确问题，分支边 label 要写“是/否/通过/不通过/异常/失败”等业务结果；最终结果要落到 end/output/action 节点。\n"
         "9. flowchart 的每个业务节点都必须绑定 source_ids；每个 decision 至少两条带标签出边；每条 loop 边必须标注回流、返工、重试或复检条件。\n"
-        "10. 如果流程超过最大节点数，优先合并为 subflow；仍无法表达时返回 can_generate=false，并在 reason 说明需要拆分子流程。\n"
-        "11. 如果无法从回答和引用中形成角色、动作、判断/分支或最终结果，返回 can_generate=false、reason、空 nodes 和空 edges，不要编造流程。"
+        "10. flowchart 如果涉及两个或更多角色、系统、岗位或设备责任方，必须输出 lanes，并为每个业务节点填写 lane_id 或 lane_label；不要把无证据的角色编造成泳道。\n"
+        "11. 如果流程超过最大节点数，优先合并为 subflow；仍无法表达时返回 can_generate=false，并在 reason 说明需要拆分子流程。\n"
+        "12. 如果无法从回答和引用中形成角色、动作、判断/分支或最终结果，返回 can_generate=false、reason、空 nodes 和空 edges，不要编造流程。"
     )
     user = (
         f"目标标题：{title}\n"
@@ -1492,6 +1565,59 @@ def _flow_semantics_metadata(flow_semantics: StructuredFlowSemantics) -> dict[st
     return normalized
 
 
+def _structured_lanes(output: StructuredDiagramOutput, diagram_type: str) -> tuple[list[DiagramLane], dict[str, str]]:
+    if diagram_type != "flowchart":
+        return [], {}
+
+    used_ids: set[str] = set()
+    lanes: list[DiagramLane] = []
+    alias_to_lane_id: dict[str, str] = {}
+
+    def add_lane(raw_id: str, raw_label: str, source: str) -> str:
+        label = _clean_text(raw_label or raw_id, 36)
+        if not label:
+            return ""
+        existing = alias_to_lane_id.get(raw_id) or alias_to_lane_id.get(label)
+        if existing:
+            return existing
+        lane_id = _safe_node_id(raw_id or label, f"lane-{len(lanes) + 1}", used_ids)
+        lane = DiagramLane(id=lane_id, label=label, order=len(lanes), metadata={"source": source})
+        lanes.append(lane)
+        alias_to_lane_id[raw_id] = lane_id
+        alias_to_lane_id[label] = lane_id
+        alias_to_lane_id[lane_id] = lane_id
+        return lane_id
+
+    for lane in output.lanes:
+        add_lane(lane.id, lane.label, "llm_lane")
+    for role in output.flow_semantics.roles:
+        add_lane(role, role, "flow_semantics_role")
+    for node in output.nodes:
+        add_lane(node.lane_id, node.lane_label or node.lane_id, "node_lane")
+
+    return lanes[:6], alias_to_lane_id
+
+
+def _resolve_node_lane(
+    node: StructuredDiagramNode,
+    lanes: list[DiagramLane],
+    alias_to_lane_id: dict[str, str],
+) -> DiagramLane | None:
+    if not lanes:
+        return None
+    explicit = alias_to_lane_id.get(node.lane_id) or alias_to_lane_id.get(node.lane_label)
+    if explicit:
+        return next((lane for lane in lanes if lane.id == explicit), None)
+
+    text = f"{node.label} {node.description}".lower()
+    for lane in lanes:
+        if lane.label.lower() and lane.label.lower() in text:
+            return lane
+    if len(lanes) == 1:
+        return lanes[0]
+    return None
+
+
 def _structured_output_to_diagram_ir(
     output: StructuredDiagramOutput,
     title: str,
@@ -1503,6 +1629,7 @@ def _structured_output_to_diagram_ir(
 ) -> DiagramIR:
     max_nodes = min(max(max_steps, 2), 12)
     semantic_extraction = _flow_semantics_metadata(output.flow_semantics)
+    lanes, lane_aliases = _structured_lanes(output, diagram_type)
     original_node_count = 0
     for node in output.nodes:
         label = _clean_text(node.label, 56)
@@ -1538,6 +1665,7 @@ def _structured_output_to_diagram_ir(
                 "structured_refusal": True,
                 "refusal_reason": refusal_reason,
                 "semantic_extraction": semantic_extraction,
+                "lanes": [lane.model_dump() for lane in lanes],
             },
         )
         return _attach_artifact_payload(ir, content, source_ids)
@@ -1560,6 +1688,11 @@ def _structured_output_to_diagram_ir(
         if node.id:
             id_map[node.id] = node_id
         id_map[label] = node_id
+        lane = _resolve_node_lane(node, lanes, lane_aliases)
+        node_metadata: dict[str, Any] = {"generated_by": "llm_structured"}
+        if lane:
+            node_metadata["lane_id"] = lane.id
+            node_metadata["lane_label"] = lane.label
         nodes.append(
             DiagramNode(
                 id=node_id,
@@ -1567,7 +1700,7 @@ def _structured_output_to_diagram_ir(
                 kind=kind,
                 description=_clean_text(node.description, 140),
                 source_ids=_filtered_source_ids(node.source_ids, source_ids),
-                metadata={"generated_by": "llm_structured"},
+                metadata=node_metadata,
             )
         )
 
@@ -1630,6 +1763,7 @@ def _structured_output_to_diagram_ir(
         layout_hint=layout_hint,
         nodes=nodes,
         edges=edges,
+        lanes=lanes,
         notes=[
             *[_clean_text(note, 120) for note in output.notes if _clean_text(note, 120)],
             "LLM 仅输出业务节点，引用证据保留在节点 source_ids 和 source_evidence 中。",
@@ -1648,6 +1782,7 @@ def _structured_output_to_diagram_ir(
             "original_node_count": original_node_count,
             "node_limit_exceeded": node_limit_exceeded,
             "semantic_extraction": semantic_extraction,
+            "lanes": [lane.model_dump() for lane in lanes],
         },
     )
     if diagram_type == "mindmap":

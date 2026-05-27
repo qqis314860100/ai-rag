@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Code2, Maximize2, Network, X } from "lucide-react";
-import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramNode } from "../types";
+import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramLane, DiagramNode } from "../types";
 import { DiagramCanvas } from "./DiagramModal";
 
 interface ArtifactModalProps {
@@ -36,6 +36,16 @@ function normalizeEdge(value: unknown, nodeIds: Set<string>): DiagramEdge | null
   };
 }
 
+function normalizeLane(value: unknown): DiagramLane | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") return null;
+  return {
+    id: value.id,
+    label: value.label,
+    order: typeof value.order === "number" ? value.order : undefined,
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+  };
+}
+
 function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
   if (!isRecord(artifact.payload)) return null;
   const rawNodes = artifact.payload.nodes;
@@ -44,6 +54,9 @@ function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
   const nodes = rawNodes.map(normalizeNode).filter((node): node is DiagramNode => Boolean(node));
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = rawEdges.map((edge) => normalizeEdge(edge, nodeIds)).filter((edge): edge is DiagramEdge => Boolean(edge));
+  const lanes = Array.isArray(artifact.payload.lanes)
+    ? artifact.payload.lanes.map(normalizeLane).filter((lane): lane is DiagramLane => Boolean(lane))
+    : [];
   if (nodes.length === 0) return null;
 
   return {
@@ -57,6 +70,7 @@ function toDiagramIR(artifact: ChatArtifact): DiagramIR | null {
     layout_hint: typeof artifact.payload.layout_hint === "string" ? artifact.payload.layout_hint : "",
     nodes,
     edges,
+    lanes,
     notes: Array.isArray(artifact.payload.notes) ? artifact.payload.notes as string[] : [],
     renderer: typeof artifact.payload.renderer === "string" ? artifact.payload.renderer : undefined,
     reason: typeof artifact.payload.reason === "string" ? artifact.payload.reason : undefined,

@@ -599,6 +599,8 @@ export async function generateDiagramArtifact(
       type: diagramType,
       objective: diagram.objective,
       layout_hint: diagram.layout_hint,
+      lanes: diagram.lanes ?? [],
+      lane_count: diagram.lanes?.length ?? 0,
       message_confidence: confidence,
       diagram_confidence: diagram.confidence,
       artifact_confidence: quality.artifactConfidence,

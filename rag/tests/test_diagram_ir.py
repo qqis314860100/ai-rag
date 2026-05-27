@@ -197,6 +197,64 @@ def test_build_llm_diagram_ir_preserves_flowchart_semantics_and_legacy_relations
     assert all("render" in edge.metadata for edge in ir.edges)
 
 
+def test_build_llm_diagram_ir_outputs_swimlane_metadata_for_multi_role_flow() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        assert "lanes" in messages[1]["content"]
+        assert "lane_id" in messages[1]["content"]
+        return {
+            "model": "fake-swimlane",
+            "content": """
+            {
+              "title": "多角色审核发布流程",
+              "objective": "按角色归属生成泳道流程",
+              "type": "flowchart",
+              "layout_hint": "top_to_bottom",
+              "flow_semantics": {
+                "roles": ["操作员", "审核员", "MES"],
+                "actions": ["提交记录", "审核记录", "发布归档"],
+                "decisions": ["审核是否通过"],
+                "branches": ["通过发布", "不通过返工"],
+                "loops": ["不通过退回操作员补正"],
+                "final_results": ["记录发布归档"]
+              },
+              "lanes": [
+                {"id": "operator", "label": "操作员"},
+                {"id": "reviewer", "label": "审核员"},
+                {"id": "mes", "label": "MES"}
+              ],
+              "nodes": [
+                {"id": "submit", "label": "提交生产记录", "kind": "start", "source_ids": ["source-a"], "lane_id": "operator"},
+                {"id": "review", "label": "审核记录完整性", "kind": "decision", "source_ids": ["source-b"], "lane_id": "reviewer"},
+                {"id": "fix", "label": "补正异常记录", "kind": "action", "source_ids": ["source-a"], "lane_id": "operator"},
+                {"id": "publish", "label": "发布并归档记录", "kind": "end", "source_ids": ["source-b"], "lane_id": "mes"}
+              ],
+              "edges": [
+                {"source": "submit", "target": "review", "relation": "sequence"},
+                {"source": "review", "target": "publish", "relation": "condition", "label": "通过"},
+                {"source": "review", "target": "fix", "relation": "fallback", "label": "不通过"},
+                {"source": "fix", "target": "review", "relation": "loop", "label": "补正后复审"}
+              ],
+              "confidence": 0.86
+            }
+            """,
+        }
+
+    ir = build_llm_diagram_ir(
+        title="多角色审核发布流程",
+        content="回答正文：操作员提交记录，审核员审核是否通过，不通过退回补正，通过后 MES 发布归档。",
+        source_ids=["source-a", "source-b"],
+        diagram_type="flowchart",
+        llm_chat=fake_chat,
+    )
+
+    assert [lane.label for lane in ir.lanes] == ["操作员", "审核员", "MES"]
+    assert ir.metadata["layout_rule"] == "swimlane_flowchart_by_role"
+    assert ir.metadata["artifact_payload"]["lanes"][0]["label"] == "操作员"
+    assert {node.metadata.get("lane_id") for node in ir.nodes} == {"operator", "reviewer", "mes"}
+    assert ir.validation is not None
+    assert not ir.validation.errors
+
+
 def test_build_llm_diagram_ir_respects_structured_refusal_without_keyword_fallback() -> None:
     def fake_chat(messages, temperature=None, response_format=None):
         assert response_format == {"type": "json_object"}

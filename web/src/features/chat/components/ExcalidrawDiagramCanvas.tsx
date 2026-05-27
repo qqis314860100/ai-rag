@@ -3,7 +3,7 @@ import { Excalidraw, convertToExcalidrawElements } from "@excalidraw/excalidraw"
 import type { ExcalidrawElementSkeleton } from "@excalidraw/excalidraw/data/transform";
 import type { ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import "@excalidraw/excalidraw/index.css";
-import type { DiagramEdge, DiagramIR, DiagramNode } from "../types";
+import type { DiagramEdge, DiagramIR, DiagramLane, DiagramNode } from "../types";
 
 type NodeLayout = {
   x: number;
@@ -50,11 +50,19 @@ const MAIN_EDGE_RELATIONS = new Set(["sequence", "flows_to", "condition"]);
 const FLOW_LEVEL_GAP = 148;
 const FLOW_BRANCH_GAP = 360;
 const FLOW_BRANCH_ROW_GAP = 104;
+const SWIMLANE_WIDTH = 360;
+const SWIMLANE_LEFT = 48;
+const SWIMLANE_TOP = 24;
+const SWIMLANE_HEADER_HEIGHT = 44;
 
 function getViewport(diagram: DiagramIR) {
   const viewport = diagram.metadata?.viewport as Partial<{ width: number; height: number }> | undefined;
+  const laneCount = getDiagramLanes(diagram).length;
   return {
-    width: typeof viewport?.width === "number" ? viewport.width : 980,
+    width: Math.max(
+      typeof viewport?.width === "number" ? viewport.width : 980,
+      laneCount >= 2 ? laneCount * SWIMLANE_WIDTH + SWIMLANE_LEFT * 2 : 0,
+    ),
     height: typeof viewport?.height === "number" ? viewport.height : 620,
   };
 }
@@ -65,6 +73,28 @@ function numberValue(value: unknown, fallback: number) {
 
 function stringValue(value: unknown, fallback: string) {
   return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function normalizeLane(value: unknown, index: number): DiagramLane | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string") return null;
+  return {
+    id: value.id,
+    label: value.label,
+    order: typeof value.order === "number" ? value.order : index,
+    metadata: isRecord(value.metadata) ? value.metadata : {},
+  };
+}
+
+function getDiagramLanes(diagram: DiagramIR): DiagramLane[] {
+  const rawLanes = Array.isArray(diagram.lanes)
+    ? diagram.lanes
+    : Array.isArray(diagram.metadata?.lanes)
+      ? diagram.metadata.lanes
+      : [];
+  return rawLanes
+    .map(normalizeLane)
+    .filter((lane): lane is DiagramLane => Boolean(lane))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
 function getNodeRender(node: DiagramNode): NodeRender {
@@ -583,12 +613,59 @@ function createFlowchartLayouts(nodes: DiagramNode[], edges: DiagramEdge[], view
   return layouts;
 }
 
+function nodeLaneId(node: DiagramNode) {
+  const laneId = node.metadata?.lane_id;
+  return typeof laneId === "string" && laneId.length > 0 ? laneId : null;
+}
+
+function createSwimlaneLayouts(nodes: DiagramNode[], edges: DiagramEdge[], diagram: DiagramIR, viewport: { width: number; height: number }) {
+  const lanes = getDiagramLanes(diagram);
+  const layouts = new Map<string, NodeLayout>();
+  const laneIndex = new Map(lanes.map((lane, index) => [lane.id, index]));
+  const flowNodes = nodes.filter((node) => FLOW_NODE_KINDS.has(node.kind) || node.kind !== "evidence");
+  const path = analyzeFlowPath(flowNodes, edges);
+  const orderedIds = [
+    ...path.mainIds,
+    ...flowNodes.map((node) => node.id).filter((id) => !path.mainIds.includes(id)),
+  ];
+  const orderedNodes = orderedIds
+    .map((id) => flowNodes.find((node) => node.id === id))
+    .filter((node): node is DiagramNode => Boolean(node));
+  const laneBlockWidth = Math.max(SWIMLANE_WIDTH, Math.floor((viewport.width - SWIMLANE_LEFT * 2) / Math.max(lanes.length, 1)));
+  const top = SWIMLANE_TOP + SWIMLANE_HEADER_HEIGHT + 36;
+
+  orderedNodes.forEach((node, index) => {
+    const laneId = nodeLaneId(node);
+    const resolvedLaneIndex = laneId && laneIndex.has(laneId) ? laneIndex.get(laneId)! : 0;
+    const laneCenterX = SWIMLANE_LEFT + resolvedLaneIndex * laneBlockWidth + laneBlockWidth / 2;
+    const width = node.kind === "decision" ? 280 : node.kind === "start" || node.kind === "end" ? 260 : 300;
+    const height = node.kind === "decision" ? 108 : node.kind === "start" || node.kind === "end" ? 68 : 76;
+    layouts.set(node.id, fitNodeLayout(node, {
+      x: laneCenterX - width / 2,
+      y: top + index * FLOW_LEVEL_GAP,
+      width,
+      height,
+    }));
+  });
+
+  flowNodes.forEach((node, index) => {
+    if (!layouts.has(node.id)) {
+      layouts.set(node.id, getNodeLayout(node, index));
+    }
+  });
+  return layouts;
+}
+
 function createLayouts(nodes: DiagramNode[], edges: DiagramEdge[], diagram: DiagramIR) {
   if (diagram.type === "mindmap") {
     return createMindmapLayouts(nodes, edges, getViewport(diagram));
   }
   if (diagram.type === "flowchart") {
-    return createFlowchartLayouts(nodes, edges, getViewport(diagram));
+    const viewport = getViewport(diagram);
+    if (getDiagramLanes(diagram).length >= 2) {
+      return createSwimlaneLayouts(nodes, edges, diagram, viewport);
+    }
+    return createFlowchartLayouts(nodes, edges, viewport);
   }
   return new Map(nodes.map((node, index) => [node.id, getNodeLayout(node, index)]));
 }
@@ -656,9 +733,63 @@ function flowchartConnectorPoints(source: NodeLayout, target: NodeLayout, edge: 
   ]);
 }
 
+function createSwimlaneSkeletons(diagram: DiagramIR, nodeCount: number): ExcalidrawElementSkeleton[] {
+  if (diagram.type !== "flowchart") return [];
+  const lanes = getDiagramLanes(diagram);
+  if (lanes.length < 2) return [];
+
+  const viewport = getViewport(diagram);
+  const laneBlockWidth = Math.max(SWIMLANE_WIDTH, Math.floor((viewport.width - SWIMLANE_LEFT * 2) / lanes.length));
+  const laneHeight = Math.max(viewport.height - SWIMLANE_TOP * 2, nodeCount * FLOW_LEVEL_GAP + SWIMLANE_HEADER_HEIGHT + 132);
+  const palette = ["#F8FAFC", "#F7FEE7", "#EFF6FF", "#FFF7ED", "#FDF2F8", "#F0FDFA"];
+
+  return lanes.flatMap((lane, index) => {
+    const x = SWIMLANE_LEFT + index * laneBlockWidth;
+    const fill = palette[index % palette.length];
+    const label = lane.label.length > 18 ? `${lane.label.slice(0, 16)}...` : lane.label;
+    return [
+      {
+        type: "rectangle",
+        id: `lane-${lane.id}`,
+        x,
+        y: SWIMLANE_TOP,
+        width: laneBlockWidth,
+        height: laneHeight,
+        backgroundColor: fill,
+        strokeColor: "#CBD5E1",
+        strokeWidth: 1,
+        roughness: 0,
+        roundness: { type: 3, value: 8 },
+        customData: {
+          diagram_lane_id: lane.id,
+          label: lane.label,
+        },
+      },
+      {
+        type: "text",
+        id: `lane-label-${lane.id}`,
+        x: x + 16,
+        y: SWIMLANE_TOP + 12,
+        width: laneBlockWidth - 32,
+        height: 24,
+        text: label,
+        fontSize: 14,
+        strokeColor: "#334155",
+        backgroundColor: "transparent",
+        roughness: 0,
+        customData: {
+          diagram_lane_id: lane.id,
+          full_label: lane.label,
+        },
+      },
+    ] as ExcalidrawElementSkeleton[];
+  });
+}
+
 function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   const graph = getRenderableGraph(diagram);
   const layouts = createLayouts(graph.nodes, graph.edges, diagram);
+  const laneSkeleton = createSwimlaneSkeletons(diagram, graph.nodes.length);
   const edgeSkeleton: ExcalidrawElementSkeleton[] = [];
   const nodeSkeleton: ExcalidrawElementSkeleton[] = [];
 
@@ -755,7 +886,7 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   });
 
   return {
-    elements: convertToExcalidrawElements([...edgeSkeleton, ...nodeSkeleton], { regenerateIds: false }),
+    elements: convertToExcalidrawElements([...laneSkeleton, ...edgeSkeleton, ...nodeSkeleton], { regenerateIds: false }),
     appState: {
       viewBackgroundColor: "#F8FAFC",
       theme: "light",
@@ -804,12 +935,13 @@ function diagramLabel(diagram: DiagramIR) {
 export default function ExcalidrawDiagramCanvas({ diagram }: { diagram: DiagramIR }) {
   const initialData = useMemo(() => toExcalidrawInitialData(diagram), [diagram]);
   const viewport = getViewport(diagram);
-  const sceneKey = `${diagram.title}-${diagram.nodes.length}-${diagram.edges.length}-controlled`;
+  const laneCount = getDiagramLanes(diagram).length;
+  const sceneKey = `${diagram.title}-${diagram.nodes.length}-${diagram.edges.length}-${laneCount}-controlled`;
 
   return (
     <div
-      className="min-w-[860px] overflow-hidden rounded-xl border border-border bg-white shadow-sm-soft"
-      style={{ height: Math.max(viewport.height, 620) }}
+      className="overflow-hidden rounded-xl border border-border bg-white shadow-sm-soft"
+      style={{ minWidth: Math.max(viewport.width, 860), height: Math.max(viewport.height, 620) }}
       role="img"
       aria-label={`${diagram.title} ${diagramLabel(diagram)}`}
     >

@@ -8,6 +8,7 @@ export type {
   ChatSession,
   DiagramEdge,
   DiagramIR,
+  DiagramLane,
   DiagramNode,
   DiagramType,
   DocComment,

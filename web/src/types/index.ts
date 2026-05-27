@@ -174,6 +174,13 @@ export interface DiagramEdge {
   metadata: Record<string, unknown>;
 }
 
+export interface DiagramLane {
+  id: string;
+  label: string;
+  order?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DiagramQualityWarning {
   code: string;
   message: string;
@@ -204,6 +211,7 @@ export interface DiagramIR {
   layout_hint: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  lanes?: DiagramLane[];
   notes: string[];
   renderer?: string;
   reason?: string;

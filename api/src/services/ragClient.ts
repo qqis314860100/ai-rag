@@ -219,6 +219,13 @@ interface DiagramEdge {
   metadata: Record<string, unknown>;
 }
 
+export interface DiagramLane {
+  id: string;
+  label: string;
+  order?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface DiagramQualityWarning {
   code: string;
   message: string;
@@ -249,6 +256,7 @@ export interface DiagramIR {
   layout_hint: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  lanes?: DiagramLane[];
   notes: string[];
   renderer?: string;
   reason?: string;
@@ -362,27 +370,41 @@ const diagramWarningSchema = z.object({
   source_ids: z.array(z.string()).optional(),
 }).passthrough();
 
+const diagramLaneSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  order: z.number().optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
+const diagramNodeSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.string(),
+  description: z.string().optional(),
+  source_ids: z.array(z.string()),
+  metadata: unknownRecordSchema,
+}).passthrough();
+
+const diagramEdgeSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  relation: z.string(),
+  label: z.string().optional(),
+  metadata: unknownRecordSchema,
+}).passthrough();
+
+const FLOWCHART_NODE_KINDS = new Set(["start", "end", "input", "output", "step", "action", "decision", "subflow"]);
+
 const diagramIRSchema = z.object({
   title: z.string(),
   objective: z.string(),
   type: z.string(),
   diagram_type: z.string().optional(),
   layout_hint: z.string(),
-  nodes: z.array(z.object({
-    id: z.string(),
-    label: z.string(),
-    kind: z.string(),
-    description: z.string().optional(),
-    source_ids: z.array(z.string()),
-    metadata: unknownRecordSchema,
-  }).passthrough()),
-  edges: z.array(z.object({
-    source: z.string(),
-    target: z.string(),
-    relation: z.string(),
-    label: z.string().optional(),
-    metadata: unknownRecordSchema,
-  }).passthrough()),
+  nodes: z.array(diagramNodeSchema),
+  edges: z.array(diagramEdgeSchema),
+  lanes: z.array(diagramLaneSchema).optional(),
   notes: z.array(z.string()),
   renderer: z.string().optional(),
   reason: z.string().optional(),
@@ -405,7 +427,49 @@ const diagramIRSchema = z.object({
   source_evidence: z.array(unknownRecordSchema).optional(),
   excalidraw_scene: unknownRecordSchema.nullable().optional(),
   metadata: unknownRecordSchema,
-}).passthrough();
+}).passthrough().superRefine((diagram, ctx) => {
+  if (diagram.type !== "flowchart" || !diagram.lanes || diagram.lanes.length === 0) return;
+
+  const laneIds = new Set<string>();
+  diagram.lanes.forEach((lane, index) => {
+    if (!lane.id.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lanes", index, "id"],
+        message: "泳道 id 不能为空。",
+      });
+      return;
+    }
+    if (laneIds.has(lane.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lanes", index, "id"],
+        message: "泳道 id 必须唯一。",
+      });
+    }
+    laneIds.add(lane.id);
+  });
+
+  diagram.nodes.forEach((node, index) => {
+    if (!FLOWCHART_NODE_KINDS.has(node.kind)) return;
+    const laneId = node.metadata.lane_id;
+    if (typeof laneId !== "string" || !laneId.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nodes", index, "metadata", "lane_id"],
+        message: "带泳道的流程图节点必须声明 metadata.lane_id。",
+      });
+      return;
+    }
+    if (!laneIds.has(laneId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nodes", index, "metadata", "lane_id"],
+        message: "节点 metadata.lane_id 必须引用已声明的泳道。",
+      });
+    }
+  });
+});
 
 function parseRagContract<T>(label: string, schema: z.ZodType<T>, payload: unknown): T {
   const parsed = schema.safeParse(payload);
