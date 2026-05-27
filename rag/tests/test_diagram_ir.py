@@ -140,6 +140,59 @@ def test_build_llm_diagram_ir_uses_structured_business_nodes_only() -> None:
     assert ir.metadata["artifact_payload"]["renderer"] == "excalidraw"
 
 
+def test_build_llm_diagram_ir_preserves_flowchart_semantics_and_legacy_relations() -> None:
+    def fake_chat(messages, temperature=None, response_format=None):
+        assert "start|end|input|output|step|action|decision|subflow" in messages[1]["content"]
+        assert "loop|fallback|flows_to" in messages[1]["content"]
+        return {
+            "model": "fake-flow-semantics",
+            "content": """
+            {
+              "title": "返修闭环流程",
+              "objective": "保留流程图节点和边语义",
+              "type": "flowchart",
+              "layout_hint": "top_to_bottom",
+              "nodes": [
+                {"id": "begin", "label": "开始接收异常", "kind": "start", "source_ids": ["source-a"]},
+                {"id": "input-order", "label": "导入返修工单", "kind": "input", "source_ids": ["source-a"]},
+                {"id": "inspect", "label": "执行外观复检", "kind": "action", "source_ids": ["source-a"]},
+                {"id": "judge", "label": "是否复检通过", "kind": "decision", "source_ids": ["source-b"]},
+                {"id": "repair", "label": "进入返修子流程", "kind": "subflow", "source_ids": ["source-b"]},
+                {"id": "report", "label": "输出复检报告", "kind": "output", "source_ids": ["source-b"]},
+                {"id": "done", "label": "结束归档", "kind": "end", "source_ids": ["source-b"]}
+              ],
+              "edges": [
+                {"source": "begin", "target": "input-order", "relation": "sequence"},
+                {"source": "input-order", "target": "inspect", "relation": "flows_to"},
+                {"source": "inspect", "target": "judge", "relation": "condition", "label": "复检"},
+                {"source": "judge", "target": "repair", "relation": "fallback", "label": "不通过"},
+                {"source": "repair", "target": "inspect", "relation": "loop", "label": "返工后复检"},
+                {"source": "judge", "target": "report", "relation": "condition", "label": "通过"},
+                {"source": "report", "target": "done", "relation": "sequence"}
+              ],
+              "notes": ["覆盖新流程图语义"],
+              "confidence": 0.88
+            }
+            """,
+        }
+
+    ir = build_llm_diagram_ir(
+        title="返修闭环流程",
+        content="回答正文：开始接收异常后导入返修工单，复检不通过则进入返修子流程并回流复检，通过后输出报告并归档。",
+        source_ids=["source-a", "source-b"],
+        diagram_type="flowchart",
+        llm_chat=fake_chat,
+    )
+
+    assert [node.kind for node in ir.nodes] == ["start", "input", "action", "decision", "subflow", "output", "end"]
+    assert {"sequence", "flows_to", "condition", "fallback", "loop"} <= {edge.relation for edge in ir.edges}
+    assert ir.validation is not None
+    assert not any(warning.code == "unknown_node_kind" for warning in ir.validation.warnings)
+    assert not any(warning.code == "unknown_edge_relation" for warning in ir.validation.warnings)
+    assert all("layout" in node.metadata for node in ir.nodes)
+    assert all("render" in edge.metadata for edge in ir.edges)
+
+
 def test_build_llm_diagram_ir_falls_back_when_structured_output_is_invalid() -> None:
     def fake_chat(messages, temperature=None, response_format=None):
         return {"model": "fake-bad", "content": "无法生成 JSON"}

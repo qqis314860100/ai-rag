@@ -322,7 +322,7 @@
 
 定位：吸收“先拆对话/文档 -> 提取角色/动作/判断/分支 -> 梳理时序/循环 -> 输出标准流程图符号”的优秀思路，但必须落到本项目的 RAG structured output、API schema 校验和前端纯渲染链路中。详细设计见 [流程图语义生成架构方案](docs/流程图语义生成架构方案.md)。
 
-- [ ] `rag`: 扩展 `DiagramIR` 流程图节点和边语义，支持 start/end/input/output/step/action/decision/subflow，以及 sequence/condition/loop/fallback，并保持旧 DiagramIR 兼容。
+- [x] `rag`: 扩展 `DiagramIR` 流程图节点和边语义，支持 start/end/input/output/step/action/decision/subflow，以及 sequence/condition/loop/fallback，并保持旧 DiagramIR 兼容。
 - [ ] `rag`: 升级流程图 LLM structured output prompt，要求先提取角色、动作、判断、分支、循环和最终结果；无法形成流程时返回 `can_generate=false`。
 - [ ] `rag`: 增强流程图质量校验，强制 decision 至少两条带标签出边、loop 显式标注、业务节点绑定证据、节点数量超限时提示拆子流程。
 - [ ] `api`: 在 artifact 生成链路增加流程图质量门槛，低质量或低证据流程图不进入回答区，并将失败原因保存到 artifact metadata。

@@ -156,8 +156,19 @@ _PARAMETER_PATTERN = r"\d+(?:\.\d+)?\s?(?:V|mA|A|MΩ|GΩ|Ω|秒|s|PPM|%RH|%)|≥
 _MAX_MINDMAP_CATEGORIES = 5
 _MAX_KEYWORDS_PER_CATEGORY = 4
 _ALLOWED_DIAGRAM_TYPES = {"mindmap", "flowchart", "graph"}
-_ALLOWED_NODE_KINDS = {"root", "category", "keyword", "evidence", "step", "decision", "action", "topic", "equipment", "parameter", "risk"}
-_ALLOWED_EDGE_RELATIONS = {"contains", "supported_by", "sequence", "condition", "flows_to", "relates_to"}
+_FLOWCHART_NODE_KINDS = {"start", "end", "input", "output", "step", "action", "decision", "subflow"}
+_ALLOWED_NODE_KINDS = {
+    "root",
+    "category",
+    "keyword",
+    "evidence",
+    *_FLOWCHART_NODE_KINDS,
+    "topic",
+    "equipment",
+    "parameter",
+    "risk",
+}
+_ALLOWED_EDGE_RELATIONS = {"contains", "supported_by", "sequence", "condition", "loop", "fallback", "flows_to", "relates_to"}
 _STRUCTURED_OUTPUT_FORMAT = {"type": "json_object"}
 
 
@@ -403,6 +414,50 @@ _NODE_RENDER_STYLES: dict[str, dict[str, Any]] = {
         "labelMaxLength": 20,
         "maxLines": 2,
     },
+    "start": {
+        "shape": "rounded",
+        "fill": "#ECFDF5",
+        "stroke": "#059669",
+        "text": "#065F46",
+        "radius": 24,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "end": {
+        "shape": "rounded",
+        "fill": "#F8FAFC",
+        "stroke": "#475569",
+        "text": "#334155",
+        "radius": 24,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 18,
+        "maxLines": 2,
+    },
+    "input": {
+        "shape": "rounded",
+        "fill": "#EFF6FF",
+        "stroke": "#2563EB",
+        "text": "#1E3A8A",
+        "radius": 12,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 20,
+        "maxLines": 2,
+    },
+    "output": {
+        "shape": "rounded",
+        "fill": "#F5F3FF",
+        "stroke": "#7C3AED",
+        "text": "#5B21B6",
+        "radius": 12,
+        "fontSize": 12,
+        "fontWeight": 600,
+        "labelMaxLength": 20,
+        "maxLines": 2,
+    },
     "parameter": {
         "shape": "rounded",
         "fill": "#ECFEFF",
@@ -447,6 +502,17 @@ _NODE_RENDER_STYLES: dict[str, dict[str, Any]] = {
         "labelMaxLength": 18,
         "maxLines": 2,
     },
+    "subflow": {
+        "shape": "rounded",
+        "fill": "#F0FDFA",
+        "stroke": "#0D9488",
+        "text": "#115E59",
+        "radius": 10,
+        "fontSize": 12,
+        "fontWeight": 700,
+        "labelMaxLength": 20,
+        "maxLines": 2,
+    },
     "evidence": {
         "shape": "rounded",
         "fill": "#F8FAFC",
@@ -476,6 +542,10 @@ _EDGE_RENDER_STYLES: dict[str, dict[str, Any]] = {
     "supported_by": {"stroke": "#CBD5E1", "strokeWidth": 1.2, "strokeDasharray": "5 6", "curve": "horizontal", "arrow": False},
     "sequence": {"stroke": "#64748B", "strokeWidth": 2.0, "curve": "vertical", "arrow": True},
     "condition": {"stroke": "#D97706", "strokeWidth": 1.8, "curve": "vertical", "arrow": True},
+    "loop": {"stroke": "#2563EB", "strokeWidth": 1.8, "strokeDasharray": "4 5", "curve": "vertical", "arrow": True},
+    "fallback": {"stroke": "#DC2626", "strokeWidth": 1.8, "strokeDasharray": "6 5", "curve": "vertical", "arrow": True},
+    "flows_to": {"stroke": "#64748B", "strokeWidth": 2.0, "curve": "vertical", "arrow": True},
+    "relates_to": {"stroke": "#94A3B8", "strokeWidth": 1.4, "curve": "vertical", "arrow": True},
 }
 
 
@@ -612,7 +682,7 @@ def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
 
 
 def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
-    flow_nodes = [node for node in ir.nodes if node.kind in {"step", "decision", "action"}]
+    flow_nodes = [node for node in ir.nodes if node.kind in _FLOWCHART_NODE_KINDS]
     viewport_width = 980
     viewport_height = max(620, len(flow_nodes) * 168 + 140)
     center_x = viewport_width // 2
@@ -621,6 +691,10 @@ def _apply_flowchart_layout(ir: DiagramIR) -> DiagramIR:
         y = 86 + index * 168
         if node.kind == "decision":
             _set_layout(node, center_x - 160, y - 58, 320, 116, "decision")
+        elif node.kind in {"start", "end"}:
+            _set_layout(node, center_x - 160, y - 34, 320, 68, node.kind)
+        elif node.kind in {"input", "output", "subflow"}:
+            _set_layout(node, center_x - 210, y - 38, 420, 76, node.kind)
         elif node.kind == "action":
             _set_layout(node, center_x - 210, y - 38, 420, 76, "action")
         else:
@@ -1148,7 +1222,7 @@ def _build_structured_diagram_messages(
             {
                 "id": "stable kebab-case id",
                 "label": "short business label",
-                "kind": "root|category|keyword|topic|step|decision|action|equipment|parameter|risk",
+                "kind": "root|category|keyword|topic|start|end|input|output|step|action|decision|subflow|equipment|parameter|risk",
                 "description": "one short evidence-backed explanation",
                 "source_ids": ["one or more source ids from the provided mapping"],
             }
@@ -1157,7 +1231,7 @@ def _build_structured_diagram_messages(
             {
                 "source": "source node id",
                 "target": "target node id",
-                "relation": "contains|sequence|condition|flows_to|relates_to",
+                "relation": "contains|sequence|condition|loop|fallback|flows_to|relates_to",
                 "label": "optional short label",
             }
         ],
@@ -1172,8 +1246,9 @@ def _build_structured_diagram_messages(
         "2. 节点必须是回答中的业务概念、步骤、参数、风险或动作，禁止创建 evidence/source/citation/引用 节点。\n"
         "3. 引用只能写入节点 source_ids，source_ids 只能来自用户提供的映射。\n"
         "4. 图要精简，节点数量不超过用户要求，标签短而具体，不要复述整段证据。\n"
-        "5. mindmap 需要一个 root 节点，并用 contains 连接分类或主题；flowchart 使用 sequence/condition/flows_to 表达流程。\n"
-        "6. 如果证据不足以生成某个节点，不要编造。"
+        "5. mindmap 需要一个 root 节点，并用 contains 连接分类或主题。\n"
+        "6. flowchart 优先使用 start/end/input/output/step/action/decision/subflow 节点；sequence 表达主线，condition 表达判断分支，loop 表达回流重试，fallback 表达异常或失败兜底，flows_to 仅用于旧结构兼容。\n"
+        "7. 如果证据不足以生成某个节点，不要编造。"
     )
     user = (
         f"目标标题：{title}\n"
@@ -1219,17 +1294,42 @@ def _safe_node_id(value: str, fallback: str, used_ids: set[str]) -> str:
 def _normalize_llm_node_kind(kind: str, label: str, diagram_type: str) -> str:
     normalized = kind.strip().lower().replace("-", "_")
     aliases = {
+        "begin": "start",
+        "entry": "start",
+        "terminal_start": "start",
+        "finish": "end",
+        "done": "end",
+        "terminal_end": "end",
+        "io": "input",
+        "data": "input",
+        "result": "output",
+        "outcome": "output",
+        "process": "step",
+        "subprocess": "subflow",
+        "sub_process": "subflow",
+        "sub_flow": "subflow",
         "source": "evidence",
         "citation": "evidence",
         "reference": "evidence",
         "concept": "topic",
-        "process": "step",
         "condition": "decision",
     }
     normalized = aliases.get(normalized, normalized)
     if normalized == "evidence":
         return "evidence"
     if diagram_type == "flowchart":
+        if normalized in _FLOWCHART_NODE_KINDS:
+            return normalized
+        if re.search(r"开始|启动|入口|发起", label):
+            return "start"
+        if re.search(r"结束|完成|关闭|归档", label):
+            return "end"
+        if re.search(r"输入|导入|接收|提交|上传", label):
+            return "input"
+        if re.search(r"输出|生成|产出|发布|回显", label):
+            return "output"
+        if re.search(r"子流程|子任务|并行处理|复用流程", label):
+            return "subflow"
         if normalized == "decision" or re.search(_DECISION_PATTERN, label):
             return "decision"
         if normalized == "action" or re.search(_ACTION_PATTERN, label):
@@ -1246,7 +1346,20 @@ def _normalize_llm_edge_relation(relation: str, diagram_type: str) -> str:
     aliases = {
         "next": "sequence",
         "then": "sequence",
+        "main": "sequence",
         "depends_on": "condition",
+        "branch": "condition",
+        "if": "condition",
+        "yes": "condition",
+        "no": "condition",
+        "retry": "loop",
+        "repeat": "loop",
+        "back": "loop",
+        "fallback_path": "fallback",
+        "exception": "fallback",
+        "error": "fallback",
+        "failure": "fallback",
+        "fail": "fallback",
         "supports": "supported_by",
         "support": "supported_by",
         "includes": "contains",
