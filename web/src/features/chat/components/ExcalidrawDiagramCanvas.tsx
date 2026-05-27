@@ -122,32 +122,38 @@ function nodeCenter(layout: NodeLayout) {
   };
 }
 
+function edgeAnchor(layout: NodeLayout, toward: { x: number; y: number }, gap = 14) {
+  const center = nodeCenter(layout);
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  if (dx === 0 && dy === 0) return center;
+
+  const halfWidth = layout.width / 2;
+  const halfHeight = layout.height / 2;
+  const scale = Math.min(
+    dx === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(dx),
+    dy === 0 ? Number.POSITIVE_INFINITY : halfHeight / Math.abs(dy),
+  );
+  const edgeX = center.x + dx * scale;
+  const edgeY = center.y + dy * scale;
+  const length = Math.max(Math.hypot(dx, dy), 1);
+  return {
+    x: edgeX + (dx / length) * gap,
+    y: edgeY + (dy / length) * gap,
+  };
+}
+
 function connectorPoints(source: NodeLayout, target: NodeLayout) {
   const sourceCenter = nodeCenter(source);
   const targetCenter = nodeCenter(target);
-  const dx = targetCenter.x - sourceCenter.x;
-  const dy = targetCenter.y - sourceCenter.y;
-
-  if (Math.abs(dy) >= Math.abs(dx)) {
-    const sourceY = dy >= 0 ? source.y + source.height + 10 : source.y - 10;
-    const targetY = dy >= 0 ? target.y - 10 : target.y + target.height + 10;
-    return {
-      x: sourceCenter.x,
-      y: sourceY,
-      width: targetCenter.x - sourceCenter.x,
-      height: targetY - sourceY,
-      points: [[0, 0], [targetCenter.x - sourceCenter.x, targetY - sourceY]],
-    };
-  }
-
-  const sourceX = dx >= 0 ? source.x + source.width + 10 : source.x - 10;
-  const targetX = dx >= 0 ? target.x - 10 : target.x + target.width + 10;
+  const start = edgeAnchor(source, targetCenter);
+  const end = edgeAnchor(target, sourceCenter);
   return {
-    x: sourceX,
-    y: sourceCenter.y,
-    width: targetX - sourceX,
-    height: targetCenter.y - sourceCenter.y,
-    points: [[0, 0], [targetX - sourceX, targetCenter.y - sourceCenter.y]],
+    x: start.x,
+    y: start.y,
+    width: end.x - start.x,
+    height: end.y - start.y,
+    points: [[0, 0], [end.x - start.x, end.y - start.y]],
   };
 }
 
@@ -157,7 +163,74 @@ function getRenderableGraph(diagram: DiagramIR) {
   const edges = diagram.edges.filter((edge) => {
     return nodeIds.has(edge.source) && nodeIds.has(edge.target);
   });
+  if (diagram.type === "mindmap") {
+    return { nodes, edges: normalizeMindmapEdges(nodes, edges) };
+  }
   return { nodes, edges };
+}
+
+function uniqueEdges(edges: DiagramEdge[]) {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    const key = `${edge.source}->${edge.target}:${edge.relation}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return edge.source !== edge.target;
+  });
+}
+
+function normalizeMindmapEdges(nodes: DiagramNode[], edges: DiagramEdge[]) {
+  const root = nodes.find((node) => node.kind === "root") ?? nodes[0];
+  if (!root) return edges;
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const childrenBySource = new Map<string, DiagramEdge[]>();
+  edges.forEach((edge) => {
+    const list = childrenBySource.get(edge.source) ?? [];
+    list.push(edge);
+    childrenBySource.set(edge.source, list);
+  });
+
+  const categories = nodes.filter((node) => node.kind === "category");
+  const rebuilt: DiagramEdge[] = [];
+  const connected = new Set([root.id]);
+
+  if (categories.length > 0) {
+    categories.forEach((category) => {
+      rebuilt.push({ source: root.id, target: category.id, relation: "contains", metadata: {} });
+      connected.add(category.id);
+
+      (childrenBySource.get(category.id) ?? []).forEach((edge) => {
+        const target = nodeById.get(edge.target);
+        if (!target || target.kind === "root" || target.kind === "category") return;
+        rebuilt.push({ ...edge, source: category.id, target: target.id, relation: target.kind === "evidence" ? "supported_by" : "contains" });
+        connected.add(target.id);
+      });
+    });
+
+    nodes.forEach((node) => {
+      if (!connected.has(node.id) && node.kind !== "evidence") {
+        rebuilt.push({ source: root.id, target: node.id, relation: "contains", metadata: {} });
+        connected.add(node.id);
+      }
+    });
+  } else {
+    nodes.forEach((node) => {
+      if (node.id !== root.id && node.kind !== "evidence") {
+        rebuilt.push({ source: root.id, target: node.id, relation: "contains", metadata: {} });
+        connected.add(node.id);
+      }
+    });
+  }
+
+  edges.forEach((edge) => {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    if (!source || !target || target.kind !== "evidence") return;
+    rebuilt.push({ ...edge, relation: "supported_by" });
+  });
+
+  return uniqueEdges(rebuilt);
 }
 
 function createLayouts(nodes: DiagramNode[]) {
@@ -267,6 +340,11 @@ function createProvidedScene(diagram: DiagramIR): ExcalidrawInitialDataState | n
 }
 
 function toExcalidrawInitialData(diagram: DiagramIR): ExcalidrawInitialDataState {
+  const renderer = diagram.metadata?.renderer;
+  const legacyRenderer = diagram.metadata?.legacy_renderer;
+  if (renderer === "excalidraw" && legacyRenderer === "positioned-svg") {
+    return createFallbackScene(diagram);
+  }
   return createProvidedScene(diagram) || createFallbackScene(diagram);
 }
 

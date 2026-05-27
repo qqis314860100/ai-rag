@@ -495,12 +495,71 @@ def _apply_edge_render(edges: list[DiagramEdge]) -> None:
         edge.metadata["render"] = dict(_EDGE_RENDER_STYLES.get(edge.relation) or _EDGE_RENDER_STYLES["contains"])
 
 
+def _dedupe_edges(edges: list[DiagramEdge]) -> list[DiagramEdge]:
+    result: list[DiagramEdge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for edge in edges:
+        if not edge.source or not edge.target or edge.source == edge.target:
+            continue
+        key = (edge.source, edge.target, edge.relation)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(edge)
+    return result
+
+
+def _normalize_mindmap_edges(ir: DiagramIR, root: DiagramNode, children: dict[str, list[str]]) -> None:
+    nodes = _node_by_id(ir.nodes)
+    categories = [node for node in ir.nodes if node.kind == "category"]
+    category_ids = {node.id for node in categories}
+    rebuilt: list[DiagramEdge] = []
+    connected: set[str] = {root.id}
+
+    if categories:
+        for category in categories:
+            rebuilt.append(DiagramEdge(source=root.id, target=category.id, relation="contains", metadata={"normalized_by": "mindmap_hierarchy"}))
+            connected.add(category.id)
+
+            for target_id in children.get(category.id, []):
+                target = nodes.get(target_id)
+                if not target or target.kind in {"root", "category"}:
+                    continue
+                rebuilt.append(DiagramEdge(source=category.id, target=target.id, relation="contains", metadata={"normalized_by": "mindmap_hierarchy"}))
+                connected.add(target.id)
+
+        # 没有明确分类归属的节点只作为一级节点，避免同层串线和反向箭头。
+        for node in ir.nodes:
+            if node.id not in connected and node.kind != "evidence":
+                rebuilt.append(DiagramEdge(source=root.id, target=node.id, relation="contains", metadata={"normalized_by": "mindmap_hierarchy", "fallback_parent": True}))
+                connected.add(node.id)
+    else:
+        for node in ir.nodes:
+            if node.id != root.id and node.kind != "evidence":
+                rebuilt.append(DiagramEdge(source=root.id, target=node.id, relation="contains", metadata={"normalized_by": "mindmap_hierarchy"}))
+                connected.add(node.id)
+
+    for edge in ir.edges:
+        source = nodes.get(edge.source)
+        target = nodes.get(edge.target)
+        if not source or not target or target.kind != "evidence":
+            continue
+        parent = source.id if source.kind != "root" else (next(iter(category_ids), root.id))
+        rebuilt.append(DiagramEdge(source=parent, target=target.id, relation="supported_by", metadata={"normalized_by": "mindmap_hierarchy"}))
+        connected.add(target.id)
+
+    ir.edges = _dedupe_edges(rebuilt)
+
+
 def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
     nodes = _node_by_id(ir.nodes)
     children = _children_by_source(ir.edges)
     root = next((node for node in ir.nodes if node.kind == "root"), ir.nodes[0] if ir.nodes else None)
     if not root:
         return ir
+
+    _normalize_mindmap_edges(ir, root, children)
+    children = _children_by_source(ir.edges)
 
     categories = [nodes[node_id] for node_id in children.get(root.id, []) if node_id in nodes]
     category_blocks: list[tuple[DiagramNode, list[str], int, int]] = []
@@ -681,14 +740,37 @@ def _excalidraw_node_elements(node: DiagramNode, index: int) -> list[dict[str, A
     return [node_element, text_element]
 
 
+def _layout_center(layout: dict[str, int]) -> tuple[float, float]:
+    return layout["x"] + layout["width"] / 2, layout["y"] + layout["height"] / 2
+
+
+def _edge_anchor(layout: dict[str, int], toward: tuple[float, float], gap: int = 14) -> tuple[float, float]:
+    center_x, center_y = _layout_center(layout)
+    dx = toward[0] - center_x
+    dy = toward[1] - center_y
+    if dx == 0 and dy == 0:
+        return center_x, center_y
+
+    half_width = layout["width"] / 2
+    half_height = layout["height"] / 2
+    scale = min(
+        half_width / abs(dx) if dx else float("inf"),
+        half_height / abs(dy) if dy else float("inf"),
+    )
+    edge_x = center_x + dx * scale
+    edge_y = center_y + dy * scale
+    length = max((dx * dx + dy * dy) ** 0.5, 1)
+    return edge_x + dx / length * gap, edge_y + dy / length * gap
+
+
 def _edge_points(source: DiagramNode, target: DiagramNode, source_index: int, target_index: int) -> tuple[float, float, float, float]:
     source_layout = _node_layout(source, source_index)
     target_layout = _node_layout(target, target_index)
-    source_x = source_layout["x"] + source_layout["width"] / 2
-    source_y = source_layout["y"] + source_layout["height"] / 2
-    target_x = target_layout["x"] + target_layout["width"] / 2
-    target_y = target_layout["y"] + target_layout["height"] / 2
-    return source_x, source_y, target_x, target_y
+    source_center = _layout_center(source_layout)
+    target_center = _layout_center(target_layout)
+    start_x, start_y = _edge_anchor(source_layout, target_center)
+    end_x, end_y = _edge_anchor(target_layout, source_center)
+    return start_x, start_y, end_x, end_y
 
 
 def _excalidraw_edge_element(
@@ -709,8 +791,8 @@ def _excalidraw_edge_element(
             "strokeWidth": int(float(render.get("strokeWidth", 2))),
             "strokeStyle": "dashed" if render.get("strokeDasharray") else "solid",
             "points": [[0, 0], [end_x - start_x, end_y - start_y]],
-            "startBinding": {"elementId": f"node-{source.id}", "focus": 0, "gap": 10},
-            "endBinding": {"elementId": f"node-{target.id}", "focus": 0, "gap": 10},
+            "startBinding": None,
+            "endBinding": None,
             "startArrowhead": None,
             "endArrowhead": "arrow" if render.get("arrow", True) else None,
             "elbowed": False,
@@ -928,15 +1010,13 @@ def _build_generation_reason(ir: DiagramIR, evidence: list[dict[str, Any]]) -> s
 def _build_excalidraw_scene(ir: DiagramIR) -> dict[str, Any]:
     node_indexes = {node.id: index for index, node in enumerate(ir.nodes)}
     nodes = _node_by_id(ir.nodes)
-    elements: list[dict[str, Any]] = []
-    for index, node in enumerate(ir.nodes):
-        elements.extend(_excalidraw_node_elements(node, index))
+    edge_elements: list[dict[str, Any]] = []
     for index, edge in enumerate(ir.edges):
         source = nodes.get(edge.source)
         target = nodes.get(edge.target)
         if not source or not target:
             continue
-        elements.append(
+        edge_elements.append(
             _excalidraw_edge_element(
                 edge,
                 source,
@@ -946,13 +1026,16 @@ def _build_excalidraw_scene(ir: DiagramIR) -> dict[str, Any]:
                 index,
             )
         )
+    node_elements: list[dict[str, Any]] = []
+    for index, node in enumerate(ir.nodes):
+        node_elements.extend(_excalidraw_node_elements(node, index))
 
     viewport = ir.metadata.get("viewport") if isinstance(ir.metadata.get("viewport"), dict) else {}
     return {
         "type": "excalidraw",
         "version": 2,
         "source": "ai-rag/rag/diagram_ir",
-        "elements": elements,
+        "elements": [*edge_elements, *node_elements],
         "appState": {
             "viewBackgroundColor": "#FFFFFF",
             "gridSize": None,
@@ -1002,8 +1085,8 @@ def _attach_artifact_payload(ir: DiagramIR, content: str, source_ids: list[str])
         "type": ir.type,
         "renderer": "excalidraw",
         "scene_format": "excalidraw",
-        "scene_version": scene["version"],
-        "element_count": len(scene["elements"]),
+            "scene_version": scene["version"],
+            "element_count": len(scene["elements"]),
         "reason": reason,
         "confidence": confidence,
         "can_generate": ir.can_generate,
