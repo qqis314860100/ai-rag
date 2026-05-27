@@ -338,7 +338,7 @@
 - [x] `repo`: 项目内安装 Impeccable skill，并补齐 `PRODUCT.md` / `DESIGN.md` / UI 协作工作流文档，作为后续前端设计任务上下文。
 - [x] `web`: 使用 Impeccable critique/polish/adapt 工作流审查聊天页、ArtifactCard、ArtifactModal、ConversationNavigator 和图解弹窗，输出第一轮 UI 问题清单。见 [第一轮 UI 质量审查问题清单](docs/第一轮 UI 质量审查问题清单.md)。
 - [x] `web`: 根据第一轮 UI 问题清单，优先修复影响信任感和可读性的 P0/P1 问题，并用桌面/移动截图验收。见 [聊天页 UI 修复验收](docs/聊天页 UI 修复验收.md)。
-- [ ] `web`: 将可复用的按钮、badge、modal、artifact 卡片和空态规则沉淀到通用 UI 组件，减少页面级临时样式。
+- [x] `web`: 将可复用的按钮、badge、modal、artifact 卡片和空态规则沉淀到通用 UI 组件，减少页面级临时样式。见 [聊天页 UI 组件沉淀说明](docs/聊天页 UI 组件沉淀说明.md)。
 
 ### 企业级知识工作台
 

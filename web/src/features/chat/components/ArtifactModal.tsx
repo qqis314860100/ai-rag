@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Code2, Maximize2, Network, X } from "lucide-react";
+import { Code2, Maximize2, Network } from "lucide-react";
+import { ModalShell } from "../../../components/ui";
 import type { ChatArtifact, DiagramEdge, DiagramIR, DiagramLane, DiagramNode } from "../types";
 import { DiagramCanvas } from "./DiagramModal";
 
@@ -98,50 +98,19 @@ export default function ArtifactModal({ artifact, onClose }: ArtifactModalProps)
   const nodeCount = diagram?.nodes.length ?? 0;
   const edgeCount = diagram?.edges.length ?? 0;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 p-0 backdrop-blur-sm sm:px-4 sm:py-6" onClick={onClose}>
-      <div
-        className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden border border-border bg-white shadow-xl-soft sm:max-h-[880px] sm:rounded-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-divider px-5 py-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-              <Network className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-text-muted">
-                {artifactKindLabel(artifact)}
-                {diagram ? ` · ${nodeCount} 节点 · ${edgeCount} 连线` : " · 原始数据"}
-              </p>
-              <h2 className="truncate text-base font-semibold text-text">{artifact.title || "AI 整理产物"}</h2>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {diagram && (
-              <span className="hidden items-center gap-1.5 rounded-lg border border-border bg-surface-page px-2.5 py-1.5 text-xs text-text-muted sm:inline-flex">
-                <Maximize2 className="h-3.5 w-3.5" />
-                滚动查看
-              </span>
-            )}
-            <button
-              onClick={onClose}
-              className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface-hover hover:text-text"
-              title="关闭"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </header>
-
+    <ModalShell
+      title={artifact.title || "AI 整理产物"}
+      eyebrow={diagram ? `${artifactKindLabel(artifact)} · ${nodeCount} 节点 · ${edgeCount} 连线` : `${artifactKindLabel(artifact)} · 原始数据`}
+      icon={<Network className="h-5 w-5" />}
+      actions={diagram && (
+        <span className="hidden items-center gap-1.5 rounded-lg border border-border bg-surface-page px-2.5 py-1.5 text-xs text-text-muted sm:inline-flex">
+          <Maximize2 className="h-3.5 w-3.5" />
+          滚动查看
+        </span>
+      )}
+      onClose={onClose}
+    >
         <div className="min-h-0 flex-1 overflow-auto bg-surface-page p-5">
           {diagram ? (
             <DiagramCanvas diagram={diagram} />
@@ -157,7 +126,6 @@ export default function ArtifactModal({ artifact, onClose }: ArtifactModalProps)
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

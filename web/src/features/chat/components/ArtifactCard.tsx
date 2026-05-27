@@ -1,4 +1,5 @@
 import { AlertCircle, BarChart3, Brain, CheckCircle2, Clock, Eye, FileText, Network, Workflow, XCircle } from "lucide-react";
+import { ActionButton, StatusBadge as UiStatusBadge } from "../../../components/ui";
 import type { ChatArtifact } from "../types";
 
 interface ArtifactCardProps {
@@ -14,30 +15,27 @@ function artifactLabel(artifact: ChatArtifact) {
   return artifact.type || "产物";
 }
 
-function StatusBadge({ status }: { status: ChatArtifact["status"] }) {
+function ArtifactStatus({ status }: { status: ChatArtifact["status"] }) {
   if (status === "ready") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-success-soft px-2 py-1 text-[11px] font-medium text-success">
-        <CheckCircle2 className="h-3 w-3" />
+      <UiStatusBadge tone="success" icon={<CheckCircle2 className="h-3 w-3" />}>
         可查看
-      </span>
+      </UiStatusBadge>
     );
   }
 
   if (status === "failed") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md bg-danger-soft px-2 py-1 text-[11px] font-medium text-danger">
-        <XCircle className="h-3 w-3" />
+      <UiStatusBadge tone="danger" icon={<XCircle className="h-3 w-3" />}>
         失败
-      </span>
+      </UiStatusBadge>
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-surface-hover px-2 py-1 text-[11px] font-medium text-text-muted">
-      <Clock className="h-3 w-3" />
+    <UiStatusBadge tone="muted" icon={<Clock className="h-3 w-3" />}>
       处理中
-    </span>
+    </UiStatusBadge>
   );
 }
 
@@ -66,7 +64,7 @@ export default function ArtifactCard({ artifact, onOpen }: ArtifactCardProps) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={artifact.status} />
+            <ArtifactStatus status={artifact.status} />
             {evidenceLabel && (
               <span className="text-[11px] font-medium text-text-muted">{evidenceLabel}</span>
             )}
@@ -87,16 +85,15 @@ export default function ArtifactCard({ artifact, onOpen }: ArtifactCardProps) {
             </p>
           )}
         </div>
-        <button
-          type="button"
+        <ActionButton
           onClick={() => onOpen(artifact)}
           disabled={!isReady}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-page px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 bg-surface-page disabled:opacity-50"
+          icon={<Eye className="h-3.5 w-3.5" />}
           title={isReady ? "查看产物" : "产物未就绪"}
         >
-          <Eye className="h-3.5 w-3.5" />
           查看
-        </button>
+        </ActionButton>
       </div>
     </article>
   );

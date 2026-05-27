@@ -6,6 +6,7 @@ import ArtifactCard from "./ArtifactCard";
 import ArtifactModal from "./ArtifactModal";
 import { api } from "../../../services/api";
 import { showToast } from "../../../components/ui/Toast";
+import { ActionButton } from "../../../components/ui";
 
 interface ChatThreadProps {
   messages: ChatMessage[];
@@ -624,31 +625,27 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                         <FileCheck className="h-3.5 w-3.5 text-accent" />
                         整理回答
                       </span>
-                      <button
-                        type="button"
+                      <ActionButton
                         onClick={() => onFollowUp("请把上一条回答整理成 3 条关键结论，并保留必要的引用依据。")}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent"
+                        icon={<FileCheck className="h-3.5 w-3.5" />}
                         title="让 AI 基于本条回答继续总结"
                       >
-                        <FileCheck className="h-3.5 w-3.5" />
                         总结
-                      </button>
+                      </ActionButton>
                       {(["card", "faq"] as const).map((assetType) => {
                         const Icon = assetType === "card" ? BookMarked : CircleHelp;
                         const status = assetType === "card" ? assetStatus.card : assetStatus.faq;
                         return (
-                          <button
+                          <ActionButton
                             key={assetType}
-                            type="button"
                             onClick={() => onCreateKnowledgeAssetDraft?.(persistedMessageId, assetType)}
                             disabled={!onCreateKnowledgeAssetDraft || Boolean(status)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                            icon={<Icon className="h-3.5 w-3.5" />}
                             title={status ? `${assetType === "card" ? "知识卡" : "FAQ"}：${assetStatusLabel(status)}` : `沉淀为${assetType === "card" ? "知识卡" : "FAQ"}草稿`}
                           >
-                            <Icon className="h-3.5 w-3.5" />
                             {assetType === "card" ? "知识卡" : "FAQ"}
                             {status && <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent">{assetStatusLabel(status)}</span>}
-                          </button>
+                          </ActionButton>
                         );
                       })}
                       {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
@@ -656,17 +653,15 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                         const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.type === type || artifact.metadata?.diagram_type === type);
                         const Icon = type === "mindmap" ? Brain : Workflow;
                         return (
-                          <button
+                          <ActionButton
                             key={type}
-                            type="button"
                             onClick={() => void generateDiagram(msg, type, state?.data || existingArtifact)}
                             disabled={state?.loading}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                            icon={state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
                             title={getDiagramButtonLabel(type, Boolean(state?.data || existingArtifact))}
                           >
-                            {state?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
                             {getDiagramActionLabel(type, Boolean(state?.data || existingArtifact))}
-                          </button>
+                          </ActionButton>
                         );
                       })}
                       {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
