@@ -106,12 +106,21 @@ function getEdgeRender(edge: DiagramEdge): EdgeRender {
 
 function getNodeLayout(node: DiagramNode, index: number): NodeLayout {
   const layout = node.metadata?.layout as Partial<NodeLayout> | undefined;
-  const render = getNodeRender(node);
-  return fitLayoutToLabel({
+  return fitNodeLayout(node, {
     x: typeof layout?.x === "number" ? layout.x : 80 + (index % 4) * 210,
     y: typeof layout?.y === "number" ? layout.y : 80 + Math.floor(index / 4) * 120,
     width: typeof layout?.width === "number" ? layout.width : 170,
     height: typeof layout?.height === "number" ? layout.height : 64,
+  });
+}
+
+function fitNodeLayout(node: DiagramNode, layout: NodeLayout): NodeLayout {
+  const render = getNodeRender(node);
+  return fitLayoutToLabel({
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
   }, compactLabel(node, render), render);
 }
 
@@ -143,6 +152,15 @@ function edgeAnchor(layout: NodeLayout, toward: { x: number; y: number }, gap = 
   };
 }
 
+function sideAnchor(layout: NodeLayout, side: "left" | "right", gap = 14) {
+  const center = nodeCenter(layout);
+  const direction = side === "right" ? 1 : -1;
+  return {
+    x: center.x + direction * (layout.width / 2 + gap),
+    y: center.y,
+  };
+}
+
 function connectorPoints(source: NodeLayout, target: NodeLayout) {
   const sourceCenter = nodeCenter(source);
   const targetCenter = nodeCenter(target);
@@ -154,6 +172,25 @@ function connectorPoints(source: NodeLayout, target: NodeLayout) {
     width: end.x - start.x,
     height: end.y - start.y,
     points: [[0, 0], [end.x - start.x, end.y - start.y]],
+  };
+}
+
+function mindmapConnectorPoints(source: NodeLayout, target: NodeLayout) {
+  const sourceCenter = nodeCenter(source);
+  const targetCenter = nodeCenter(target);
+  const targetOnRight = targetCenter.x >= sourceCenter.x;
+  const start = sideAnchor(source, targetOnRight ? "right" : "left", 12);
+  const end = sideAnchor(target, targetOnRight ? "left" : "right", 12);
+  const width = end.x - start.x;
+  const height = end.y - start.y;
+
+  // 思维导图只表达父子归属，使用独立侧边连线，避免形成总线或流程感。
+  return {
+    x: start.x,
+    y: start.y,
+    width,
+    height,
+    points: [[0, 0], [width, height]],
   };
 }
 
@@ -233,13 +270,91 @@ function normalizeMindmapEdges(nodes: DiagramNode[], edges: DiagramEdge[]) {
   return uniqueEdges(rebuilt);
 }
 
-function createLayouts(nodes: DiagramNode[]) {
+function childrenBySource(edges: DiagramEdge[]) {
+  const children = new Map<string, string[]>();
+  edges.forEach((edge) => {
+    const list = children.get(edge.source) ?? [];
+    list.push(edge.target);
+    children.set(edge.source, list);
+  });
+  return children;
+}
+
+function distributeBranches(nodes: DiagramNode[], root: DiagramNode, edges: DiagramEdge[]) {
+  const children = childrenBySource(edges);
+  const directChildren = (children.get(root.id) ?? [])
+    .map((id) => nodes.find((node) => node.id === id))
+    .filter((node): node is DiagramNode => node !== undefined);
+  const branches = directChildren.length > 0 ? directChildren : nodes.filter((node) => node.id !== root.id && node.kind !== "evidence");
+  const left: DiagramNode[] = [];
+  const right: DiagramNode[] = [];
+  branches.forEach((node, index) => {
+    const layout = node.metadata?.layout as Partial<NodeLayout> | undefined;
+    if (typeof layout?.x === "number") {
+      const rootLayout = root.metadata?.layout as Partial<NodeLayout> | undefined;
+      const rootX = typeof rootLayout?.x === "number" ? rootLayout.x : 490;
+      (layout.x < rootX ? left : right).push(node);
+      return;
+    }
+    (index % 2 === 0 ? left : right).push(node);
+  });
+  return { left, right, children };
+}
+
+function branchSlot(index: number, total: number, centerY: number, gap: number) {
+  return centerY + (index - (total - 1) / 2) * gap;
+}
+
+function createMindmapLayouts(nodes: DiagramNode[], edges: DiagramEdge[], viewport: { width: number; height: number }) {
+  const layouts = new Map<string, NodeLayout>();
+  const root = nodes.find((node) => node.kind === "root") ?? nodes[0];
+  if (!root) return layouts;
+
+  const centerX = viewport.width / 2;
+  const centerY = Math.max(330, viewport.height / 2);
+  layouts.set(root.id, fitNodeLayout(root, { x: centerX - 128, y: centerY - 36, width: 256, height: 72 }));
+
+  const { left, right, children } = distributeBranches(nodes, root, edges);
+  const placeBranch = (branch: DiagramNode[], side: -1 | 1) => {
+    const gap = branch.length > 3 ? 118 : 138;
+    branch.forEach((node, index) => {
+      const y = branchSlot(index, branch.length, centerY, gap);
+      const distance = 330 + Math.min(150, Math.abs(y - centerY) * 0.22);
+      const x = centerX + side * distance;
+      layouts.set(node.id, fitNodeLayout(node, { x: x - 118, y: y - 32, width: 236, height: 64 }));
+
+      const childNodes = (children.get(node.id) ?? [])
+        .map((id) => nodes.find((child) => child.id === id))
+        .filter((child): child is DiagramNode => child !== undefined && child.kind !== "evidence");
+      childNodes.forEach((child, childIndex) => {
+        const childY = y + (childIndex - (childNodes.length - 1) / 2) * 76;
+        const childX = x + side * 270;
+        layouts.set(child.id, fitNodeLayout(child, { x: childX - 102, y: childY - 28, width: 204, height: 56 }));
+      });
+    });
+  };
+
+  placeBranch(left, -1);
+  placeBranch(right, 1);
+
+  nodes.forEach((node, index) => {
+    if (!layouts.has(node.id)) {
+      layouts.set(node.id, getNodeLayout(node, index));
+    }
+  });
+  return layouts;
+}
+
+function createLayouts(nodes: DiagramNode[], edges: DiagramEdge[], diagram: DiagramIR) {
+  if (diagram.type === "mindmap") {
+    return createMindmapLayouts(nodes, edges, getViewport(diagram));
+  }
   return new Map(nodes.map((node, index) => [node.id, getNodeLayout(node, index)]));
 }
 
 function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   const graph = getRenderableGraph(diagram);
-  const layouts = createLayouts(graph.nodes);
+  const layouts = createLayouts(graph.nodes, graph.edges, diagram);
   const edgeSkeleton: ExcalidrawElementSkeleton[] = [];
   const nodeSkeleton: ExcalidrawElementSkeleton[] = [];
 
@@ -282,7 +397,7 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
     const target = layouts.get(edge.target);
     if (!source || !target) return;
     const render = getEdgeRender(edge);
-    const line = connectorPoints(source, target);
+    const line = diagram.type === "mindmap" ? mindmapConnectorPoints(source, target) : connectorPoints(source, target);
     edgeSkeleton.push({
       type: "arrow",
       id: `edge-${edge.source}-${edge.target}-${index}`,
@@ -342,7 +457,7 @@ function createProvidedScene(diagram: DiagramIR): ExcalidrawInitialDataState | n
 function toExcalidrawInitialData(diagram: DiagramIR): ExcalidrawInitialDataState {
   const renderer = diagram.metadata?.renderer;
   const legacyRenderer = diagram.metadata?.legacy_renderer;
-  if (renderer === "excalidraw" && legacyRenderer === "positioned-svg") {
+  if (diagram.type === "mindmap" || (renderer === "excalidraw" && legacyRenderer === "positioned-svg")) {
     return createFallbackScene(diagram);
   }
   return createProvidedScene(diagram) || createFallbackScene(diagram);

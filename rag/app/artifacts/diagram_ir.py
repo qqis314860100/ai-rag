@@ -472,7 +472,7 @@ _NODE_RENDER_STYLES: dict[str, dict[str, Any]] = {
 }
 
 _EDGE_RENDER_STYLES: dict[str, dict[str, Any]] = {
-    "contains": {"stroke": "#94A3B8", "strokeWidth": 1.8, "curve": "horizontal", "arrow": True},
+    "contains": {"stroke": "#94A3B8", "strokeWidth": 1.8, "curve": "horizontal", "arrow": False},
     "supported_by": {"stroke": "#CBD5E1", "strokeWidth": 1.2, "strokeDasharray": "5 6", "curve": "horizontal", "arrow": False},
     "sequence": {"stroke": "#64748B", "strokeWidth": 2.0, "curve": "vertical", "arrow": True},
     "condition": {"stroke": "#D97706", "strokeWidth": 1.8, "curve": "vertical", "arrow": True},
@@ -576,10 +576,10 @@ def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
     left_height = sum(block_height for _, _, block_height, side in category_blocks if side < 0)
     right_height = sum(block_height for _, _, block_height, side in category_blocks if side > 0)
     viewport_height = max(620, max(left_height, right_height) + 180)
-    viewport_width = 980
+    viewport_width = 1280
     center_x = viewport_width // 2
     center_y = viewport_height // 2
-    _set_layout(root, center_x - 78, center_y - 34, 156, 68, "root")
+    _set_layout(root, center_x - 110, center_y - 34, 220, 68, "root")
 
     cursors = {
         1: max(70, (viewport_height - right_height) // 2),
@@ -588,19 +588,20 @@ def _apply_mindmap_layout(ir: DiagramIR) -> DiagramIR:
     for category, keyword_ids, block_height, side in category_blocks:
         y = cursors[side] + block_height // 2
         cursors[side] += block_height
-        category_x = center_x + side * 230
-        _set_layout(category, category_x - 56, y - 24, 112, 48, "category")
+        branch_distance = 285 + min(180, int(abs(y - center_y) * 0.22))
+        category_x = center_x + side * branch_distance
+        _set_layout(category, category_x - 100, y - 27, 200, 54, "category")
 
         for keyword_index, keyword_id in enumerate(keyword_ids):
             keyword = nodes[keyword_id]
             keyword_y = y + (keyword_index - (len(keyword_ids) - 1) / 2) * 56
-            keyword_x = category_x + side * 185
-            _set_layout(keyword, int(keyword_x - 68), int(keyword_y - 20), 136, 40, keyword.metadata.get("category", "keyword"))
+            keyword_x = category_x + side * 220
+            _set_layout(keyword, int(keyword_x - 86), int(keyword_y - 22), 172, 44, keyword.metadata.get("category", "keyword"))
 
             evidence_ids = [node_id for node_id in children.get(keyword.id, []) if nodes.get(node_id) and nodes[node_id].kind == "evidence"]
             for evidence_index, evidence_id in enumerate(evidence_ids[:2]):
                 evidence = nodes[evidence_id]
-                evidence_x = keyword_x + side * 140
+                evidence_x = keyword_x + side * 150
                 evidence_y = keyword_y + (evidence_index * 30) - 15
                 _set_layout(evidence, int(evidence_x - 46), int(evidence_y - 14), 92, 28, "evidence")
 
@@ -763,14 +764,35 @@ def _edge_anchor(layout: dict[str, int], toward: tuple[float, float], gap: int =
     return edge_x + dx / length * gap, edge_y + dy / length * gap
 
 
-def _edge_points(source: DiagramNode, target: DiagramNode, source_index: int, target_index: int) -> tuple[float, float, float, float]:
+def _side_anchor(layout: dict[str, int], side: str, gap: int = 14) -> tuple[float, float]:
+    center_x, center_y = _layout_center(layout)
+    direction = 1 if side == "right" else -1
+    return center_x + direction * (layout["width"] / 2 + gap), center_y
+
+
+def _edge_points(
+    source: DiagramNode,
+    target: DiagramNode,
+    source_index: int,
+    target_index: int,
+    curve: str = "",
+) -> tuple[float, float, float, float, list[list[float]]]:
     source_layout = _node_layout(source, source_index)
     target_layout = _node_layout(target, target_index)
     source_center = _layout_center(source_layout)
     target_center = _layout_center(target_layout)
+    if curve == "horizontal":
+        target_on_right = target_center[0] >= source_center[0]
+        start_x, start_y = _side_anchor(source_layout, "right" if target_on_right else "left", 12)
+        end_x, end_y = _side_anchor(target_layout, "left" if target_on_right else "right", 12)
+        width = end_x - start_x
+        height = end_y - start_y
+        # 思维导图只表达父子归属，使用独立侧边连线，避免形成总线或流程感。
+        return start_x, start_y, end_x, end_y, [[0, 0], [width, height]]
+
     start_x, start_y = _edge_anchor(source_layout, target_center)
     end_x, end_y = _edge_anchor(target_layout, source_center)
-    return start_x, start_y, end_x, end_y
+    return start_x, start_y, end_x, end_y, [[0, 0], [end_x - start_x, end_y - start_y]]
 
 
 def _excalidraw_edge_element(
@@ -781,16 +803,22 @@ def _excalidraw_edge_element(
     target_index: int,
     index: int,
 ) -> dict[str, Any]:
-    start_x, start_y, end_x, end_y = _edge_points(source, target, source_index, target_index)
     element_id = f"edge-{edge.source}-{edge.target}-{index}"
     render = edge.metadata.get("render") if isinstance(edge.metadata.get("render"), dict) else {}
+    start_x, start_y, end_x, end_y, points = _edge_points(
+        source,
+        target,
+        source_index,
+        target_index,
+        str(render.get("curve") or ""),
+    )
     element = _element_base(element_id, "arrow", start_x, start_y, end_x - start_x, end_y - start_y)
     element.update(
         {
             "strokeColor": render.get("stroke", "#64748B"),
             "strokeWidth": int(float(render.get("strokeWidth", 2))),
             "strokeStyle": "dashed" if render.get("strokeDasharray") else "solid",
-            "points": [[0, 0], [end_x - start_x, end_y - start_y]],
+            "points": points,
             "startBinding": None,
             "endBinding": None,
             "startArrowhead": None,
