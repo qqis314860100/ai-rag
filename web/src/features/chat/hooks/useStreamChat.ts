@@ -36,6 +36,7 @@ export function useStreamChat() {
   const flushScheduledRef = useRef(false);
   const metaRef = useRef<{ sources?: Source[]; confidence?: number; followups?: string[] }>({});
   const savedRef = useRef<{ message_id?: string }>({});
+  const errorRef = useRef<string | null>(null);
 
   const scheduleFlush = useCallback((runId: number) => {
     if (flushScheduledRef.current) return;
@@ -63,6 +64,7 @@ export function useStreamChat() {
       flushScheduledRef.current = false;
       metaRef.current = {};
       savedRef.current = {};
+      errorRef.current = null;
 
       setStream({ ...INITIAL_STATE, loading: true });
 
@@ -105,6 +107,9 @@ export function useStreamChat() {
                 case "saved":
                   savedRef.current = { message_id: parsed.message_id };
                   break;
+                case "error":
+                  errorRef.current = typeof parsed.message === "string" ? parsed.message : "回答生成失败，请重试。";
+                  break;
               }
             } catch {
               /* skip malformed frame */
@@ -123,7 +128,7 @@ export function useStreamChat() {
           confidence: metaRef.current.confidence || 0,
           followups: metaRef.current.followups || [],
           messageId: savedRef.current.message_id || "",
-          error: null,
+          error: errorRef.current,
           stopped: false,
         });
       } catch (err) {
