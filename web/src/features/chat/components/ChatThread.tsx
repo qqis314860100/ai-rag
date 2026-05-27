@@ -68,6 +68,20 @@ function assetStatusLabel(status?: string) {
   return "";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const UNCERTAIN_ANSWER_PATTERN = /(?:暂时无法确认|无法确认|无法回答|没有足够(?:信息|证据)|信息不足|不能确定|请补充|问题不够具体)/;
+
+function isAnswerReadyForRefinement(message: ChatMessage) {
+  const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
+  const status = typeof answerSummary?.status === "string" ? answerSummary.status : "";
+  if (status && status !== "answered") return false;
+  if (typeof message.confidence === "number" && message.confidence > 0 && message.confidence < 0.6) return false;
+  return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
+}
+
 type DiagramState = {
   loading: boolean;
   data?: ChatArtifact;
@@ -503,6 +517,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
         const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
         const userBranchActionsDisabled = loading || !canPersistUserActions;
+        const canRefineAssistantAnswer = canPersistAssistantActions && isAnswerReadyForRefinement(msg);
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
         const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
@@ -603,7 +618,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}
                   </div>
-                  {!msg.streaming && canPersistAssistantActions && (
+                  {!msg.streaming && canRefineAssistantAnswer && (
                     <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-divider/70 pt-3">
                       <span className="mr-auto inline-flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
                         <Sparkles className="h-3.5 w-3.5 text-accent" />
