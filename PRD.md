@@ -336,7 +336,7 @@
 定位：把前端 UI 从“让 AI 做得好看点”升级为“定方向 -> 起稿 -> 审查 -> 打磨 -> 优化 -> 适配 -> 截图验收”的轻量协作流程。日常小改不强制使用，高影响 UI、图解弹窗、知识资产页和发布前体验检查必须使用。
 
 - [x] `repo`: 项目内安装 Impeccable skill，并补齐 `PRODUCT.md` / `DESIGN.md` / UI 协作工作流文档，作为后续前端设计任务上下文。
-- [ ] `web`: 使用 Impeccable critique/polish/adapt 工作流审查聊天页、ArtifactCard、ArtifactModal、ConversationNavigator 和图解弹窗，输出第一轮 UI 问题清单。
+- [x] `web`: 使用 Impeccable critique/polish/adapt 工作流审查聊天页、ArtifactCard、ArtifactModal、ConversationNavigator 和图解弹窗，输出第一轮 UI 问题清单。见 [第一轮 UI 质量审查问题清单](docs/第一轮 UI 质量审查问题清单.md)。
 - [ ] `web`: 根据第一轮 UI 问题清单，优先修复影响信任感和可读性的 P0/P1 问题，并用桌面/移动截图验收。
 - [ ] `web`: 将可复用的按钮、badge、modal、artifact 卡片和空态规则沉淀到通用 UI 组件，减少页面级临时样式。
 
