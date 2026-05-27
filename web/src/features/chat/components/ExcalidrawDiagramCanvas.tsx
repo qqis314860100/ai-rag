@@ -26,6 +26,7 @@ type EdgeRender = {
   strokeWidth: number;
   strokeDasharray?: string;
   arrow: boolean;
+  opacity: number;
 };
 
 type FlowEdgeKind = "sequence" | "condition" | "fallback" | "loop" | "other";
@@ -149,11 +150,13 @@ function fitLayoutToLabel(layout: NodeLayout, label: string, render: NodeRender)
 
 function getEdgeRender(edge: DiagramEdge): EdgeRender {
   const render = edge.metadata?.render as Partial<EdgeRender> | undefined;
+  const kind = flowEdgeKind(edge);
   return {
     stroke: stringValue(render?.stroke, "#64748B"),
-    strokeWidth: numberValue(render?.strokeWidth, 2),
-    strokeDasharray: typeof render?.strokeDasharray === "string" ? render.strokeDasharray : undefined,
+    strokeWidth: kind === "loop" ? numberValue(render?.strokeWidth, 1.5) : numberValue(render?.strokeWidth, 2),
+    strokeDasharray: typeof render?.strokeDasharray === "string" ? render.strokeDasharray : kind === "loop" ? "6 6" : undefined,
     arrow: typeof render?.arrow === "boolean" ? render.arrow : true,
+    opacity: kind === "loop" ? numberValue(render?.opacity, 72) : numberValue(render?.opacity, 100),
   };
 }
 
@@ -623,34 +626,104 @@ function createSwimlaneLayouts(nodes: DiagramNode[], edges: DiagramEdge[], diagr
   const layouts = new Map<string, NodeLayout>();
   const laneIndex = new Map(lanes.map((lane, index) => [lane.id, index]));
   const flowNodes = nodes.filter((node) => FLOW_NODE_KINDS.has(node.kind) || node.kind !== "evidence");
+  const nodeById = new Map(flowNodes.map((node) => [node.id, node]));
   const path = analyzeFlowPath(flowNodes, edges);
-  const orderedIds = [
-    ...path.mainIds,
-    ...flowNodes.map((node) => node.id).filter((id) => !path.mainIds.includes(id)),
-  ];
-  const orderedNodes = orderedIds
-    .map((id) => flowNodes.find((node) => node.id === id))
-    .filter((node): node is DiagramNode => Boolean(node));
   const laneBlockWidth = Math.max(SWIMLANE_WIDTH, Math.floor((viewport.width - SWIMLANE_LEFT * 2) / Math.max(lanes.length, 1)));
   const top = SWIMLANE_TOP + SWIMLANE_HEADER_HEIGHT + 36;
+  const mainIds = path.mainIds.length > 0 ? path.mainIds : flowNodes.map((node) => node.id);
+  const mainIndex = new Map(mainIds.map((id, index) => [id, index]));
+  const laneBands = new Map<string, Array<{ top: number; bottom: number }>>();
+  const laneMainBottom = new Map<string, number>();
 
-  orderedNodes.forEach((node, index) => {
+  const laneCenterX = (node: DiagramNode) => {
     const laneId = nodeLaneId(node);
     const resolvedLaneIndex = laneId && laneIndex.has(laneId) ? laneIndex.get(laneId)! : 0;
-    const laneCenterX = SWIMLANE_LEFT + resolvedLaneIndex * laneBlockWidth + laneBlockWidth / 2;
+    return SWIMLANE_LEFT + resolvedLaneIndex * laneBlockWidth + laneBlockWidth / 2;
+  };
+
+  const reserveLaneBand = (node: DiagramNode, preferredY: number, height: number) => {
+    const laneId = nodeLaneId(node) ?? "__default";
+    const bands = laneBands.get(laneId) ?? [];
+    let y = preferredY;
+    const gap = 32;
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const band of bands) {
+        const overlaps = y < band.bottom + gap && y + height > band.top - gap;
+        if (overlaps) {
+          y = band.bottom + gap;
+          moved = true;
+        }
+      }
+    }
+    bands.push({ top: y, bottom: y + height });
+    bands.sort((a, b) => a.top - b.top);
+    laneBands.set(laneId, bands);
+    return y;
+  };
+
+  const layoutNode = (node: DiagramNode, preferredY: number): NodeLayout => {
     const width = node.kind === "decision" ? 280 : node.kind === "start" || node.kind === "end" ? 260 : 300;
     const height = node.kind === "decision" ? 108 : node.kind === "start" || node.kind === "end" ? 68 : 76;
-    layouts.set(node.id, fitNodeLayout(node, {
-      x: laneCenterX - width / 2,
-      y: top + index * FLOW_LEVEL_GAP,
+    const fitted = fitNodeLayout(node, {
+      x: laneCenterX(node) - width / 2,
+      y: preferredY,
       width,
       height,
-    }));
+    });
+    return {
+      ...fitted,
+      y: reserveLaneBand(node, fitted.y, fitted.height),
+    };
+  };
+
+  mainIds.forEach((id, index) => {
+    const node = nodeById.get(id);
+    if (!node || path.branchIds.has(id)) return;
+    const layout = layoutNode(node, top + index * FLOW_LEVEL_GAP);
+    layouts.set(node.id, layout);
+    const laneId = nodeLaneId(node) ?? "__default";
+    laneMainBottom.set(laneId, Math.max(laneMainBottom.get(laneId) ?? 0, layout.y + layout.height));
   });
+
+  const branchOffsets = new Map<string, number>();
+  const nextBranchOffset = (sourceId: string) => {
+    const value = branchOffsets.get(sourceId) ?? 0;
+    branchOffsets.set(sourceId, value + 1);
+    return value;
+  };
+
+  const placeBranchTarget = (edge: DiagramEdge) => {
+    const target = nodeById.get(edge.target);
+    if (!target || layouts.has(target.id) || !path.branchIds.has(target.id)) return false;
+    const sourceLayout = layouts.get(edge.source);
+    if (!sourceLayout) return false;
+    const sourceMainIndex = mainIndex.get(edge.source) ?? 0;
+    const targetLaneId = nodeLaneId(target) ?? "__default";
+    const baseY = Math.max(
+      top + sourceMainIndex * FLOW_LEVEL_GAP + FLOW_LEVEL_GAP,
+      sourceLayout.y + sourceLayout.height + 72,
+      laneMainBottom.get(targetLaneId) ? laneMainBottom.get(targetLaneId)! + 56 : 0,
+    );
+    const y = baseY + nextBranchOffset(edge.source) * FLOW_BRANCH_ROW_GAP;
+    layouts.set(target.id, layoutNode(target, y));
+    return true;
+  };
+
+  let placed = true;
+  while (placed) {
+    placed = false;
+    edges.forEach((edge) => {
+      if (flowEdgeKind(edge) === "loop") return;
+      if (placeBranchTarget(edge)) placed = true;
+    });
+  }
 
   flowNodes.forEach((node, index) => {
     if (!layouts.has(node.id)) {
-      layouts.set(node.id, getNodeLayout(node, index));
+      const fallbackIndex = mainIds.length + index;
+      layouts.set(node.id, layoutNode(node, top + fallbackIndex * FLOW_LEVEL_GAP));
     }
   });
   return layouts;
@@ -733,14 +806,18 @@ function flowchartConnectorPoints(source: NodeLayout, target: NodeLayout, edge: 
   ]);
 }
 
-function createSwimlaneSkeletons(diagram: DiagramIR, nodeCount: number): ExcalidrawElementSkeleton[] {
+function createSwimlaneSkeletons(diagram: DiagramIR, layouts: Map<string, NodeLayout>): ExcalidrawElementSkeleton[] {
   if (diagram.type !== "flowchart") return [];
   const lanes = getDiagramLanes(diagram);
   if (lanes.length < 2) return [];
 
   const viewport = getViewport(diagram);
   const laneBlockWidth = Math.max(SWIMLANE_WIDTH, Math.floor((viewport.width - SWIMLANE_LEFT * 2) / lanes.length));
-  const laneHeight = Math.max(viewport.height - SWIMLANE_TOP * 2, nodeCount * FLOW_LEVEL_GAP + SWIMLANE_HEADER_HEIGHT + 132);
+  const maxNodeBottom = Math.max(
+    ...Array.from(layouts.values()).map((layout) => layout.y + layout.height),
+    SWIMLANE_TOP + SWIMLANE_HEADER_HEIGHT,
+  );
+  const laneHeight = Math.max(viewport.height - SWIMLANE_TOP * 2, maxNodeBottom - SWIMLANE_TOP + 96);
   const palette = ["#F8FAFC", "#F7FEE7", "#EFF6FF", "#FFF7ED", "#FDF2F8", "#F0FDFA"];
 
   return lanes.flatMap((lane, index) => {
@@ -789,7 +866,7 @@ function createSwimlaneSkeletons(diagram: DiagramIR, nodeCount: number): Excalid
 function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
   const graph = getRenderableGraph(diagram);
   const layouts = createLayouts(graph.nodes, graph.edges, diagram);
-  const laneSkeleton = createSwimlaneSkeletons(diagram, graph.nodes.length);
+  const laneSkeleton = createSwimlaneSkeletons(diagram, layouts);
   const edgeSkeleton: ExcalidrawElementSkeleton[] = [];
   const nodeSkeleton: ExcalidrawElementSkeleton[] = [];
 
@@ -847,6 +924,7 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
       points: line.points,
       strokeColor: render.stroke,
       strokeWidth: render.strokeWidth,
+      opacity: render.opacity,
       roughness: 0.35,
       strokeStyle: render.strokeDasharray ? "dashed" : "solid",
       startArrowhead: null,
