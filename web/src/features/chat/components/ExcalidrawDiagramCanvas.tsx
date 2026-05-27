@@ -28,6 +28,29 @@ type EdgeRender = {
   arrow: boolean;
 };
 
+type FlowEdgeKind = "sequence" | "condition" | "fallback" | "loop" | "other";
+
+type FlowPath = {
+  mainIds: string[];
+  branchIds: Set<string>;
+};
+
+type RouteLine = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  points: number[][];
+  labelX: number;
+  labelY: number;
+};
+
+const FLOW_NODE_KINDS = new Set(["start", "end", "input", "output", "step", "action", "decision", "subflow"]);
+const MAIN_EDGE_RELATIONS = new Set(["sequence", "flows_to", "condition"]);
+const FLOW_LEVEL_GAP = 148;
+const FLOW_BRANCH_GAP = 360;
+const FLOW_BRANCH_ROW_GAP = 104;
+
 function getViewport(diagram: DiagramIR) {
   const viewport = diagram.metadata?.viewport as Partial<{ width: number; height: number }> | undefined;
   return {
@@ -172,6 +195,8 @@ function connectorPoints(source: NodeLayout, target: NodeLayout) {
     width: end.x - start.x,
     height: end.y - start.y,
     points: [[0, 0], [end.x - start.x, end.y - start.y]],
+    labelX: (start.x + end.x) / 2,
+    labelY: (start.y + end.y) / 2,
   };
 }
 
@@ -191,7 +216,38 @@ function mindmapConnectorPoints(source: NodeLayout, target: NodeLayout) {
     width,
     height,
     points: [[0, 0], [width, height]],
+    labelX: start.x + width / 2,
+    labelY: start.y + height / 2,
   };
+}
+
+function flowEdgeKind(edge: DiagramEdge): FlowEdgeKind {
+  if (edge.relation === "loop") return "loop";
+  if (edge.relation === "fallback") return "fallback";
+  if (edge.relation === "condition") return "condition";
+  if (edge.relation === "sequence" || edge.relation === "flows_to") return "sequence";
+  return "other";
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
+function isFallbackBranch(edge: DiagramEdge) {
+  const branch = metadataString(edge.metadata, "branch");
+  return (
+    edge.relation === "fallback"
+    || branch === "fallback"
+    || branch === "fail"
+    || branch === "no"
+    || branch === "error"
+  );
+}
+
+function isPositiveBranch(edge: DiagramEdge) {
+  const branch = metadataString(edge.metadata, "branch");
+  return branch === "yes" || branch === "pass" || branch === "ok" || branch === "success";
 }
 
 function getRenderableGraph(diagram: DiagramIR) {
@@ -305,6 +361,109 @@ function branchSlot(index: number, total: number, centerY: number, gap: number) 
   return centerY + (index - (total - 1) / 2) * gap;
 }
 
+function getOutgoing(edges: DiagramEdge[]) {
+  const outgoing = new Map<string, DiagramEdge[]>();
+  edges.forEach((edge) => {
+    const list = outgoing.get(edge.source) ?? [];
+    list.push(edge);
+    outgoing.set(edge.source, list);
+  });
+  return outgoing;
+}
+
+function getIncoming(edges: DiagramEdge[]) {
+  const incoming = new Map<string, DiagramEdge[]>();
+  edges.forEach((edge) => {
+    const list = incoming.get(edge.target) ?? [];
+    list.push(edge);
+    incoming.set(edge.target, list);
+  });
+  return incoming;
+}
+
+function findFlowStart(nodes: DiagramNode[], edges: DiagramEdge[]) {
+  const incoming = getIncoming(edges.filter((edge) => flowEdgeKind(edge) !== "loop" && flowEdgeKind(edge) !== "fallback"));
+  return (
+    nodes.find((node) => node.kind === "start")
+    ?? nodes.find((node) => !incoming.has(node.id))
+    ?? nodes[0]
+  );
+}
+
+function chooseMainEdge(edges: DiagramEdge[], indexById: Map<string, number>, visited: Set<string>) {
+  const candidates = edges
+    .filter((edge) => {
+      if (!MAIN_EDGE_RELATIONS.has(edge.relation) || visited.has(edge.target)) return false;
+      return flowEdgeKind(edge) !== "loop" && !isFallbackBranch(edge);
+    })
+    .sort((a, b) => {
+      const aScore = (isPositiveBranch(a) ? -5 : 0) + (a.relation === "condition" ? 2 : 0);
+      const bScore = (isPositiveBranch(b) ? -5 : 0) + (b.relation === "condition" ? 2 : 0);
+      if (aScore !== bScore) return aScore - bScore;
+      return (indexById.get(a.target) ?? 0) - (indexById.get(b.target) ?? 0);
+    });
+  return candidates[0];
+}
+
+function collectBranchIds(nodes: DiagramNode[], edges: DiagramEdge[], mainIds: string[]) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const mainSet = new Set(mainIds);
+  const outgoing = getOutgoing(edges);
+  const branchIds = new Set<string>();
+  const queue: string[] = [];
+
+  const enqueueBranch = (id: string) => {
+    if (!nodeIds.has(id) || mainSet.has(id) || branchIds.has(id)) return;
+    branchIds.add(id);
+    queue.push(id);
+  };
+
+  edges.forEach((edge) => {
+    if (mainSet.has(edge.source) && !mainSet.has(edge.target)) {
+      enqueueBranch(edge.target);
+    }
+    if (flowEdgeKind(edge) === "loop") {
+      enqueueBranch(edge.source);
+    }
+  });
+
+  while (queue.length > 0) {
+    const sourceId = queue.shift();
+    if (!sourceId) continue;
+    (outgoing.get(sourceId) ?? []).forEach((edge) => {
+      enqueueBranch(edge.target);
+    });
+  }
+
+  nodes.forEach((node) => {
+    if (node.kind !== "evidence" && !mainSet.has(node.id)) {
+      enqueueBranch(node.id);
+    }
+  });
+
+  return branchIds;
+}
+
+function analyzeFlowPath(nodes: DiagramNode[], edges: DiagramEdge[]): FlowPath {
+  const start = findFlowStart(nodes, edges);
+  if (!start) return { mainIds: [], branchIds: new Set() };
+
+  const outgoing = getOutgoing(edges);
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const mainIds: string[] = [];
+  const visited = new Set<string>();
+  let current: DiagramNode | undefined = start;
+
+  while (current && !visited.has(current.id)) {
+    mainIds.push(current.id);
+    visited.add(current.id);
+    const edge = chooseMainEdge(outgoing.get(current.id) ?? [], indexById, visited);
+    current = edge ? nodes.find((node) => node.id === edge.target) : undefined;
+  }
+
+  return { mainIds, branchIds: collectBranchIds(nodes, edges, mainIds) };
+}
+
 function createMindmapLayouts(nodes: DiagramNode[], edges: DiagramEdge[], viewport: { width: number; height: number }) {
   const layouts = new Map<string, NodeLayout>();
   const root = nodes.find((node) => node.kind === "root") ?? nodes[0];
@@ -345,11 +504,156 @@ function createMindmapLayouts(nodes: DiagramNode[], edges: DiagramEdge[], viewpo
   return layouts;
 }
 
+function createFlowchartLayouts(nodes: DiagramNode[], edges: DiagramEdge[], viewport: { width: number; height: number }) {
+  const layouts = new Map<string, NodeLayout>();
+  const flowNodes = nodes.filter((node) => FLOW_NODE_KINDS.has(node.kind) || node.kind !== "evidence");
+  const nodeById = new Map(flowNodes.map((node) => [node.id, node]));
+  const path = analyzeFlowPath(flowNodes, edges);
+  const centerX = Math.max(520, viewport.width / 2);
+  const top = 56;
+  const mainIds = path.mainIds.length > 0 ? path.mainIds : flowNodes.map((node) => node.id);
+
+  mainIds.forEach((id, index) => {
+    const node = nodeById.get(id);
+    if (!node || path.branchIds.has(id)) return;
+    const width = node.kind === "decision" ? 320 : node.kind === "start" || node.kind === "end" ? 300 : 420;
+    const height = node.kind === "decision" ? 116 : node.kind === "start" || node.kind === "end" ? 68 : 76;
+    layouts.set(node.id, fitNodeLayout(node, {
+      x: centerX - width / 2,
+      y: top + index * FLOW_LEVEL_GAP,
+      width,
+      height,
+    }));
+  });
+
+  const mainIndex = new Map(mainIds.map((id, index) => [id, index]));
+  const branchColumns = new Map<string, { left: number; right: number }>();
+  const nextBranchOffset = (sourceId: string, side: "left" | "right") => {
+    const column = branchColumns.get(sourceId) ?? { left: 0, right: 0 };
+    const value = column[side];
+    column[side] += 1;
+    branchColumns.set(sourceId, column);
+    return value;
+  };
+
+  const placeBranchTarget = (edge: DiagramEdge) => {
+    const target = nodeById.get(edge.target);
+    if (!target || layouts.has(edge.target) || !path.branchIds.has(edge.target)) return false;
+    const sourceLayout = layouts.get(edge.source);
+    if (!sourceLayout) return false;
+    const fallback = isFallbackBranch(edge);
+    const side: "left" | "right" = fallback ? "right" : "left";
+    const offset = nextBranchOffset(edge.source, side);
+    const width = target.kind === "decision" ? 300 : target.kind === "subflow" ? 380 : 340;
+    const height = target.kind === "decision" ? 108 : 72;
+    // 分支位置只消费 DiagramIR 的结构语义：relation / metadata.branch，不在前端抽取业务含义。
+    const branchBaseX = mainIndex.has(edge.source)
+      ? centerX + (side === "right" ? FLOW_BRANCH_GAP : -FLOW_BRANCH_GAP)
+      : sourceLayout.x + sourceLayout.width / 2;
+    const y = sourceLayout.y + 92 + offset * FLOW_BRANCH_ROW_GAP;
+    const x = branchBaseX - width / 2;
+    layouts.set(target.id, fitNodeLayout(target, { x, y, width, height }));
+    return true;
+  };
+
+  let placed = true;
+  while (placed) {
+    placed = false;
+    edges.forEach((edge) => {
+      if (placeBranchTarget(edge)) placed = true;
+    });
+  }
+
+  flowNodes.forEach((node, index) => {
+    if (layouts.has(node.id) || !path.branchIds.has(node.id)) return;
+    const width = node.kind === "decision" ? 300 : 340;
+    const side: "left" | "right" = index % 2 === 0 ? "left" : "right";
+    const y = top + Math.max(1, mainIds.length - 1) * FLOW_LEVEL_GAP + index * FLOW_BRANCH_ROW_GAP;
+    const x = centerX + (side === "right" ? FLOW_BRANCH_GAP : -FLOW_BRANCH_GAP) - width / 2;
+    layouts.set(node.id, fitNodeLayout(node, { x, y, width, height: node.kind === "decision" ? 108 : 72 }));
+  });
+
+  flowNodes.forEach((node, index) => {
+    if (layouts.has(node.id)) return;
+    const width = node.kind === "decision" ? 300 : 360;
+    const y = top + (mainIds.length + index) * 116;
+    layouts.set(node.id, fitNodeLayout(node, { x: centerX - width / 2, y, width, height: node.kind === "decision" ? 108 : 72 }));
+  });
+
+  return layouts;
+}
+
 function createLayouts(nodes: DiagramNode[], edges: DiagramEdge[], diagram: DiagramIR) {
   if (diagram.type === "mindmap") {
     return createMindmapLayouts(nodes, edges, getViewport(diagram));
   }
+  if (diagram.type === "flowchart") {
+    return createFlowchartLayouts(nodes, edges, getViewport(diagram));
+  }
   return new Map(nodes.map((node, index) => [node.id, getNodeLayout(node, index)]));
+}
+
+function routePoints(points: Array<{ x: number; y: number }>): RouteLine {
+  const start = points[0];
+  const end = points[points.length - 1];
+  const middle = points[Math.max(1, Math.floor(points.length / 2))] ?? start;
+  return {
+    x: start.x,
+    y: start.y,
+    width: end.x - start.x,
+    height: end.y - start.y,
+    points: points.map((point) => [point.x - start.x, point.y - start.y]),
+    labelX: middle.x,
+    labelY: middle.y,
+  };
+}
+
+function topAnchor(layout: NodeLayout, gap = 14) {
+  const center = nodeCenter(layout);
+  return { x: center.x, y: layout.y - gap };
+}
+
+function bottomAnchor(layout: NodeLayout, gap = 14) {
+  const center = nodeCenter(layout);
+  return { x: center.x, y: layout.y + layout.height + gap };
+}
+
+function flowchartConnectorPoints(source: NodeLayout, target: NodeLayout, edge: DiagramEdge): RouteLine {
+  const sourceCenter = nodeCenter(source);
+  const targetCenter = nodeCenter(target);
+  const kind = flowEdgeKind(edge);
+
+  if (kind === "loop") {
+    const targetAbove = targetCenter.y < sourceCenter.y;
+    const side: "left" | "right" = sourceCenter.x >= targetCenter.x ? "right" : "left";
+    const sourceAnchor = sideAnchor(source, side, 18);
+    const targetAnchor = targetAbove ? sideAnchor(target, side, 18) : topAnchor(target, 18);
+    const bendX = side === "right" ? Math.max(sourceAnchor.x, targetAnchor.x) + 80 : Math.min(sourceAnchor.x, targetAnchor.x) - 80;
+    return routePoints([
+      sourceAnchor,
+      { x: bendX, y: sourceAnchor.y },
+      { x: bendX, y: targetAnchor.y },
+      targetAnchor,
+    ]);
+  }
+
+  const mostlyVertical = Math.abs(sourceCenter.x - targetCenter.x) < 80;
+  if (mostlyVertical && targetCenter.y >= sourceCenter.y) {
+    const start = bottomAnchor(source);
+    const end = topAnchor(target);
+    return routePoints([start, end]);
+  }
+
+  const side: "left" | "right" = targetCenter.x >= sourceCenter.x ? "right" : "left";
+  const start = sideAnchor(source, side, 16);
+  const end = targetCenter.y >= sourceCenter.y ? topAnchor(target, 16) : sideAnchor(target, side === "right" ? "left" : "right", 16);
+  const midY = start.y + Math.max(42, (end.y - start.y) * 0.48);
+  return routePoints([
+    start,
+    { x: start.x, y: midY },
+    { x: end.x, y: midY },
+    end,
+  ]);
 }
 
 function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
@@ -397,7 +701,11 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
     const target = layouts.get(edge.target);
     if (!source || !target) return;
     const render = getEdgeRender(edge);
-    const line = diagram.type === "mindmap" ? mindmapConnectorPoints(source, target) : connectorPoints(source, target);
+    const line = diagram.type === "mindmap"
+      ? mindmapConnectorPoints(source, target)
+      : diagram.type === "flowchart"
+        ? flowchartConnectorPoints(source, target, edge)
+        : connectorPoints(source, target);
     edgeSkeleton.push({
       type: "arrow",
       id: `edge-${edge.source}-${edge.target}-${index}`,
@@ -421,6 +729,29 @@ function createFallbackScene(diagram: DiagramIR): ExcalidrawInitialDataState {
         },
       },
     } as ExcalidrawElementSkeleton);
+
+    if (diagram.type === "flowchart" && edge.label) {
+      edgeSkeleton.push({
+        type: "text",
+        id: `edge-label-${edge.source}-${edge.target}-${index}`,
+        x: line.labelX - 34,
+        y: line.labelY - 24,
+        width: 68,
+        height: 24,
+        text: edge.label,
+        fontSize: 12,
+        strokeColor: render.stroke,
+        backgroundColor: "#FFFFFF",
+        roughness: 0,
+        customData: {
+          diagram_edge_label: {
+            source: edge.source,
+            target: edge.target,
+            relation: edge.relation,
+          },
+        },
+      } as ExcalidrawElementSkeleton);
+    }
   });
 
   return {
@@ -457,7 +788,7 @@ function createProvidedScene(diagram: DiagramIR): ExcalidrawInitialDataState | n
 function toExcalidrawInitialData(diagram: DiagramIR): ExcalidrawInitialDataState {
   const renderer = diagram.metadata?.renderer;
   const legacyRenderer = diagram.metadata?.legacy_renderer;
-  if (diagram.type === "mindmap" || (renderer === "excalidraw" && legacyRenderer === "positioned-svg")) {
+  if (diagram.type === "mindmap" || diagram.type === "flowchart" || (renderer === "excalidraw" && legacyRenderer === "positioned-svg")) {
     return createFallbackScene(diagram);
   }
   return createProvidedScene(diagram) || createFallbackScene(diagram);
