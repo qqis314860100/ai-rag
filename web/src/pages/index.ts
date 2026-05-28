@@ -1,6 +1,7 @@
 export { default as ChatPage } from "../features/chat/ChatPage";
 export { default as DocumentsPage } from "./DocumentsPage";
 export { default as KnowledgeAssetsPage } from "./KnowledgeAssetsPage";
+export { default as KnowledgeGapsPage } from "./KnowledgeGapsPage";
 export { default as SopDocumentsPage } from "./SopDocumentsPage";
 export { default as FavoritesPage } from "./FavoritesPage";
 export { default as AnalyticsPage } from "./AnalyticsPage";
