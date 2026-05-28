@@ -121,6 +121,7 @@ class SearchResult(BaseModel):
     query: str
     expanded_query: str = ""
     term_expansion_hits: list[TermExpansionHit] = Field(default_factory=list)
+    rerank_trace: dict[str, Any] = Field(default_factory=dict)
     results: list[SearchHit]
     latency_ms: int
 

@@ -82,6 +82,8 @@ class Config:
     rag_top_k: int = _read_db_setting_int("rag_top_k", int(os.getenv("RAG_TOP_K", "5")))
     rag_temperature: float = _read_db_setting_float("rag_temperature", float(os.getenv("RAG_TEMPERATURE", "0.2")))
     rag_max_context_chars: int = _read_db_setting_int("rag_max_context_chars", int(os.getenv("RAG_MAX_CONTEXT_CHARS", "12000")))
+    rag_rerank_mode: str = _read_db_setting("rag_rerank_mode", os.getenv("RAG_RERANK_MODE", "local")).strip().lower()
+    rag_rerank_llm_candidate_limit: int = _read_env_int("RAG_RERANK_LLM_CANDIDATE_LIMIT", 12)
 
     llm_usage_log_path: str = os.getenv("LLM_USAGE_LOG_PATH", "./data/llm_usage.jsonl")
     llm_max_input_chars_per_request: int = _read_env_int("LLM_MAX_INPUT_CHARS_PER_REQUEST", 25000)

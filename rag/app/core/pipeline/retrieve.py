@@ -1,12 +1,18 @@
 import math
+import json
+import logging
 import re
 
+from ..config import config
+from ...llm.client import chat as llm_chat
 from ..source_metadata import (
     infer_content_kind,
     infer_file_type,
     infer_mime_type,
     normalize_source_format,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _build_ingest_metadata(file_path: str, metadata: dict | None = None) -> dict:
@@ -72,7 +78,87 @@ _HYBRID_SIGNAL_WEIGHTS = {
 }
 
 
+def rerank_hits(
+    query: str,
+    hits: list[dict],
+    filters: dict | None = None,
+    term_expansion_hits: list[dict] | None = None,
+    top_k: int | None = None,
+    mode: str | None = None,
+) -> dict:
+    """Rerank vector candidates through a configurable adapter and return audit trace."""
+    configured_mode = _normalize_rerank_mode(mode or config.rag_rerank_mode)
+    candidate_count = len(hits)
+    requested_top_k = top_k or candidate_count
+    if not hits:
+        trace = _build_rerank_trace(
+            mode=configured_mode,
+            configured_mode=configured_mode,
+            candidate_count=0,
+            requested_top_k=requested_top_k,
+            selected_hits=[],
+        )
+        return {"results": hits, "trace": trace}
+
+    working_hits = [_copy_hit_with_original_rank(hit, index) for index, hit in enumerate(hits)]
+    fallback_reason = ""
+
+    if configured_mode == "off":
+        ranked_hits = sorted(working_hits, key=lambda hit: hit.get("score", 0), reverse=True)
+        mode_used = "off"
+    else:
+        ranked_hits = _local_hybrid_rerank(
+            query,
+            working_hits,
+            filters,
+            term_expansion_hits=term_expansion_hits,
+        )
+        mode_used = "local"
+
+        if configured_mode == "llm":
+            try:
+                ranked_hits, fallback_reason = _llm_rerank(
+                    query,
+                    ranked_hits,
+                    filters=filters,
+                    requested_top_k=requested_top_k,
+                )
+                mode_used = "llm" if not fallback_reason else "local"
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                fallback_reason = f"llm_exception:{type(exc).__name__}"
+                logger.warning("LLM rerank failed, falling back to local rerank: %s", exc)
+                mode_used = "local"
+
+    selected_hits = ranked_hits[:requested_top_k]
+    trace = _build_rerank_trace(
+        mode=mode_used,
+        configured_mode=configured_mode,
+        candidate_count=candidate_count,
+        requested_top_k=requested_top_k,
+        selected_hits=selected_hits,
+        fallback_reason=fallback_reason,
+    )
+    _annotate_rerank_metadata(selected_hits, trace)
+    return {"results": selected_hits, "trace": trace}
+
+
 def _keyword_rerank(
+    query: str,
+    hits: list[dict],
+    filters: dict | None = None,
+    term_expansion_hits: list[dict] | None = None,
+) -> list[dict]:
+    return rerank_hits(
+        query,
+        hits,
+        filters,
+        term_expansion_hits=term_expansion_hits,
+        top_k=len(hits),
+        mode="local",
+    )["results"]
+
+
+def _local_hybrid_rerank(
     query: str,
     hits: list[dict],
     filters: dict | None = None,
@@ -139,6 +225,218 @@ def _keyword_rerank(
         metadata["retrieval_mode"] = "hybrid"
         h["metadata"] = metadata
     return sorted(hits, key=lambda h: h.get("score", 0), reverse=True)
+
+
+def _llm_rerank(
+    query: str,
+    hits: list[dict],
+    *,
+    filters: dict | None,
+    requested_top_k: int,
+) -> tuple[list[dict], str]:
+    candidate_limit = max(1, min(config.rag_rerank_llm_candidate_limit, len(hits)))
+    candidates = hits[:candidate_limit]
+    candidate_payload = [
+        {
+            "chunk_id": str(hit.get("chunk_id") or ""),
+            "document_title": str(hit.get("document_title") or ""),
+            "section_path": str(hit.get("section_path") or ""),
+            "score": round(_clamp_float(hit.get("score", 0)), 4),
+            "matched_features": _matched_feature_names(hit),
+            "snippet": str(hit.get("snippet") or hit.get("content") or "")[:360],
+        }
+        for hit in candidates
+    ]
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是企业知识库检索精排器。只返回 JSON，不要解释。"
+                "按问题相关性、证据完整性、标题/章节命中和过滤条件匹配度排序。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "query": query,
+                    "top_k": requested_top_k,
+                    "filters": filters or {},
+                    "candidates": candidate_payload,
+                    "output_schema": {
+                        "ranked_chunk_ids": ["chunk id in preferred order"],
+                        "reasons": {"chunk_id": "short Chinese reason"},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    response = llm_chat(
+        messages,
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    payload = _parse_llm_rerank_response(response.get("content", ""))
+    ranked_ids = payload.get("ranked_chunk_ids")
+    if not isinstance(ranked_ids, list) or not ranked_ids:
+        return hits, "llm_empty_ranking"
+
+    id_to_rank = {str(chunk_id): rank for rank, chunk_id in enumerate(ranked_ids) if str(chunk_id)}
+    if not id_to_rank:
+        return hits, "llm_empty_ranking"
+
+    reasons = payload.get("reasons") if isinstance(payload.get("reasons"), dict) else {}
+    for hit in hits:
+        chunk_id = str(hit.get("chunk_id") or "")
+        if chunk_id not in id_to_rank:
+            continue
+        metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+        llm_reason = str(reasons.get(chunk_id) or "").strip()
+        metadata["llm_rerank"] = {
+            "rank": id_to_rank[chunk_id] + 1,
+            "reason": llm_reason[:120],
+        }
+        hit["metadata"] = metadata
+
+    ranked = sorted(
+        hits,
+        key=lambda hit: (
+            id_to_rank.get(str(hit.get("chunk_id") or ""), len(id_to_rank) + int(hit.get("_original_rank", 0))),
+            -_clamp_float(hit.get("score", 0)),
+        ),
+    )
+    return ranked, ""
+
+
+def _parse_llm_rerank_response(content: str) -> dict:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", content, flags=re.S)
+        if not match:
+            return {}
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return {}
+
+
+def _build_rerank_trace(
+    *,
+    mode: str,
+    configured_mode: str,
+    candidate_count: int,
+    requested_top_k: int,
+    selected_hits: list[dict],
+    fallback_reason: str = "",
+) -> dict:
+    return {
+        "mode": mode,
+        "configured_mode": configured_mode,
+        "fallback_reason": fallback_reason,
+        "candidate_count": candidate_count,
+        "requested_top_k": requested_top_k,
+        "topk_distribution": _topk_distribution(selected_hits),
+        "hit_features": [
+            {
+                "chunk_id": str(hit.get("chunk_id") or ""),
+                "document_id": str(hit.get("document_id") or ""),
+                "rank": index + 1,
+                "original_rank": int(hit.get("_original_rank", index)) + 1,
+                "score": round(_clamp_float(hit.get("score", 0)), 4),
+                "matched_features": _matched_feature_names(hit),
+            }
+            for index, hit in enumerate(selected_hits)
+        ],
+    }
+
+
+def _annotate_rerank_metadata(hits: list[dict], trace: dict) -> None:
+    distribution = trace["topk_distribution"]
+    for index, hit in enumerate(hits):
+        metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+        original_rank = int(hit.get("_original_rank", index)) + 1
+        metadata["rerank"] = {
+            "mode": trace["mode"],
+            "configured_mode": trace["configured_mode"],
+            "rank": index + 1,
+            "original_rank": original_rank,
+            "rank_delta": original_rank - (index + 1),
+            "candidate_count": trace["candidate_count"],
+            "topk_distribution": distribution,
+            "matched_features": _matched_feature_names(hit),
+        }
+        if trace.get("fallback_reason"):
+            metadata["rerank"]["fallback_reason"] = trace["fallback_reason"]
+        hit["metadata"] = metadata
+        hit.pop("_original_rank", None)
+
+
+def _topk_distribution(hits: list[dict]) -> dict:
+    scores = [_clamp_float(hit.get("score", 0)) for hit in hits]
+    buckets = {
+        "0.80-1.00": 0,
+        "0.60-0.79": 0,
+        "0.40-0.59": 0,
+        "0.20-0.39": 0,
+        "0.00-0.19": 0,
+    }
+    for score in scores:
+        if score >= 0.8:
+            buckets["0.80-1.00"] += 1
+        elif score >= 0.6:
+            buckets["0.60-0.79"] += 1
+        elif score >= 0.4:
+            buckets["0.40-0.59"] += 1
+        elif score >= 0.2:
+            buckets["0.20-0.39"] += 1
+        else:
+            buckets["0.00-0.19"] += 1
+
+    document_distribution: dict[str, dict] = {}
+    for hit in hits:
+        document_id = str(hit.get("document_id") or "unknown")
+        entry = document_distribution.setdefault(document_id, {"count": 0, "best_score": 0.0})
+        entry["count"] += 1
+        entry["best_score"] = max(entry["best_score"], round(_clamp_float(hit.get("score", 0)), 4))
+
+    return {
+        "count": len(hits),
+        "score_min": round(min(scores), 4) if scores else 0.0,
+        "score_max": round(max(scores), 4) if scores else 0.0,
+        "score_avg": round(sum(scores) / len(scores), 4) if scores else 0.0,
+        "score_buckets": buckets,
+        "documents": document_distribution,
+    }
+
+
+def _matched_feature_names(hit: dict) -> list[str]:
+    metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    signals = metadata.get("retrieval_signals") if isinstance(metadata.get("retrieval_signals"), list) else []
+    feature_names = [
+        str(signal.get("name"))
+        for signal in signals
+        if isinstance(signal, dict) and _clamp_float(signal.get("score", 0)) > 0
+    ]
+    if _clamp_float(hit.get("score", 0)) > 0 and "rerank_score" not in feature_names:
+        feature_names.append("rerank_score")
+    return feature_names
+
+
+def _copy_hit_with_original_rank(hit: dict, index: int) -> dict:
+    copied = {**hit}
+    metadata = copied.get("metadata") if isinstance(copied.get("metadata"), dict) else {}
+    copied["metadata"] = {**metadata}
+    copied["_original_rank"] = index
+    return copied
+
+
+def _normalize_rerank_mode(mode: str | None) -> str:
+    normalized = (mode or "local").strip().lower()
+    if normalized in {"local", "llm", "off"}:
+        return normalized
+    return "local"
 
 
 def _bm25_scores(terms: list[str], hits: list[dict]) -> list[float]:

@@ -1,5 +1,8 @@
+import json
+
 from app.core import pipeline as pipeline_module
-from app.core.pipeline import RagPipeline, _estimate_confidence, _extract_query_terms, _keyword_rerank
+from app.core.pipeline import RagPipeline, _estimate_confidence, _extract_query_terms, _keyword_rerank, rerank_hits
+from app.core.pipeline import retrieve as retrieve_module
 from app.llm.prompt_builder import SYSTEM_PROMPT
 
 
@@ -99,6 +102,53 @@ def test_keyword_rerank_records_explainable_hybrid_retrieval_signals() -> None:
     assert ranking["filter_match"] == 1.0
 
 
+def test_rerank_adapter_records_topk_distribution_and_hit_features() -> None:
+    hits = [
+        _hit(0.58, "绝缘电阻测试标准为电压、时间和阈值满足工艺要求。", document_id="doc-standard"),
+        _hit(0.64, "设备维护周期和日常点检要求。", document_id="doc-maintain"),
+    ]
+
+    result = rerank_hits("绝缘电阻测试标准是什么？", hits, top_k=2, mode="local")
+    trace = result["trace"]
+    top_hit = result["results"][0]
+
+    assert trace["mode"] == "local"
+    assert trace["topk_distribution"]["count"] == 2
+    assert trace["topk_distribution"]["score_buckets"]
+    assert trace["hit_features"][0]["matched_features"]
+    assert top_hit["metadata"]["rerank"]["topk_distribution"]["count"] == 2
+    assert "keyword_bm25" in top_hit["metadata"]["rerank"]["matched_features"]
+
+
+def test_rerank_adapter_llm_mode_reorders_candidates_and_records_reason(monkeypatch) -> None:
+    hits = [
+        _hit(0.62, "设备维护周期和日常点检要求。", document_id="doc-maintain"),
+        _hit(0.55, "OCV异常时需要复核静置时间、采样线和电压阈值。", document_id="doc-ocv"),
+    ]
+    preferred_chunk_id = hits[1]["chunk_id"]
+
+    def fake_llm_chat(messages, temperature=None, stream=False, response_format=None):
+        assert response_format == {"type": "json_object"}
+        return {
+            "content": json.dumps({
+                "ranked_chunk_ids": [preferred_chunk_id, hits[0]["chunk_id"]],
+                "reasons": {preferred_chunk_id: "命中 OCV 异常处理证据"},
+            }, ensure_ascii=False),
+            "model": "fake",
+            "latency_ms": 1,
+        }
+
+    monkeypatch.setattr(retrieve_module.config, "rag_rerank_mode", "llm")
+    monkeypatch.setattr(retrieve_module, "llm_chat", fake_llm_chat)
+
+    result = rerank_hits("OCV异常怎么处理？", hits, top_k=2)
+
+    assert result["trace"]["mode"] == "llm"
+    assert result["results"][0]["chunk_id"] == preferred_chunk_id
+    assert result["results"][0]["metadata"]["llm_rerank"]["reason"] == "命中 OCV 异常处理证据"
+    assert result["results"][0]["metadata"]["rerank"]["mode"] == "llm"
+
+
 def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -124,6 +174,7 @@ def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatc
     assert "开路电压" in captured["embedding_query"]
     assert result["expanded_query"] == captured["embedding_query"]
     assert result["term_expansion_hits"][0]["canonical_term"] == "OCV"
+    assert result["rerank_trace"]["topk_distribution"]["count"] == 2
     domain_hit = next(hit for hit in result["results"] if hit["content"].startswith("开路电压异常"))
     noisy_hit = next(hit for hit in result["results"] if hit["content"].startswith("设备维护周期"))
     assert domain_hit["metadata"]["ranking"]["keyword_coverage"] > noisy_hit["metadata"]["ranking"]["keyword_coverage"]

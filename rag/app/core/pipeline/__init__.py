@@ -32,6 +32,7 @@ from .retrieve import (
     _estimate_confidence,
     _extract_query_terms,
     _keyword_rerank,
+    rerank_hits,
 )
 from .rewrite import (
     _enrich_query_understanding_with_recall,
@@ -149,12 +150,14 @@ class RagPipeline:
             top_k=candidate_top_k,
             filters=filters,
         )
-        hits = _keyword_rerank(
+        rerank_result = rerank_hits(
             retrieval_query,
             hits,
             filters,
             term_expansion_hits=term_expansion_hits,
-        )[:top_k]
+            top_k=top_k,
+        )
+        hits = rerank_result["results"]
 
         latency_ms = int((time.time() - start) * 1000)
 
@@ -162,6 +165,7 @@ class RagPipeline:
             "query": query,
             "expanded_query": retrieval_query,
             "term_expansion_hits": term_expansion_hits,
+            "rerank_trace": rerank_result["trace"],
             "results": hits,
             "latency_ms": latency_ms,
         }
@@ -206,6 +210,7 @@ class RagPipeline:
                 "top_k": top_k,
                 "latency_ms": search_result["latency_ms"],
                 "term_expansion_hits": search_result.get("term_expansion_hits", []),
+                "rerank_trace": search_result.get("rerank_trace", {}),
                 "results": hits,
             },
             "prompt_preview": prompt_preview,
@@ -315,6 +320,7 @@ __all__ = [
     "_estimate_confidence",
     "_extract_query_terms",
     "_keyword_rerank",
+    "rerank_hits",
     "_knowledge_asset_trace",
     "_rewrite_query",
     "_rewrite_query_with_trace",
