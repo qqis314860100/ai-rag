@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, FileCheck, MessageSquare, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
 import type { ChatMessage, DiagramType, Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
@@ -79,6 +79,13 @@ function StreamingPlainText({ content }: { content: string }) {
       {content}
     </div>
   );
+}
+
+function messageContainmentStyle(isUser: boolean): CSSProperties {
+  return {
+    contentVisibility: "auto",
+    containIntrinsicSize: isUser ? "64px" : "220px",
+  } as CSSProperties;
 }
 
 function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }) {
@@ -223,9 +230,12 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   const [editValue, setEditValue] = useState("");
   const { bottomRef, showScrollBtn, scrollToBottom } = useChatThreadScroll({ loading, streamingContent, scrollToBottomSignal });
 
-  const persistedAssistantMessageIds = messages
-    .filter((m) => m.role === "assistant" && !m.streaming && canUsePersistedAssistantActions(getPersistedMessageId(m)))
-    .map((m) => getPersistedMessageId(m));
+  const persistedAssistantMessageIds = useMemo(
+    () => messages
+      .filter((m) => m.role === "assistant" && !m.streaming && canUsePersistedAssistantActions(getPersistedMessageId(m)))
+      .map((m) => getPersistedMessageId(m)),
+    [messages]
+  );
   const persistedAssistantMessageKey = persistedAssistantMessageIds.join(",");
   const { feedbackCounts, voting, feedbackReason, setFeedbackReason, handleFeedback, submitFeedbackReason } =
     useMessageFeedback(persistedAssistantMessageKey, loading);
@@ -275,6 +285,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             key={msg.id}
             id={`chat-message-${msg.id}`}
             className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
+            style={messageContainmentStyle(isUser)}
           >
             {/* Message body */}
             <div className={`max-w-[80%]`}>
