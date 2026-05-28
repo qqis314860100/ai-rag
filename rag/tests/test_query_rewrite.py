@@ -1,3 +1,5 @@
+import pytest
+
 from app.core import pipeline as pipeline_module
 from app.core.pipeline import RagPipeline, _rewrite_query, _rewrite_query_with_trace
 from app.core.terminology import list_term_entries, terminology_contract
@@ -103,6 +105,78 @@ def test_query_understanding_corrects_misspelled_abbreviation() -> None:
         and item["value"] == "built_in_battery_line_glossary"
         for item in understanding.trace
     )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_signal", "expected_match_kind"),
+    [
+        ("elo测试异常怎么处理？", "spell_correction", "spell_correction"),
+        ("eOl测试异常怎么处理？", "terminology_expansion", "abbreviation"),
+        ("ELO测试异常怎么处理？", "spell_correction", "spell_correction"),
+        ("终检测试异常怎么处理？", "terminology_expansion", "alias"),
+    ],
+)
+def test_query_understanding_eval_should_normalize_eol_variants(
+    query: str,
+    expected_signal: str,
+    expected_match_kind: str,
+) -> None:
+    result = _rewrite_query_with_trace(query)
+    understanding = result.query_understanding
+
+    assert result.changed is True
+    assert "EOL" in result.rewritten_query
+    assert expected_signal in result.signals
+    assert understanding.needs_confirmation is False
+    assert any(
+        candidate.term == "EOL" and candidate.matched_kind == expected_match_kind
+        for candidate in understanding.candidate_terms
+    )
+
+
+def test_query_understanding_eval_completes_chapter_ellipsis_from_history() -> None:
+    result = _rewrite_query_with_trace(
+        "第五章呢？",
+        history=[{"role": "user", "content": "模组EOL测试规范的安全注意事项有哪些？"}],
+    )
+
+    assert result.changed is True
+    assert result.strategy == "compound"
+    assert "模组EOL测试规范的安全注意事项" in result.rewritten_query
+    assert "第5章" in result.rewritten_query
+    assert {"history_topic", "ellipsis", "chapter_number"}.issubset(result.signals)
+    assert result.query_understanding.needs_confirmation is False
+
+
+def test_query_understanding_eval_resolves_pronoun_from_history() -> None:
+    result = _rewrite_query_with_trace(
+        "它异常时怎么处理？",
+        history=[
+            {"role": "user", "content": "绝缘电阻测试合格阈值是多少？"},
+            {"role": "assistant", "content": "绝缘电阻测试阈值是不低于20MΩ。"},
+        ],
+    )
+
+    assert result.changed is True
+    assert result.strategy == "history_pronoun_resolution"
+    assert result.rewritten_query == "绝缘电阻测试合格阈值异常时怎么处理？"
+    assert result.query_understanding.needs_confirmation is False
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SOC容量怎么估算？",
+        "ELISA测试异常怎么处理？",
+        "ERP接口异常怎么处理？",
+        "终端测试异常怎么处理？",
+    ],
+)
+def test_query_understanding_eval_does_not_overcorrect_unrelated_terms(query: str) -> None:
+    result = _rewrite_query_with_trace(query)
+
+    assert result.query_understanding.spell_corrections == []
+    assert "spell_correction" not in result.signals
 
 
 def test_query_understanding_marks_low_information_confirmation() -> None:

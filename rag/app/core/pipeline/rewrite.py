@@ -253,9 +253,12 @@ def _detect_spell_corrections(query: str) -> list[QuerySpellCorrection]:
         for entry in list_term_entries()
         if str(entry.get("abbreviation") or entry.get("canonical_term") or "")
     ]
+    known_abbreviations = {abbreviation.lower() for abbreviation in abbreviations}
     seen: set[tuple[str, str]] = set()
     for token in tokens:
         normalized = token.lower()
+        if normalized in known_abbreviations:
+            continue
         for abbreviation in abbreviations:
             target = abbreviation.lower()
             if normalized == target or abs(len(normalized) - len(target)) > 1:
