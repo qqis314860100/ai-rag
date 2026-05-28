@@ -4,6 +4,8 @@ import { getDb } from "./index";
 
 export const TERMINOLOGY_STATUSES = ["draft", "published", "archived"] as const;
 export type TerminologyStatus = typeof TERMINOLOGY_STATUSES[number];
+export const TERMINOLOGY_FEEDBACK_STATUSES = ["candidate", "approved", "fed_back", "deprecated"] as const;
+export type TerminologyFeedbackStatus = typeof TERMINOLOGY_FEEDBACK_STATUSES[number];
 
 export interface TerminologySourceRef {
   document_id?: string;
@@ -36,6 +38,25 @@ export interface TerminologyFilters {
   relatedTopic?: string;
 }
 
+export interface TerminologyTermInput {
+  canonicalTerm: string;
+  abbreviation?: string;
+  aliases?: string[];
+  synonyms?: string[];
+  definition?: string;
+  applicableScenarios?: string[];
+  sourceRefs?: TerminologySourceRef[];
+  relatedTopics?: string[];
+  retrievalTerms?: string[];
+  status?: TerminologyStatus;
+  source?: string;
+  confidence?: number;
+  reviewerId?: string | null;
+  reviewerName?: string | null;
+  feedbackStatus?: TerminologyFeedbackStatus;
+  metadata?: Record<string, unknown>;
+}
+
 export const TERMINOLOGY_CONTRACT = {
   schema_version: "terminology.v1",
   owner_service: "api",
@@ -53,6 +74,17 @@ export const TERMINOLOGY_CONTRACT = {
     "retrieval_terms",
   ],
   status_flow: ["draft", "published", "archived"],
+  governance_fields: [
+    "source",
+    "source_refs",
+    "applicable_scenarios",
+    "confidence",
+    "reviewer_id",
+    "reviewer_name",
+    "reviewed_at",
+    "version",
+    "feedback_status",
+  ],
   retrieval_rule: "RAG 只能使用 published 术语反哺查询改写和检索扩展，并在 trace 中记录命中的 canonical_term。",
 } as const;
 
@@ -148,6 +180,29 @@ function parseJson<T>(input: string, fallback: T): T {
   }
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function clampConfidence(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(1, value));
+}
+
+function mergeStrings(existingJson: string, next?: string[]): string[] {
+  return uniqueStrings([...parseJson<string[]>(existingJson, []), ...(next ?? [])]);
+}
+
+function mergeSourceRefs(existingJson: string, next?: TerminologySourceRef[]): TerminologySourceRef[] {
+  const refs = [...parseJson<TerminologySourceRef[]>(existingJson, []), ...(next ?? [])];
+  const byKey = new Map<string, TerminologySourceRef>();
+  for (const ref of refs) {
+    const key = ref.chunk_id || ref.document_id || `${ref.title || ""}:${ref.section_path || ""}`;
+    if (key.trim()) byKey.set(key, ref);
+  }
+  return Array.from(byKey.values()).slice(0, 20);
+}
+
 export function isTerminologyStatus(value: unknown): value is TerminologyStatus {
   return typeof value === "string" && TERMINOLOGY_STATUSES.includes(value as TerminologyStatus);
 }
@@ -230,7 +285,110 @@ export function getTerminologyTermByCanonicalTerm(canonicalTerm: string): Termin
   return row ?? null;
 }
 
+export function upsertTerminologyTerm(input: TerminologyTermInput): TerminologyRow {
+  const now = new Date().toISOString();
+  const existing = getTerminologyTermByCanonicalTerm(input.canonicalTerm);
+  if (existing) {
+    return updateTerminologyTerm(existing.id, input)!;
+  }
+
+  const id = uuidv4();
+  const confidence = clampConfidence(input.confidence);
+  const metadata = {
+    ...(input.metadata ?? {}),
+    confidence: confidence ?? input.metadata?.confidence ?? null,
+    reviewer_id: input.reviewerId ?? null,
+    reviewer_name: input.reviewerName ?? null,
+    reviewed_at: input.reviewerName || input.reviewerId ? now : null,
+    version: 1,
+    feedback_status: input.feedbackStatus ?? "candidate",
+  };
+
+  getDb().prepare(
+    `INSERT INTO terminology_terms (
+       id, canonical_term, abbreviation, aliases_json, synonyms_json, definition,
+       applicable_scenarios_json, source_refs_json, related_topics_json,
+       retrieval_terms_json, status, source, metadata_json, created_at, updated_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    input.canonicalTerm,
+    input.abbreviation ?? "",
+    toJson(input.aliases ?? []),
+    toJson(input.synonyms ?? []),
+    input.definition ?? "",
+    toJson(input.applicableScenarios ?? []),
+    toJson(input.sourceRefs ?? []),
+    toJson(input.relatedTopics ?? []),
+    toJson(input.retrievalTerms ?? uniqueStrings([input.canonicalTerm, input.abbreviation ?? "", ...(input.aliases ?? [])])),
+    input.status ?? "draft",
+    input.source ?? "manual",
+    JSON.stringify(metadata),
+    now,
+    now
+  );
+
+  return getTerminologyTermById(id)!;
+}
+
+export function updateTerminologyTerm(id: string, input: Partial<TerminologyTermInput>): TerminologyRow | null {
+  const existing = getTerminologyTermById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const existingMetadata = parseJson<Record<string, unknown>>(existing.metadata_json, {});
+  const nextVersion = typeof existingMetadata.version === "number" ? existingMetadata.version + 1 : 2;
+  const confidence = clampConfidence(input.confidence);
+  const metadata = {
+    ...existingMetadata,
+    ...(input.metadata ?? {}),
+    ...(confidence !== undefined ? { confidence } : {}),
+    ...(input.reviewerId !== undefined ? { reviewer_id: input.reviewerId } : {}),
+    ...(input.reviewerName !== undefined ? { reviewer_name: input.reviewerName } : {}),
+    ...(input.reviewerId || input.reviewerName ? { reviewed_at: now } : {}),
+    version: nextVersion,
+    ...(input.feedbackStatus ? { feedback_status: input.feedbackStatus } : {}),
+  };
+
+  getDb().prepare(
+    `UPDATE terminology_terms
+     SET canonical_term = ?,
+         abbreviation = ?,
+         aliases_json = ?,
+         synonyms_json = ?,
+         definition = ?,
+         applicable_scenarios_json = ?,
+         source_refs_json = ?,
+         related_topics_json = ?,
+         retrieval_terms_json = ?,
+         status = ?,
+         source = ?,
+         metadata_json = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(
+    input.canonicalTerm ?? existing.canonical_term,
+    input.abbreviation ?? existing.abbreviation,
+    toJson(mergeStrings(existing.aliases_json, input.aliases)),
+    toJson(mergeStrings(existing.synonyms_json, input.synonyms)),
+    input.definition ?? existing.definition,
+    toJson(mergeStrings(existing.applicable_scenarios_json, input.applicableScenarios)),
+    toJson(mergeSourceRefs(existing.source_refs_json, input.sourceRefs)),
+    toJson(mergeStrings(existing.related_topics_json, input.relatedTopics)),
+    toJson(mergeStrings(existing.retrieval_terms_json, input.retrievalTerms)),
+    input.status ?? existing.status,
+    input.source ?? existing.source,
+    JSON.stringify(metadata),
+    now,
+    id
+  );
+
+  return getTerminologyTermById(id);
+}
+
 export function formatTerminologyTerm(row: TerminologyRow) {
+  const metadata = parseJson<Record<string, unknown>>(row.metadata_json, {});
   return {
     id: row.id,
     canonical_term: row.canonical_term,
@@ -244,7 +402,15 @@ export function formatTerminologyTerm(row: TerminologyRow) {
     retrieval_terms: parseJson<string[]>(row.retrieval_terms_json, []),
     status: row.status,
     source: row.source,
-    metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
+    evidence_refs: parseJson<TerminologySourceRef[]>(row.source_refs_json, []),
+    applicable_scope: parseJson<string[]>(row.applicable_scenarios_json, []),
+    confidence: typeof metadata.confidence === "number" ? metadata.confidence : null,
+    reviewer_id: typeof metadata.reviewer_id === "string" ? metadata.reviewer_id : null,
+    reviewer_name: typeof metadata.reviewer_name === "string" ? metadata.reviewer_name : null,
+    reviewed_at: typeof metadata.reviewed_at === "string" ? metadata.reviewed_at : null,
+    version: typeof metadata.version === "number" ? metadata.version : 1,
+    feedback_status: typeof metadata.feedback_status === "string" ? metadata.feedback_status : "candidate",
+    metadata,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
