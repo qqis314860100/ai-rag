@@ -113,9 +113,16 @@ def test_chat_warns_context_conflict_without_hard_refusal(monkeypatch) -> None:
     assert result["answer_ir"]["status"] in ("answered", "partial")
     assert result["confidence"] > 0
     assert "context_conflict" in warning_codes
+    conflict_warning = next(warning for warning in result["answer_ir"]["warnings"] if warning["code"] == "context_conflict")
+    assert conflict_warning["citation_ids"] == ["chunk-a", "chunk-b"]
+    assert "精确核验" in conflict_warning["message"]
     assert result["answer_ir"]["metadata"]["refusal_reasons"] == []
     assert result["answer_ir"]["metadata"]["conflict_assessment"]["status"] == "candidate"
-    assert any("检索风险提示" in message["content"] for message in captured_messages)
+    assert result["answer_ir"]["metadata"]["conflict_assessment"]["verification"] == "precise"
+    assert result["answer_ir"]["metadata"]["conflict_assessment"]["decision"] == "warn_only"
+    risk_prompt = next(message["content"] for message in captured_messages if "检索风险提示" in message["content"])
+    assert "chunk-a" in risk_prompt
+    assert "chunk-b" in risk_prompt
 
 
 def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypatch) -> None:

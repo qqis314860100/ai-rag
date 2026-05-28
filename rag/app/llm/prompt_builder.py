@@ -104,7 +104,8 @@ def _format_evidence_warnings(warnings: list[AnswerWarning]) -> str:
     lines: list[str] = []
     for warning in warnings:
         if warning.code == "context_conflict":
-            lines.append("- 检索片段可能存在冲突表述，请核对是否为同一对象、动作或参数。")
+            citation_suffix = f" 相关引用：{', '.join(warning.citation_ids)}。" if warning.citation_ids else ""
+            lines.append(f"- {warning.message}{citation_suffix}")
         elif warning.severity in {"warning", "error"}:
             lines.append(f"- {warning.message}")
     return "\n".join(lines[:4])
