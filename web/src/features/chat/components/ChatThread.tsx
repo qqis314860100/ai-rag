@@ -1,27 +1,28 @@
 import { lazy, Suspense, useMemo, useState, type CSSProperties } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, FileCheck, MessageSquare, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp, Sparkles, Eye } from "lucide-react";
-import type { ChatMessage, DiagramType, Source } from "../types";
-import { MarkdownContent } from "./MarkdownContent";
+import { ChevronDown, StopCircle } from "lucide-react";
+import type { ChatArtifact, ChatMessage, DiagramType, Source } from "../types";
 import { showToast } from "../../../components/ui/Toast";
 import { ChatEmptyWelcome } from "./ChatEmptyWelcome";
 import { StreamStages } from "./StreamStages";
+import UserMessageBubble from "./UserMessageBubble";
+import AssistantMessageBubble from "./AssistantMessageBubble";
+import AssistantFooterActions from "./AssistantFooterActions";
 import {
-  assetStatusLabel,
+  FeedbackReasonPopup,
+  FollowUpList,
+  StreamingPendingCard,
+  ThreadInlineStatus,
+} from "./ChatThreadBlocks";
+import {
   canUsePersistedAssistantActions,
   canUsePersistedUserActions,
   formatTime,
   getAnswerQualityNotice,
   getAnswerTrustSummary,
-  getDiagramActionLabel,
-  getDiagramButtonLabel,
-  getDiagramKey,
   getPersistedMessageId,
   getQueryUnderstandingNotice,
   isAnswerReadyForRefinement,
   mergeArtifacts,
-  type AnswerQualityNotice,
-  type AnswerTrustSummary,
-  type QueryUnderstandingNotice,
 } from "./chatThreadUtils";
 import { useChatThreadScroll } from "../hooks/useChatThreadScroll";
 import { useMessageArtifacts } from "../hooks/useMessageArtifacts";
@@ -51,35 +52,6 @@ interface ChatThreadProps {
   onCreateKnowledgeAssetDraft?: (messageId: string, type: "card" | "faq") => Promise<void>;
 }
 
-const queryNoticeToneClass: Record<QueryUnderstandingNotice["tone"], string> = {
-  confirmed: "border-success/20 bg-success-soft/65 text-success",
-  inferred: "border-accent/20 bg-accent-soft/55 text-accent",
-  confirmation: "border-warning/25 bg-warning-soft text-warning",
-};
-
-const answerQualityToneClass: Record<AnswerQualityNotice["tone"], string> = {
-  answerable: "border-success/20 bg-success-soft/60 text-success",
-  grey_answer: "border-accent/20 bg-accent-soft/60 text-accent",
-  partial_answer: "border-warning/25 bg-warning-soft text-warning",
-  refused: "border-danger/20 bg-danger-soft text-danger",
-};
-
-const trustToneClass: Record<AnswerTrustSummary["tone"], { text: string; badge: string; icon: string }> = {
-  strong: { text: "text-success", badge: "bg-success-soft text-success", icon: "text-success" },
-  medium: { text: "text-accent", badge: "bg-accent-soft text-accent", icon: "text-accent" },
-  weak: { text: "text-warning", badge: "bg-warning-soft text-warning", icon: "text-warning" },
-  danger: { text: "text-danger", badge: "bg-danger-soft text-danger", icon: "text-danger" },
-  neutral: { text: "text-text-secondary", badge: "bg-surface-hover text-text-secondary", icon: "text-text-muted" },
-};
-
-function StreamingPlainText({ content }: { content: string }) {
-  return (
-    <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-text">
-      {content}
-    </div>
-  );
-}
-
 function messageContainmentStyle(isUser: boolean): CSSProperties {
   return {
     contentVisibility: "auto",
@@ -87,171 +59,37 @@ function messageContainmentStyle(isUser: boolean): CSSProperties {
   } as CSSProperties;
 }
 
-function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }) {
-  const Icon = notice.tone === "confirmed" ? FileCheck : notice.tone === "confirmation" ? AlertCircle : CircleHelp;
-
-  return (
-    <div className={`mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-relaxed ${queryNoticeToneClass[notice.tone]}`}>
-      <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
-        <Icon className="h-3.5 w-3.5" />
-        {notice.label}
-      </span>
-      <span className="min-w-0 flex-1 text-text-secondary">{notice.text}</span>
-      {notice.terms.map((term) => (
-        <span key={term} className="max-w-full truncate rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
-          {term}
-        </span>
-      ))}
-    </div>
-  );
+function assistantMessageIds(messages: ChatMessage[]) {
+  return messages
+    .filter((message) => message.role === "assistant" && !message.streaming)
+    .map(getPersistedMessageId)
+    .filter(canUsePersistedAssistantActions);
 }
 
-function AnswerQualityHint({ notice }: { notice: AnswerQualityNotice }) {
-  const Icon = notice.tone === "answerable" ? FileCheck : notice.tone === "refused" ? X : notice.tone === "partial_answer" ? AlertCircle : CircleHelp;
-
-  return (
-    <div className={`mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-relaxed ${answerQualityToneClass[notice.tone]}`}>
-      <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
-        <Icon className="h-3.5 w-3.5" />
-        {notice.label}
-      </span>
-      <span className="min-w-0 flex-1 text-text-secondary">{notice.text}</span>
-      {notice.confidence !== undefined && notice.confidence > 0 && (
-        <span className="shrink-0 rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
-          {Math.round(notice.confidence * 100)}%
-        </span>
-      )}
-      {notice.reasons.map((reason) => (
-        <span key={reason} className="max-w-full truncate rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
-          {reason}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function AnswerTrustPanel({
-  summary,
-  sources,
-  isOpen,
-  onToggleSources,
+export default function ChatThread({
+  messages,
+  loading,
+  streamingContent,
+  streamError,
+  streamStopped,
+  scrollToBottomSignal,
+  selectedSources,
+  onSelectSources,
+  onFollowUp,
+  onCancelStream,
+  onInitialQuestion,
+  onRetry,
+  onEditUser,
+  onDeleteMessage,
   onSourceAnchor,
-}: {
-  summary: AnswerTrustSummary;
-  sources?: Source[];
-  isOpen: boolean;
-  onToggleSources: () => void;
-  onSourceAnchor?: (sources: Source[], index: number) => void;
-}) {
-  const tone = trustToneClass[summary.tone];
-  const coverageLabel = summary.claimCount > 0
-    ? `${summary.supportedClaimCount}/${summary.claimCount} 条结论有引用`
-    : summary.citedSourceCount > 0
-      ? `${summary.citedSourceCount} 条引用支撑`
-      : summary.sourceCount > 0
-        ? `${summary.sourceCount} 条相关资料`
-        : "暂无引用";
-  const coverageRatioLabel = summary.claimCoverageRatio !== undefined && summary.claimCount > 0
-    ? `${Math.round(summary.claimCoverageRatio * 100)}%`
-    : "";
-  const visibleWarnings = summary.warnings.slice(0, 3);
-  const hasSources = Boolean(sources?.length);
-
-  return (
-    <div className="mt-4 border-t border-divider/70 pt-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px]">
-        <span className={`inline-flex items-center gap-1.5 font-semibold ${tone.text}`}>
-          {summary.tone === "strong" ? <FileCheck className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
-          可信度 {summary.confidenceLabel}
-        </span>
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-text-secondary">
-          <FileSearch className={`h-3.5 w-3.5 shrink-0 ${tone.icon}`} />
-          <span className="truncate">{coverageLabel}</span>
-          {coverageRatioLabel && <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${tone.badge}`}>{coverageRatioLabel}</span>}
-        </span>
-        {summary.conflictCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-danger-soft px-1.5 py-0.5 text-[11px] font-semibold text-danger">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {summary.conflictLabels.join("、")}
-          </span>
-        )}
-        {hasSources && (
-          <button
-            onClick={onToggleSources}
-            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-page px-2.5 py-1.5 font-medium text-text-secondary transition-colors hover:border-accent/40 hover:bg-accent-soft/50 hover:text-accent"
-          >
-            <FileSearch className="h-3.5 w-3.5" />
-            {isOpen ? "收起证据" : "查看证据"}
-            <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">{sources?.length}</span>
-          </button>
-        )}
-      </div>
-      {visibleWarnings.length > 0 && (
-        <div className="mt-2 flex flex-col gap-1 text-[12px] leading-relaxed text-text-secondary">
-          {visibleWarnings.map((warning) => (
-            <div key={`${warning.code}:${warning.message}`} className="flex min-w-0 items-start gap-1.5">
-              <AlertCircle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${warning.severity === "error" ? "text-danger" : "text-warning"}`} />
-              <span className="min-w-0 flex-1">{warning.message}</span>
-              {warning.citationIds.length > 0 && (
-                <span className="shrink-0 rounded-md bg-surface-hover px-1.5 py-0.5 text-[11px] text-text-muted">
-                  {warning.citationIds.length} 引用
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {hasSources && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {sources!.slice(0, 3).map((source, index) => (
-            <button
-              key={`${source.chunk_id}-${index}`}
-              onClick={() => onSourceAnchor?.(sources!, index)}
-              className="max-w-full truncate rounded-md border border-border bg-surface-page px-2 py-1 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
-              title={source.document_title || source.section_path || `证据 ${index + 1}`}
-            >
-              {index + 1}. {source.document_title || source.section_path || "引用资料"}
-            </button>
-          ))}
-          {sources!.length > 3 && (
-            <span className="rounded-md bg-surface-hover px-2 py-1 text-[11px] text-text-muted">
-              另有 {sources!.length - 3} 条
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function artifactLabel(type: string, subtype?: unknown) {
-  if (type === "diagram") return subtype === "architecture" ? "架构图" : "图解";
-  if (type === "mindmap") return "思维导图";
-  if (type === "flowchart") return "流程图";
-  if (type === "chart") return "图表";
-  return type || "产物";
-}
-
-function artifactStatusLabel(status: string) {
-  if (status === "ready") return "可查看";
-  if (status === "pending") return "生成中";
-  if (status === "failed") return "失败";
-  return status;
-}
-
-export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onSourceAnchor, assetDraftStatusByMessage = {}, onCreateKnowledgeAssetDraft }: ChatThreadProps) {
+  assetDraftStatusByMessage = {},
+  onCreateKnowledgeAssetDraft,
+}: ChatThreadProps) {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
   const { bottomRef, showScrollBtn, scrollToBottom } = useChatThreadScroll({ loading, streamingContent, scrollToBottomSignal });
-
-  const persistedAssistantMessageIds = useMemo(
-    () => messages
-      .filter((m) => m.role === "assistant" && !m.streaming && canUsePersistedAssistantActions(getPersistedMessageId(m)))
-      .map((m) => getPersistedMessageId(m)),
-    [messages]
-  );
-  const persistedAssistantMessageKey = persistedAssistantMessageIds.join(",");
+  const persistedAssistantMessageKey = useMemo(() => assistantMessageIds(messages).join(","), [messages]);
   const { feedbackCounts, voting, feedbackReason, setFeedbackReason, handleFeedback, submitFeedbackReason } =
     useMessageFeedback(persistedAssistantMessageKey, loading);
   const { favoriteStatus, favoriting, handleFavorite } = useMessageFavorites(persistedAssistantMessageKey);
@@ -262,17 +100,26 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     showToast("success", "已复制到剪贴板");
   };
 
-  const handleStartEdit = (msg: ChatMessage) => {
-    if (!canUsePersistedUserActions(getPersistedMessageId(msg))) return;
-    setEditingMsgId(msg.id);
-    setEditValue(msg.content);
+  const startEdit = (message: ChatMessage) => {
+    if (!canUsePersistedUserActions(getPersistedMessageId(message))) return;
+    setEditingMsgId(message.id);
+    setEditValue(message.content);
   };
 
-  const handleDeleteUserMessage = (msg: ChatMessage) => {
-    if (!canUsePersistedUserActions(getPersistedMessageId(msg))) return;
-    const ok = window.confirm("确认删除这一轮问答及其后续分支吗？此操作会连带删除对应回答。");
-    if (!ok) return;
-    onDeleteMessage(msg.id);
+  const deleteUserMessage = (message: ChatMessage) => {
+    if (!canUsePersistedUserActions(getPersistedMessageId(message))) return;
+    if (!window.confirm("确认删除这一轮问答及其后续分支吗？此操作会连带删除对应回答。")) return;
+    onDeleteMessage(message.id);
+  };
+
+  const generateAndClose = (message: ChatMessage, type: DiagramType, artifact?: ChatArtifact) => {
+    setOpenActionMenuId(null);
+    void generateDiagram(message, type, artifact);
+  };
+
+  const createAssetAndClose = async (messageId: string, type: "card" | "faq") => {
+    setOpenActionMenuId(null);
+    await onCreateKnowledgeAssetDraft?.(messageId, type);
   };
 
   if (messages.length === 0 && !loading) {
@@ -280,406 +127,131 @@ export default function ChatThread({ messages, loading, streamingContent, stream
   }
 
   return (
-    <div className="py-6 space-y-10">
-      {messages.map((msg) => {
-        const isUser = msg.role === "user";
-        const persistedMessageId = getPersistedMessageId(msg);
+    <div className="space-y-10 py-6">
+      {messages.map((message) => {
+        const isUser = message.role === "user";
+        const persistedMessageId = getPersistedMessageId(message);
         const canPersistAssistantActions = !isUser && canUsePersistedAssistantActions(persistedMessageId);
         const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
-        const userBranchActionsDisabled = loading || !canPersistUserActions;
-        const canRefineAssistantAnswer = canPersistAssistantActions && isAnswerReadyForRefinement(msg);
-        const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
-        const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
-        const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
-        const answerQualityNotice = !isUser && !msg.streaming ? getAnswerQualityNotice(msg) : null;
-        const answerTrustSummary = !isUser && !msg.streaming ? getAnswerTrustSummary(msg) : null;
-        const queryUnderstandingNotice = !isUser && !msg.streaming ? getQueryUnderstandingNotice(msg) : null;
-        const canShowAssistantDock = !isUser && !msg.streaming && canPersistAssistantActions;
-        const isActionMenuOpen = openActionMenuId === persistedMessageId;
+        const feedback = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
+        const artifacts = !isUser ? mergeArtifacts(message.artifacts, generatedArtifacts[persistedMessageId]) : [];
+        const answerQualityNotice = !isUser && !message.streaming ? getAnswerQualityNotice(message) : null;
+        const answerTrustSummary = !isUser && !message.streaming ? getAnswerTrustSummary(message) : null;
+        const queryUnderstandingNotice = !isUser && !message.streaming ? getQueryUnderstandingNotice(message) : null;
 
         return (
           <div
-            key={msg.id}
-            id={`chat-message-${msg.id}`}
+            key={message.id}
+            id={`chat-message-${message.id}`}
             className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}
             style={messageContainmentStyle(isUser)}
           >
-            {/* Message body */}
-            <div className={`max-w-[80%]`}>
+            <div className="max-w-[80%]">
               {isUser ? (
-                editingMsgId === msg.id ? (
-                  /* Edit mode */
-                  <div className="relative w-[min(80vw,28rem)] rounded-[22px] border border-accent/70 bg-[#F3F1EE] px-4 pb-12 pt-3 shadow-sm-soft">
-                    <textarea value={editValue} onChange={(e) => setEditValue(e.target.value)}
-                      rows={4}
-                      onKeyDown={(e) => { if (e.key === "Escape") setEditingMsgId(null); }}
-                      className="block max-h-[40vh] min-h-[6.5rem] w-full resize-none overflow-y-auto bg-transparent p-0 text-[15px] leading-relaxed text-text outline-none placeholder:text-text-muted"
-                      autoFocus />
-                    <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
-                      <button onClick={() => setEditingMsgId(null)}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-white/70 hover:text-text" title="取消">
-                        <X className="h-4 w-4" />
-                      </button>
-                      <button onClick={() => { onEditUser(msg.id, editValue); setEditingMsgId(null); }} disabled={!editValue.trim()}
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-[#3F3B37] text-white shadow-sm-soft transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40" title="确认">
-                        <Check className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* User bubble — hover shows copy/edit/delete on the left */
-                  <div className="relative group/bubble inline-flex items-center gap-1">
-                    {/* Copy + edit + delete on hover — appear to the LEFT of the bubble */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity order-first">
-                      <button onClick={(e) => { e.stopPropagation(); handleCopy(msg.content); }}
-                        className="p-1 rounded text-text-muted hover:text-text transition-colors" title="复制">
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleStartEdit(msg); }}
-                        disabled={userBranchActionsDisabled}
-                        className="p-1 rounded text-text-muted hover:text-accent disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:text-text-muted transition-colors"
-                        title={loading ? "生成中不可编辑" : canPersistUserActions ? "编辑并重新提问" : "消息保存后可编辑"}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteUserMessage(msg); }}
-                        disabled={userBranchActionsDisabled}
-                        className="p-1 rounded text-text-muted hover:text-danger disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:text-text-muted transition-colors"
-                        title={loading ? "生成中不可删除" : canPersistUserActions ? "删除本轮问答" : "消息保存后可删除"}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <div
-                      className="rounded-2xl bg-[#F3F1EE] px-4 py-2.5 text-[15px] leading-relaxed text-text whitespace-pre-wrap hover:bg-[#EDEAE6] transition-colors"
-                    >
-                      {msg.content}
-                    </div>
-                  </div>
-                )
-              ) : msg.streaming && !streamingContent ? (
-                /* Streaming — no content yet, show staged progress */
-                <div className="relative min-w-[18rem] rounded-2xl border border-border/60 bg-surface-page px-5 py-4 shadow-sm-soft">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-medium text-accent">
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      正在准备回答...
-                      <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
-                    </div>
-                    <button onClick={onCancelStream} className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止生成">
-                      <StopCircle size={14} />
-                    </button>
-                  </div>
-                  <StreamStages />
-                </div>
+                <UserMessageBubble
+                  message={message}
+                  editing={editingMsgId === message.id}
+                  editValue={editValue}
+                  actionsDisabled={loading || !canPersistUserActions}
+                  canPersistActions={canPersistUserActions}
+                  loading={loading}
+                  onCopy={handleCopy}
+                  onStartEdit={startEdit}
+                  onEditValueChange={setEditValue}
+                  onCancelEdit={() => setEditingMsgId(null)}
+                  onConfirmEdit={() => {
+                    onEditUser(message.id, editValue);
+                    setEditingMsgId(null);
+                  }}
+                  onDelete={deleteUserMessage}
+                />
+              ) : message.streaming && !streamingContent ? (
+                <StreamingPendingCard onCancelStream={onCancelStream} />
               ) : (
-                /* AI message — 统一气泡背景，流式与定稿不再换 bg/border，只靠顶部状态条和光标作为 indicator */
-                <div className="relative rounded-2xl border px-5 py-4 shadow-sm-soft bg-surface-page border-border/60">
-                  {/* Streaming label */}
-                  {msg.streaming && (
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2 text-xs text-accent font-medium">
-                        <MessageSquare className="h-3.5 w-3.5" />
-                        正在生成答案...
-                        <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
-                      </div>
-                      <button onClick={onCancelStream} className="p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止生成">
-                        <StopCircle size={14} />
-                      </button>
-                    </div>
-                  )}
-                  {answerQualityNotice && <AnswerQualityHint notice={answerQualityNotice} />}
-                  {queryUnderstandingNotice && <QueryUnderstandingHint notice={queryUnderstandingNotice} />}
-                  <div className="text-[15px] leading-relaxed text-text">
-                    {msg.streaming ? (
-                      <StreamingPlainText content={streamingContent} />
-                    ) : (
-                      <MarkdownContent
-                        content={msg.content}
-                        sources={msg.sources}
-                        onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }}
-                      />
-                    )}
-                    {msg.streaming && (
-                      <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
-                    )}
-                  </div>
-                  {answerTrustSummary && (
-                    <AnswerTrustPanel
-                      summary={answerTrustSummary}
-                      sources={msg.sources}
-                      isOpen={selectedSources === msg.sources}
-                      onToggleSources={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources || null)}
-                      onSourceAnchor={onSourceAnchor}
-                    />
-                  )}
-                  {canShowAssistantDock && (
-                    <div className="mt-4 flex justify-end border-t border-divider/70 pt-3">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setOpenActionMenuId(isActionMenuOpen ? null : persistedMessageId)}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft/70 px-3 py-1.5 text-xs font-semibold text-accent shadow-sm-soft transition-colors hover:border-accent/60 hover:bg-accent-soft"
-                          title="整理本条回答"
-                        >
-                          <Sparkles className="h-3.5 w-3.5" />
-                          AI 整理
-                          {messageArtifacts.length > 0 && (
-                            <span className="rounded-full bg-white/75 px-1.5 py-0.5 text-[10px] text-accent">{messageArtifacts.length}</span>
-                          )}
-                        </button>
-
-                        {isActionMenuOpen && (
-                          <div className="absolute right-0 top-full z-30 mt-2 w-80 overflow-hidden rounded-xl border border-border bg-white shadow-lg-soft">
-                            <div className="border-b border-divider/70 px-3 py-2">
-                              <div className="flex items-center gap-1.5 text-xs font-semibold text-text">
-                                <Sparkles className="h-3.5 w-3.5 text-accent" />
-                                整理与沉淀
-                              </div>
-                              <p className="mt-0.5 text-[11px] text-text-muted">大型图解在后台生成，完成后用弹窗查看。</p>
-                            </div>
-                            <div className="grid gap-1 p-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenActionMenuId(null);
-                                  onFollowUp("请把上一条回答整理成 3 条关键结论，并保留必要的引用依据。");
-                                }}
-                                className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text"
-                              >
-                                <FileCheck className="h-4 w-4 text-accent" />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block font-semibold text-text">总结精髓</span>
-                                  <span className="block truncate text-[11px] text-text-muted">生成 3 条关键结论并保留引用</span>
-                                </span>
-                              </button>
-
-                              {(["card", "faq"] as const).map((assetType) => {
-                                const Icon = assetType === "card" ? BookMarked : CircleHelp;
-                                const status = assetType === "card" ? assetStatus.card : assetStatus.faq;
-                                const label = assetType === "card" ? "知识卡草稿" : "FAQ 草稿";
-                                return (
-                                  <button
-                                    key={assetType}
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      void onCreateKnowledgeAssetDraft?.(persistedMessageId, assetType);
-                                    }}
-                                    disabled={!canRefineAssistantAnswer || !onCreateKnowledgeAssetDraft || Boolean(status)}
-                                    className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-55"
-                                  >
-                                    <Icon className="h-4 w-4 text-accent" />
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block font-semibold text-text">{label}</span>
-                                      <span className="block truncate text-[11px] text-text-muted">{status ? assetStatusLabel(status) : canRefineAssistantAnswer ? "沉淀为可审核知识资产" : "当前回答需先复核"}</span>
-                                    </span>
-                                  </button>
-                                );
-                              })}
-
-                              {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
-                                const state = diagramStates[getDiagramKey(persistedMessageId, type)];
-                                const existingArtifact = messageArtifacts.find((artifact) => artifact.type === type || artifact.metadata?.type === type || artifact.metadata?.diagram_type === type);
-                                const artifact = state?.data || existingArtifact;
-                                const Icon = type === "mindmap" ? Brain : Workflow;
-                                return (
-                                  <button
-                                    key={type}
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      void generateDiagram(msg, type, artifact);
-                                    }}
-                                    disabled={state?.loading}
-                                    className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-wait disabled:opacity-60"
-                                    title={getDiagramButtonLabel(type, Boolean(artifact))}
-                                  >
-                                    {state?.loading ? <Loader2 className="h-4 w-4 animate-spin text-accent" /> : <Icon className="h-4 w-4 text-accent" />}
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block font-semibold text-text">{getDiagramActionLabel(type, Boolean(artifact))}</span>
-                                      <span className="block truncate text-[11px] text-text-muted">{artifact ? artifactStatusLabel(artifact.status) : "基于回答与引用生成"}</span>
-                                    </span>
-                                  </button>
-                                );
-                              })}
-
-                              {messageArtifacts.length > 0 && (
-                                <div className="mt-1 border-t border-divider/70 pt-2">
-                                  <div className="px-2 pb-1 text-[11px] font-semibold text-text-muted">已生成产物</div>
-                                  {messageArtifacts.map((artifact) => (
-                                    <button
-                                      key={artifact.id}
-                                      type="button"
-                                      onClick={() => {
-                                        if (artifact.status === "ready") {
-                                          setOpenActionMenuId(null);
-                                          setActiveArtifact(artifact);
-                                        }
-                                      }}
-                                      disabled={artifact.status !== "ready"}
-                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-surface-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-55"
-                                    >
-                                      <Eye className="h-4 w-4 text-accent" />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate font-semibold text-text">{artifact.title || artifactLabel(artifact.type, artifact.metadata?.subtype)}</span>
-                                        <span className="block truncate text-[11px] text-text-muted">
-                                          {artifactLabel(artifact.type, artifact.metadata?.subtype)} · {artifactStatusLabel(artifact.status)}
-                                        </span>
-                                      </span>
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-
-                              {(["mindmap", "flowchart"] as DiagramType[]).map((type) => {
-                                const state = diagramStates[getDiagramKey(persistedMessageId, type)];
-                                return state?.error ? (
-                                  <div key={`${type}-error`} className="rounded-lg bg-warning-soft px-2.5 py-2 text-[11px] leading-relaxed text-warning">
-                                    {state.error}
-                                  </div>
-                                ) : null;
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <AssistantMessageBubble
+                  message={message}
+                  messageId={persistedMessageId}
+                  streamingContent={streamingContent}
+                  selectedSources={selectedSources}
+                  artifacts={artifacts}
+                  assetStatus={assetDraftStatusByMessage[persistedMessageId] || {}}
+                  canPersistActions={canPersistAssistantActions}
+                  canCreateAssetDraft={isAnswerReadyForRefinement(message)}
+                  openActionMenu={openActionMenuId === persistedMessageId}
+                  diagramStates={diagramStates}
+                  answerQualityNotice={answerQualityNotice}
+                  answerTrustSummary={answerTrustSummary}
+                  queryUnderstandingNotice={queryUnderstandingNotice}
+                  onCancelStream={onCancelStream}
+                  onSelectSources={onSelectSources}
+                  onSourceAnchor={onSourceAnchor}
+                  onToggleActionMenu={() => setOpenActionMenuId(openActionMenuId === persistedMessageId ? null : persistedMessageId)}
+                  onFollowUp={(query) => {
+                    setOpenActionMenuId(null);
+                    onFollowUp(query);
+                  }}
+                  onCreateKnowledgeAssetDraft={createAssetAndClose}
+                  onGenerateDiagram={generateAndClose}
+                  onOpenArtifact={(artifact) => {
+                    setOpenActionMenuId(null);
+                    setActiveArtifact(artifact);
+                  }}
+                />
               )}
             </div>
 
-            {/* AI: sources + follow-ups (hidden while streaming) */}
-            {!isUser && !msg.streaming && (
-              <>
-                {msg.followups && msg.followups.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {msg.followups.map((q, j) => (
-                      <button key={j} onClick={() => onFollowUp(q)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-border text-xs text-text-secondary hover:border-accent hover:text-accent transition-colors">
-                        {q}<ChevronRight className="h-3 w-3" />
-                      </button>
-                    ))}
-                  </div>
+            {!isUser && !message.streaming && <FollowUpList items={message.followups} onFollowUp={onFollowUp} />}
+
+            {!message.streaming && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="select-none text-[11px] text-text-muted">{formatTime(message.created_at)}</span>
+                {canPersistAssistantActions && (
+                  <AssistantFooterActions
+                    messageId={persistedMessageId}
+                    content={message.content}
+                    feedback={feedback}
+                    favorite={favoriteStatus[persistedMessageId]}
+                    favoriting={favoriting[persistedMessageId]}
+                    voting={voting[persistedMessageId]}
+                    onCopy={handleCopy}
+                    onFavorite={handleFavorite}
+                    onFeedback={handleFeedback}
+                    onRetry={onRetry}
+                  />
                 )}
-              </>
-            )}
-
-            {/* Time + actions — hidden while streaming */}
-            {!msg.streaming && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-[11px] text-text-muted select-none">{formatTime(msg.created_at)}</span>
-              {!isUser && (
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => handleCopy(msg.content)}
-                    className="p-0.5 rounded text-text-muted hover:text-text transition-colors" title="复制">
-                    <Copy className="h-3 w-3" />
-                  </button>
-                  {canPersistAssistantActions && (
-                    <>
-                      <button onClick={() => handleFavorite(persistedMessageId)} disabled={favoriting[persistedMessageId]}
-                        className={`p-0.5 rounded transition-colors ${favoriteStatus[persistedMessageId] ? "text-warning" : "text-text-muted hover:text-warning"}`} title={favoriteStatus[persistedMessageId] ? "取消收藏" : "收藏"}>
-                        <Star className="h-3 w-3" fill={favoriteStatus[persistedMessageId] ? "currentColor" : "none"} />
-                      </button>
-                      <button onClick={() => handleFeedback(persistedMessageId, "up")} disabled={voting[persistedMessageId]}
-                        className={`p-0.5 rounded transition-colors ${fb.userVote === "up" ? "text-success" : "text-text-muted hover:text-success"}`} title="点赞">
-                        <ThumbsUp className="h-3 w-3" fill={fb.userVote === "up" ? "currentColor" : "none"} />
-                      </button>
-                      {fb.up > 0 && <span className="text-[11px] text-text-muted">{fb.up}</span>}
-                      <button onClick={() => handleFeedback(persistedMessageId, "down")} disabled={voting[persistedMessageId]}
-                        className={`p-0.5 rounded transition-colors ${fb.userVote === "down" ? "text-danger" : "text-text-muted hover:text-danger"}`} title="点踩">
-                        <ThumbsDown className="h-3 w-3" fill={fb.userVote === "down" ? "currentColor" : "none"} />
-                      </button>
-                      {fb.down > 0 && <span className="text-[11px] text-text-muted">{fb.down}</span>}
-                    </>
-                  )}
-                  <button onClick={() => onRetry(msg.id)}
-                    className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成此回答">
-                    <RefreshCw className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
+              </div>
             )}
           </div>
         );
       })}
 
-      {/* Cancel stream button — shown when loading but streaming msg not yet received content */}
-      {loading && !messages.some((m) => m.streaming) && (
+      {loading && !messages.some((message) => message.streaming) && (
         <div className="flex flex-col items-start">
           <StreamStages />
-          <button onClick={onCancelStream} className="mt-2 p-1 rounded text-text-muted hover:text-danger transition-colors" title="停止">
+          <button type="button" onClick={onCancelStream} className="mt-2 rounded p-1 text-text-muted transition-colors hover:text-danger" title="停止">
             <StopCircle size={14} />
           </button>
         </div>
       )}
 
-      {/* Error state */}
-      {!loading && streamError && !streamStopped && (
-        <div className="flex flex-col items-start">
-          <div className="flex items-center gap-2 text-sm text-danger">
-            <AlertCircle className="h-4 w-4" />
-            {streamError}
-          </div>
-          <button onClick={() => onRetry()} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
-            <RefreshCw className="h-3 w-3" />重试
-          </button>
-        </div>
-      )}
+      {!loading && <ThreadInlineStatus streamError={streamError} streamStopped={streamStopped} onRetry={() => onRetry()} />}
 
-      {!loading && streamStopped && (
-        <div className="flex flex-col items-start">
-          <span className="text-sm text-text-muted">已中断</span>
-          <button onClick={() => onRetry()} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:text-accent-hover">
-            <RefreshCw className="h-3 w-3" />重试
-          </button>
-        </div>
-      )}
-
-      {/* Scroll-to-bottom floating button */}
       {showScrollBtn && (
         <button
+          type="button"
           onClick={() => scrollToBottom("smooth")}
-          className="sticky bottom-4 mx-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-white border border-border shadow-md-soft text-xs text-text-secondary hover:text-accent hover:border-accent/50 transition-all animate-fade-in-up z-10"
+          className="sticky bottom-4 z-10 mx-auto flex animate-fade-in-up items-center gap-1.5 rounded-full border border-border bg-white px-3 py-2 text-xs text-text-secondary shadow-md-soft transition-all hover:border-accent/50 hover:text-accent"
         >
           <ChevronDown className="h-3.5 w-3.5" />
           滚动到底部
         </button>
       )}
 
-      {/* Feedback reason popup */}
-      {feedbackReason && (
-        <div className="animate-fade-in-up sticky bottom-16 mx-auto max-w-xs w-full bg-white border border-border rounded-xl shadow-lg-soft p-3 z-20">
-          <p className="text-xs font-medium text-text mb-2">为什么觉得不够好？</p>
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { label: "内容过时", reason: "outdated" },
-              { label: "匹配错误", reason: "mismatch" },
-              { label: "逻辑混乱", reason: "confusing" },
-              { label: "信息不全", reason: "incomplete" },
-              { label: "其他", reason: "other" },
-            ].map(({ label, reason }) => (
-              <button
-                key={reason}
-                onClick={() => submitFeedbackReason(feedbackReason, reason)}
-                className="px-2.5 py-1 rounded-lg border border-border text-xs text-text-secondary hover:border-accent hover:text-accent transition-all"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setFeedbackReason(null)}
-            className="mt-2 text-[10px] text-text-muted hover:text-text transition-colors"
-          >
-            取消
-          </button>
-        </div>
-      )}
+      <FeedbackReasonPopup
+        feedbackReason={feedbackReason}
+        onSubmit={submitFeedbackReason}
+        onCancel={() => setFeedbackReason(null)}
+      />
 
       {activeArtifact && (
         <Suspense fallback={null}>
