@@ -37,6 +37,54 @@ def test_answer_ir_maps_chat_fields_to_structured_contract() -> None:
     assert ir.warnings == []
 
 
+def test_answer_ir_extracts_granular_claim_kinds_with_citations() -> None:
+    ir = AnswerIR.from_chat(
+        answer=(
+            "结论：绝缘电阻测试应按EOL规范执行。[来源 1]"
+            "参数：测试电压为500V DC，合格阈值不低于20MΩ。[来源 1]"
+            "步骤：先确认夹具和线缆，再记录并上传结果。[来源 1]"
+            "风险：低于阈值需要判定为不合格并转入复核。[来源 1]"
+            "限制：知识库未提供区分泄漏电流类型的具体算法。[来源 1]"
+        ),
+        sources=[_source()],
+        original_query="绝缘电阻测试怎么执行？",
+        rewritten_query="绝缘电阻测试怎么执行？",
+        confidence=0.86,
+    )
+
+    claims_by_kind = {claim.kind: claim for claim in ir.claims}
+
+    assert set(claims_by_kind) == {"conclusion", "parameter", "step", "risk", "limitation"}
+    assert claims_by_kind["parameter"].citation_ids == ["chunk-1"]
+    assert claims_by_kind["step"].text.startswith("步骤")
+    assert all(claim.citation_ids for claim in ir.claims)
+
+
+def test_answer_ir_matches_claims_to_relevant_citations_without_markers() -> None:
+    parameter_source = {
+        **_source(),
+        "chunk_id": "chunk-parameter",
+        "snippet": "测试电压为500V DC，合格阈值不低于20MΩ。",
+    }
+    risk_source = {
+        **_source(),
+        "chunk_id": "chunk-risk",
+        "snippet": "低于阈值需要判定为不合格，并转入异常复核。",
+    }
+    ir = AnswerIR.from_chat(
+        answer="参数：测试电压为500V DC，合格阈值不低于20MΩ。风险：低于阈值需要判定为不合格并转入复核。",
+        sources=[parameter_source, risk_source],
+        original_query="绝缘测试阈值和风险是什么？",
+        rewritten_query="绝缘测试阈值和风险是什么？",
+        confidence=0.83,
+    )
+
+    claims_by_kind = {claim.kind: claim for claim in ir.claims}
+
+    assert claims_by_kind["parameter"].citation_ids == ["chunk-parameter"]
+    assert claims_by_kind["risk"].citation_ids == ["chunk-risk"]
+
+
 def test_answer_ir_marks_missing_citations_as_insufficient_context() -> None:
     ir = AnswerIR.from_chat(
         answer="根据当前知识库信息，我暂时无法确认该问题。",

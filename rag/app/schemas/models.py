@@ -294,15 +294,7 @@ class AnswerIR(BaseModel):
         normalized_confidence = _clamp_confidence(confidence)
         derived_status = status or _derive_answer_status(answer, citations, normalized_confidence)
         answer_confidence = 0.0 if derived_status == "insufficient_context" else normalized_confidence
-        claim_text = _extract_primary_claim(answer)
-        claims = [
-            AnswerClaim(
-                id="claim-1",
-                text=claim_text,
-                citation_ids=[citation.id for citation in citations],
-                confidence=answer_confidence,
-            )
-        ] if claim_text and derived_status != "insufficient_context" else []
+        claims = _extract_answer_claims(answer, citations, answer_confidence) if derived_status != "insufficient_context" else []
         derived_warnings = list(warnings or [])
         if not citations:
             derived_warnings.append(AnswerWarning(
@@ -470,9 +462,135 @@ def _derive_answer_status(answer: str, citations: list[AnswerCitation], confiden
     return "answered"
 
 
-def _extract_primary_claim(answer: str) -> str:
-    for line in answer.splitlines():
-        cleaned = line.strip().lstrip("-*0123456789.、 ")
-        if cleaned and not cleaned.startswith("[来源") and not cleaned.startswith("来源"):
-            return cleaned[:300]
-    return ""
+CLAIM_KIND_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("risk", re.compile(r"(?:风险|注意|警示|告警|异常|不合格|禁止|避免|防护|安全)")),
+    ("limitation", re.compile(r"(?:限制|不足|无法|未提供|不能确认|不适用|前提|仅|除非|需要人工|待确认)")),
+    ("parameter", re.compile(r"(?:参数|阈值|范围|标准|电压|电流|电阻|温度|时间|压力|频率|容量|SOC|SOH|℃|°C|V|A|Ω|MΩ|kΩ|mΩ|%|\d)")),
+    ("step", re.compile(r"(?:步骤|流程|先|再|然后|最后|执行|记录|上传|确认|检查|连接|测试|复核|判定|进入|转入)")),
+    ("conclusion", re.compile(r"(?:结论|建议|应当|应该|必须|可以|需要|采用|包含|适合|是|为)")),
+)
+
+SOURCE_MARKER_PATTERN = re.compile(r"\[来源\s*([0-9,，、\s]+)\]")
+CLAIM_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*|\n+")
+CLAIM_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2,}")
+
+
+def _extract_answer_claims(answer: str, citations: list[AnswerCitation], confidence: float) -> list[AnswerClaim]:
+    claims: list[AnswerClaim] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_segment in _claim_segments(answer):
+        text = _clean_claim_text(raw_segment)
+        if not text:
+            continue
+        kind = _classify_claim_kind(text)
+        key = (kind, text)
+        if key in seen:
+            continue
+        seen.add(key)
+        claims.append(AnswerClaim(
+            id=f"claim-{len(claims) + 1}",
+            text=text[:300],
+            kind=kind,
+            citation_ids=_claim_citation_ids(raw_segment, text, citations),
+            confidence=confidence,
+        ))
+    return claims
+
+
+def _claim_segments(answer: str) -> list[str]:
+    segments: list[str] = []
+    for part in CLAIM_SPLIT_PATTERN.split(answer):
+        cleaned = part.strip()
+        if cleaned:
+            segments.append(cleaned)
+    if segments:
+        return segments
+    return [answer.strip()] if answer.strip() else []
+
+
+def _clean_claim_text(segment: str) -> str:
+    cleaned = SOURCE_MARKER_PATTERN.sub("", segment)
+    cleaned = re.sub(r"^\s*[-*•\d]+[.、)]\s*", "", cleaned)
+    cleaned = cleaned.strip(" \t\r\n。；;")
+    if not cleaned or cleaned.startswith("[来源") or cleaned.startswith("来源"):
+        return ""
+    return cleaned
+
+
+def _classify_claim_kind(text: str) -> str:
+    normalized = text.strip()
+    label_match = re.match(r"^(结论|参数|步骤|流程|风险|限制|注意|前提)[:：]", normalized)
+    if label_match:
+        label = label_match.group(1)
+        if label == "参数":
+            return "parameter"
+        if label in ("步骤", "流程"):
+            return "step"
+        if label in ("风险", "注意"):
+            return "risk"
+        if label in ("限制", "前提"):
+            return "limitation"
+        return "conclusion"
+    for kind, pattern in CLAIM_KIND_PATTERNS:
+        if pattern.search(normalized):
+            return kind
+    return "conclusion"
+
+
+def _claim_citation_ids(raw_segment: str, text: str, citations: list[AnswerCitation]) -> list[str]:
+    explicit_ids = _explicit_citation_ids(raw_segment, citations)
+    if explicit_ids:
+        return explicit_ids
+    matched_ids = _matched_citation_ids(text, citations)
+    if matched_ids:
+        return matched_ids
+    return [citation.id for citation in citations if citation.id]
+
+
+def _explicit_citation_ids(segment: str, citations: list[AnswerCitation]) -> list[str]:
+    ids: list[str] = []
+    by_index = {citation.source_index: citation.id for citation in citations if citation.id}
+    for marker in SOURCE_MARKER_PATTERN.findall(segment):
+        for item in re.split(r"[,，、\s]+", marker):
+            if not item:
+                continue
+            source_index = _coerce_int(item)
+            citation_id = by_index.get(source_index)
+            if citation_id and citation_id not in ids:
+                ids.append(citation_id)
+    return ids
+
+
+def _matched_citation_ids(text: str, citations: list[AnswerCitation]) -> list[str]:
+    claim_tokens = _claim_tokens(text)
+    if not claim_tokens:
+        return []
+    scored: list[tuple[str, int]] = []
+    for citation in citations:
+        citation_tokens = _claim_tokens(" ".join([
+            citation.snippet,
+            citation.document_title,
+            citation.section_path,
+        ]))
+        score = len(claim_tokens.intersection(citation_tokens))
+        if citation.id and score >= 2:
+            scored.append((citation.id, score))
+    if not scored:
+        return []
+    best_score = max(score for _, score in scored)
+    return [citation_id for citation_id, score in scored if score == best_score]
+
+
+def _claim_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for token in CLAIM_TOKEN_PATTERN.findall(text):
+        normalized = token.lower().strip()
+        if len(normalized) < 2:
+            continue
+        if re.fullmatch(r"[\u4e00-\u9fff]+", normalized):
+            for size in (2, 3, 4):
+                if len(normalized) >= size:
+                    tokens.update(normalized[index:index + size] for index in range(len(normalized) - size + 1))
+        else:
+            tokens.add(normalized)
+    return tokens

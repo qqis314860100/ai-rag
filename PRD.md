@@ -334,7 +334,7 @@
 
 目标：回答不是一段自然语言，而是可追溯的结论、证据、风险和限制集合。
 
-- [ ] `rag`: 强化 AnswerIR claim 粒度，要求关键结论、参数、步骤、风险、限制分别形成 claim，并绑定 citation_ids。
+- [x] `rag`: 强化 AnswerIR claim 粒度，要求关键结论、参数、步骤、风险、限制分别形成 claim，并绑定 citation_ids。
 - [ ] `rag`: 增加回答后核验器，检查引用是否支撑 claim、是否存在无证据扩展、版本冲突、过期来源和互相矛盾证据。
 - [ ] `rag`: 对核验失败的回答降级为 partial 或 insufficient_context，并给出 warning；不允许把 warning 当硬拒答替代品。
 - [ ] `api`: 将核验结果、claim 覆盖率、warning、冲突来源和过期来源写入回答 metadata 与 audit_logs。
