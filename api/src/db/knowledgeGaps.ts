@@ -16,6 +16,22 @@ export type KnowledgeGapType = typeof KNOWLEDGE_GAP_TYPES[number];
 export const KNOWLEDGE_GAP_STATUSES = ["pending", "merged", "draft_generated", "published", "ignored"] as const;
 export type KnowledgeGapStatus = typeof KNOWLEDGE_GAP_STATUSES[number];
 
+export const KNOWLEDGE_GAP_STATUS_LABELS: Record<KnowledgeGapStatus, string> = {
+  pending: "待处理",
+  merged: "已合并",
+  draft_generated: "已生成草稿",
+  published: "已发布",
+  ignored: "已忽略",
+};
+
+export const KNOWLEDGE_GAP_STATUS_TRANSITIONS: Record<KnowledgeGapStatus, KnowledgeGapStatus[]> = {
+  pending: ["merged", "draft_generated", "ignored"],
+  merged: ["pending", "draft_generated", "ignored"],
+  draft_generated: ["merged", "published", "ignored", "pending"],
+  published: ["pending"],
+  ignored: ["pending"],
+};
+
 export const KNOWLEDGE_GAP_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type KnowledgeGapSeverity = typeof KNOWLEDGE_GAP_SEVERITIES[number];
 
@@ -116,6 +132,17 @@ export interface UpdateKnowledgeGapInput {
   lastSeenAt?: string;
 }
 
+export interface UpdateKnowledgeGapStatusInput {
+  status: KnowledgeGapStatus;
+  reason?: string;
+  operatorId?: string | null;
+  operatorName?: string | null;
+  mergedToGapId?: string | null;
+  draftAssetIds?: string[];
+  publishedAssetIds?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface FailedQuestionInput {
   eventType: FailedQuestionEventType;
   question: string;
@@ -163,6 +190,8 @@ export const KNOWLEDGE_GAP_MODEL_CONTRACT = {
   event_types: FAILED_QUESTION_EVENT_TYPES,
   gap_types: KNOWLEDGE_GAP_TYPES,
   status_flow: KNOWLEDGE_GAP_STATUSES,
+  status_labels: KNOWLEDGE_GAP_STATUS_LABELS,
+  status_transitions: KNOWLEDGE_GAP_STATUS_TRANSITIONS,
   required_failed_question_fields: ["event_type", "question", "normalized_question"],
   structured_fields: ["query_understanding", "retrieval_evidence", "metadata"],
   trace_fields: ["session_id", "user_message_id", "assistant_message_id", "feedback_id", "retry_of_question_id"],
@@ -221,6 +250,21 @@ export function isKnowledgeGapType(value: unknown): value is KnowledgeGapType {
 
 export function isKnowledgeGapStatus(value: unknown): value is KnowledgeGapStatus {
   return typeof value === "string" && KNOWLEDGE_GAP_STATUSES.includes(value as KnowledgeGapStatus);
+}
+
+export function canTransitionKnowledgeGapStatus(from: KnowledgeGapStatus, to: KnowledgeGapStatus): boolean {
+  return from === to || KNOWLEDGE_GAP_STATUS_TRANSITIONS[from].includes(to);
+}
+
+export function getKnowledgeGapStatusContract() {
+  return {
+    statuses: KNOWLEDGE_GAP_STATUSES.map((status) => ({
+      status,
+      label: KNOWLEDGE_GAP_STATUS_LABELS[status],
+      next: KNOWLEDGE_GAP_STATUS_TRANSITIONS[status],
+    })),
+    transitions: KNOWLEDGE_GAP_STATUS_TRANSITIONS,
+  };
 }
 
 export function isKnowledgeGapSeverity(value: unknown): value is KnowledgeGapSeverity {
@@ -359,6 +403,38 @@ export function updateKnowledgeGap(id: string, input: UpdateKnowledgeGapInput): 
     now,
     id
   );
+
+  return getKnowledgeGapById(id);
+}
+
+export function updateKnowledgeGapStatus(id: string, input: UpdateKnowledgeGapStatusInput): KnowledgeGapRow | null {
+  const existing = getKnowledgeGapById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const metadata = {
+    ...parseJson<Record<string, unknown>>(existing.metadata_json, {}),
+    ...(input.metadata ?? {}),
+    status_flow: {
+      previous_status: existing.status,
+      status: input.status,
+      reason: input.reason ?? "",
+      operator_id: input.operatorId ?? null,
+      operator_name: input.operatorName ?? null,
+      changed_at: now,
+      ...(input.mergedToGapId ? { merged_to_gap_id: input.mergedToGapId } : {}),
+      ...(input.draftAssetIds?.length ? { draft_asset_ids: input.draftAssetIds } : {}),
+      ...(input.publishedAssetIds?.length ? { published_asset_ids: input.publishedAssetIds } : {}),
+    },
+  };
+
+  getDb().prepare(
+    `UPDATE knowledge_gaps
+     SET status = ?,
+         metadata_json = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(input.status, toJson(metadata, {}), now, id);
 
   return getKnowledgeGapById(id);
 }

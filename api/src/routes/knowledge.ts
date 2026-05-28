@@ -29,10 +29,15 @@ import {
 import type { TerminologyStatus } from "../db/terminology";
 import {
   isFailedQuestionEventType,
+  canTransitionKnowledgeGapStatus,
+  formatKnowledgeGap,
+  getKnowledgeGapById,
+  getKnowledgeGapStatusContract,
   isKnowledgeGapStatus,
   isKnowledgeGapType,
   listFailedQuestions,
   listKnowledgeGaps,
+  updateKnowledgeGapStatus,
 } from "../db/knowledgeGaps";
 import type { FailedQuestionEventType, KnowledgeGapStatus, KnowledgeGapType } from "../db/knowledgeGaps";
 import { requirePermission } from "../middleware/auth";
@@ -97,6 +102,14 @@ function queryNumber(value: unknown, fallback: number): number {
   if (typeof value !== "string" || !value.trim()) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function bodyString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function bodyStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
 }
 
 function knowledgeAssetStatusesForMessages(messageIds: string[]) {
@@ -356,6 +369,91 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       sendSuccess(res, buildKnowledgeGovernanceView(), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/gaps/status-flow",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      sendSuccess(res, getKnowledgeGapStatusContract(), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  "/knowledge/gaps/:id/status",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gapId = String(req.params.id || "").trim();
+      const gap = getKnowledgeGapById(gapId);
+      if (!gap) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口不存在。", 404);
+      }
+
+      const status = bodyString(req.body.status);
+      if (!isKnowledgeGapStatus(status)) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口状态不合法。", 400);
+      }
+
+      if (!canTransitionKnowledgeGapStatus(gap.status, status)) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口状态迁移不合法。", 400, {
+          current_status: gap.status,
+          requested_status: status,
+          allowed_statuses: getKnowledgeGapStatusContract().transitions[gap.status],
+        });
+      }
+
+      const mergedToGapId = bodyString(req.body.merged_to_gap_id || req.body.merge_target_gap_id);
+      if (status === "merged") {
+        if (!mergedToGapId) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "合并知识缺口必须指定目标缺口。", 400);
+        }
+        if (mergedToGapId === gap.id) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口不能合并到自身。", 400);
+        }
+        if (!getKnowledgeGapById(mergedToGapId)) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "目标知识缺口不存在。", 400);
+        }
+      }
+
+      const updated = updateKnowledgeGapStatus(gap.id, {
+        status,
+        reason: bodyString(req.body.reason),
+        operatorId: req.user?.id ?? null,
+        operatorName: req.user?.name ?? null,
+        mergedToGapId: mergedToGapId || null,
+        draftAssetIds: bodyStringArray(req.body.draft_asset_ids),
+        publishedAssetIds: bodyStringArray(req.body.published_asset_ids),
+      });
+      if (!updated) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口不存在。", 404);
+      }
+
+      auditFromRequest(req, "knowledge_gap.status.update", "knowledge_gap", gap.id, {
+        old_status: gap.status,
+        new_status: status,
+        reason: bodyString(req.body.reason),
+        merged_to_gap_id: mergedToGapId || undefined,
+        draft_asset_ids: bodyStringArray(req.body.draft_asset_ids),
+        published_asset_ids: bodyStringArray(req.body.published_asset_ids),
+      });
+
+      sendSuccess(res, {
+        gap: formatKnowledgeGap(updated),
+        transition: {
+          old_status: gap.status,
+          new_status: status,
+          allowed_next_statuses: getKnowledgeGapStatusContract().transitions[status],
+        },
+      }, req.requestId);
     } catch (err) {
       next(err);
     }
