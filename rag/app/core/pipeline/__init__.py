@@ -29,6 +29,7 @@ from .refusal import (
 )
 from .retrieve import (
     _build_ingest_metadata,
+    _build_confidence_profile,
     _estimate_confidence,
     _extract_query_terms,
     _keyword_rerank,
@@ -258,7 +259,14 @@ class RagPipeline:
         )
 
         sources = extract_sources(hits)
-        confidence = _estimate_confidence(query, hits, filters, matched_assets)
+        confidence_profile = _build_confidence_profile(
+            query,
+            hits,
+            filters=filters,
+            knowledge_assets=matched_assets,
+            query_understanding=query_rewrite,
+        )
+        confidence = confidence_profile["confidence"]
         refusal_start = time.time()
         refusal = _assess_insufficient_context(
             query=query,
@@ -283,6 +291,7 @@ class RagPipeline:
                 stage_timings_ms=stage_timings_ms,
                 total_start=total_start,
                 knowledge_assets=matched_assets,
+                confidence_profile=confidence_profile,
             )
             logger.info("rag_pipeline_timing %s", safe_log_json(result["trace"].get("stage_timings_ms", {})))
             return result
@@ -304,6 +313,7 @@ class RagPipeline:
             llm_chat_fn=llm_chat,
             evidence_warnings=refusal.warnings,
             evidence_metadata=refusal.metadata,
+            confidence_profile=confidence_profile,
         )
         logger.info("rag_pipeline_timing %s", safe_log_json(result["trace"].get("stage_timings_ms", {})))
         return result
@@ -315,6 +325,7 @@ __all__ = [
     "EvidenceAssessment",
     "RagPipeline",
     "_assess_insufficient_context",
+    "_build_confidence_profile",
     "_build_ingest_metadata",
     "_enrich_query_understanding_with_recall",
     "_estimate_confidence",

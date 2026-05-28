@@ -136,6 +136,9 @@ def test_quality_eval_troubleshooting_answer_keeps_actionable_sources(monkeypatc
     assert result["confidence"] >= 0.7
     assert result["answer_ir"]["status"] == "answered"
     assert len(result["sources"]) == 2
+    confidence_profile = result["answer_ir"]["metadata"]["confidence_profile"]
+    assert confidence_profile["confidence"] == result["confidence"]
+    assert confidence_profile["components"]["top1_score"] > 0
     assert result["answer_ir"]["citations"][0]["section_path"] == "异常排查 / DCR"
 
 

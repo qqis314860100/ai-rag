@@ -326,7 +326,7 @@
 
 - [x] `rag`: 实现混合检索评分层，将向量召回、关键词/BM25、标题命中、章节命中、术语命中、文档过滤命中合并为可解释 retrieval signals。
 - [x] `rag`: 增加 rerank 精排适配层，先支持本地轻量 rerank 或 LLM rerank 配置开关；rerank 结果必须记录 topK 分布和命中特征。
-- [ ] `rag`: 重构综合 confidence，纳入 top1 分数、topK 分布、关键词覆盖、引用数量、引用覆盖率、章节/文档过滤命中、query understanding 置信度和上下文可用性。
+- [x] `rag`: 重构综合 confidence，纳入 top1 分数、topK 分布、关键词覆盖、引用数量、引用覆盖率、章节/文档过滤命中、query understanding 置信度和上下文可用性。
 - [ ] `rag`: 将 `context_conflict` 从硬拦截降级为 warning + precise verification，只有无引用、低信息或证据完全不支持时才拒答。
 - [ ] `api` / `web`: 将低置信状态分为可回答、灰度回答、部分回答、拒答四档，并在回答 metadata 与 UI 中展示对应原因。
 

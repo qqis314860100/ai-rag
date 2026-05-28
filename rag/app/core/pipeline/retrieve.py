@@ -36,36 +36,222 @@ def _build_ingest_metadata(file_path: str, metadata: dict | None = None) -> dict
     }
 
 
-def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = None, knowledge_assets: list[dict] | None = None) -> float:
+_CONFIDENCE_SIGNAL_WEIGHTS = {
+    "top1_score": 0.22,
+    "topk_distribution": 0.15,
+    "keyword_coverage": 0.15,
+    "citation_count": 0.10,
+    "citation_coverage": 0.12,
+    "document_filter_match": 0.05,
+    "section_filter_match": 0.05,
+    "query_understanding": 0.07,
+    "context_availability": 0.09,
+}
+
+
+def _estimate_confidence(
+    query: str,
+    hits: list[dict],
+    filters: dict | None = None,
+    knowledge_assets: list[dict] | None = None,
+    query_understanding: object | None = None,
+) -> float:
+    return _build_confidence_profile(
+        query,
+        hits,
+        filters=filters,
+        knowledge_assets=knowledge_assets,
+        query_understanding=query_understanding,
+    )["confidence"]
+
+
+def _build_confidence_profile(
+    query: str,
+    hits: list[dict],
+    filters: dict | None = None,
+    knowledge_assets: list[dict] | None = None,
+    query_understanding: object | None = None,
+) -> dict:
+    if not hits:
+        return {
+            "confidence": 0.0,
+            "components": {},
+            "weights": _CONFIDENCE_SIGNAL_WEIGHTS,
+            "caps": ["no_hits"],
+        }
+
+    top_hits = hits[:5]
+    top1 = _clamp_float(top_hits[0].get("score", 0))
+    components = {
+        "top1_score": top1,
+        "topk_distribution": _topk_distribution_score(top_hits),
+        "keyword_coverage": _keyword_coverage(query, top_hits[:3]),
+        "citation_count": _citation_count_score(top_hits),
+        "citation_coverage": _citation_coverage_score(top_hits),
+        "document_filter_match": _filter_group_match_score(
+            filters,
+            top_hits[:3],
+            {"document_id", "document_title", "document_type", "category", "source_format"},
+        ),
+        "section_filter_match": _filter_group_match_score(
+            filters,
+            top_hits[:3],
+            {"section_path", "section_title", "chapter_title", "section_level", "page_number"},
+        ),
+        "query_understanding": _query_understanding_confidence(query_understanding),
+        "context_availability": _context_availability_score(top_hits[:3]),
+    }
+    asset_score = min(1.0, len(knowledge_assets or []) / 3)
+
+    confidence = sum(
+        components[name] * weight
+        for name, weight in _CONFIDENCE_SIGNAL_WEIGHTS.items()
+    )
+    if asset_score:
+        confidence += asset_score * 0.03
+
+    caps: list[str] = []
+    if top1 < 0.2:
+        confidence = min(confidence, 0.55)
+        caps.append("very_low_top1")
+    if components["keyword_coverage"] < 0.2 and top1 < 0.45:
+        confidence = min(confidence, 0.60)
+        caps.append("weak_keyword_match")
+    if components["citation_coverage"] < 0.55:
+        confidence = min(confidence, 0.68)
+        caps.append("weak_citation_coverage")
+    if components["context_availability"] < 0.5:
+        confidence = min(confidence, 0.75)
+        caps.append("weak_context")
+    if _meaningful_filters(filters) and (
+        components["document_filter_match"] < 0.5
+        or components["section_filter_match"] < 0.5
+    ):
+        confidence = min(confidence, 0.60)
+        caps.append("filter_mismatch")
+    if components["query_understanding"] < 0.35:
+        confidence = min(confidence, 0.55)
+        caps.append("low_query_understanding")
+
+    return {
+        "confidence": round(_clamp_float(confidence), 2),
+        "components": {key: round(value, 4) for key, value in components.items()},
+        "weights": _CONFIDENCE_SIGNAL_WEIGHTS,
+        "knowledge_asset_match": round(asset_score, 4),
+        "topk_distribution": _topk_distribution(top_hits),
+        "caps": caps,
+    }
+
+
+def _topk_distribution_score(hits: list[dict]) -> float:
     if not hits:
         return 0.0
 
-    top1 = _clamp_float(hits[0].get("score", 0))
-    keyword_score = _keyword_coverage(query, hits[:3])
-    context_score = _context_availability_score(hits[:3])
-    source_score = _source_count_score(len(hits))
-    filter_score = _filter_match_score(filters, hits[:3])
-    asset_score = min(1.0, len(knowledge_assets or []) / 3)
-
-    confidence = (
-        top1 * 0.32
-        + keyword_score * 0.25
-        + context_score * 0.20
-        + source_score * 0.10
-        + filter_score * 0.08
-        + asset_score * 0.05
+    scores = [_clamp_float(hit.get("score", 0)) for hit in hits]
+    average = sum(scores) / len(scores)
+    useful_ratio = sum(1 for score in scores if score >= 0.4) / len(scores)
+    strong_ratio = sum(1 for score in scores if score >= 0.6) / len(scores)
+    consistency = 1.0 - min(1.0, max(scores) - min(scores))
+    return _clamp_float(
+        average * 0.45
+        + useful_ratio * 0.20
+        + strong_ratio * 0.25
+        + consistency * 0.10
     )
 
-    if top1 < 0.2:
-        confidence = min(confidence, 0.55)
-    if keyword_score < 0.2 and top1 < 0.45:
-        confidence = min(confidence, 0.60)
-    if context_score < 0.5:
-        confidence = min(confidence, 0.75)
-    if filters and filter_score < 0.5:
-        confidence = min(confidence, 0.60)
 
-    return round(_clamp_float(confidence), 2)
+def _citation_count_score(hits: list[dict]) -> float:
+    usable_count = sum(1 for hit in hits if _citation_quality_score(hit) >= 0.55)
+    return _source_count_score(usable_count)
+
+
+def _citation_coverage_score(hits: list[dict]) -> float:
+    if not hits:
+        return 0.0
+    return round(sum(_citation_quality_score(hit) for hit in hits) / len(hits), 4)
+
+
+def _citation_quality_score(hit: dict) -> float:
+    source_context = (
+        hit.get("source_context")
+        if isinstance(hit.get("source_context"), dict)
+        else {}
+    )
+    metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    text = " ".join(
+        str(value)
+        for value in (
+            hit.get("context_window"),
+            source_context.get("window"),
+            hit.get("content"),
+            source_context.get("content"),
+            hit.get("snippet"),
+            source_context.get("snippet"),
+        )
+        if value
+    )
+    location = hit.get("section_path") or metadata.get("section_path") or hit.get("page_number")
+    score = 0.0
+    if hit.get("chunk_id") or hit.get("id"):
+        score += 0.25
+    if hit.get("document_id") or metadata.get("document_id"):
+        score += 0.18
+    if hit.get("document_title") or metadata.get("document_title"):
+        score += 0.12
+    if location:
+        score += 0.20
+    if text:
+        score += 0.25
+    return _clamp_float(score)
+
+
+def _filter_group_match_score(
+    filters: dict | None,
+    hits: list[dict],
+    allowed_keys: set[str],
+) -> float:
+    meaningful_filters = {
+        key: value
+        for key, value in _meaningful_filters(filters).items()
+        if key in allowed_keys
+    }
+    if not meaningful_filters:
+        return 0.7
+    if not hits:
+        return 0.0
+
+    matched = 0
+    total = 0
+    for key, expected in meaningful_filters.items():
+        for hit in hits:
+            metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+            actual = hit.get(key, metadata.get(key))
+            total += 1
+            if _value_matches_filter(actual, expected):
+                matched += 1
+    return _clamp_float(matched / max(total, 1))
+
+
+def _query_understanding_confidence(query_understanding: object | None) -> float:
+    if query_understanding is None:
+        return 0.7
+
+    target = query_understanding
+    if isinstance(query_understanding, dict):
+        target = query_understanding.get("query_understanding", query_understanding)
+    elif hasattr(query_understanding, "query_understanding"):
+        target = getattr(query_understanding, "query_understanding")
+
+    if isinstance(target, dict):
+        confidence = _clamp_float(target.get("confidence", 0.7))
+        needs_confirmation = bool(target.get("needs_confirmation"))
+    else:
+        confidence = _clamp_float(getattr(target, "confidence", 0.7))
+        needs_confirmation = bool(getattr(target, "needs_confirmation", False))
+
+    if needs_confirmation:
+        return min(confidence, 0.45)
+    return confidence
 
 
 _HYBRID_SIGNAL_WEIGHTS = {

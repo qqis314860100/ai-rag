@@ -26,6 +26,7 @@ def _build_answer_chat_result(
     llm_chat_fn: Callable,
     evidence_warnings: list[AnswerWarning] | None = None,
     evidence_metadata: dict | None = None,
+    confidence_profile: dict | None = None,
 ) -> dict:
     stage_timings_ms = dict(stage_timings_ms or {})
     messages = build_messages(query, hits, history, max_context_chars, evidence_warnings=evidence_warnings)
@@ -45,6 +46,7 @@ def _build_answer_chat_result(
         warnings=evidence_warnings,
         metadata={
             "knowledge_assets": _knowledge_asset_trace(knowledge_assets),
+            "confidence_profile": confidence_profile or {},
             **(evidence_metadata or {}),
         },
     )
@@ -85,6 +87,7 @@ def _build_answer_chat_result(
             "llm_ms": llm_ms,
             "total_ms": total_ms,
             "knowledge_asset_count": len(knowledge_assets),
+            "confidence_profile": confidence_profile or {},
             "stage_timings_ms": stage_timings_ms,
         },
         "answer_ir": answer_ir.model_dump(),
@@ -106,6 +109,7 @@ def _build_refusal_chat_result(
     stage_timings_ms: dict[str, int] | None = None,
     total_start: float,
     knowledge_assets: list[dict] | None = None,
+    confidence_profile: dict | None = None,
 ) -> dict:
     stage_timings_ms = dict(stage_timings_ms or {})
     answer_ir = AnswerIR.from_chat(
@@ -117,7 +121,10 @@ def _build_refusal_chat_result(
         confidence=confidence,
         status="insufficient_context",
         warnings=refusal.warnings,
-        metadata=refusal.metadata,
+        metadata={
+            **refusal.metadata,
+            "confidence_profile": confidence_profile or {},
+        },
     )
     artifact_start = time.time()
     visual_plan = plan_visual_artifacts(
@@ -152,6 +159,7 @@ def _build_refusal_chat_result(
             "artifact_ms": artifact_ms,
             "llm_ms": llm_ms,
             "total_ms": total_ms,
+            "confidence_profile": confidence_profile or {},
             "stage_timings_ms": stage_timings_ms,
         },
         "answer_ir": answer_ir.model_dump(),

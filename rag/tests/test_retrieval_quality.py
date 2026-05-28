@@ -199,6 +199,60 @@ def test_estimate_confidence_uses_keywords_filters_sources_and_context() -> None
     assert confidence >= 0.75
 
 
+def test_confidence_profile_uses_distribution_citations_filters_and_query_understanding() -> None:
+    hits = [
+        _hit(
+            0.82,
+            "OCV异常时需要复核静置时间、采样线和电压阈值。",
+            document_id="doc-ocv",
+            section_path="终检 / OCV异常排查",
+        ),
+        _hit(
+            0.76,
+            "OCV异常处理需要记录报警代码，并复测电压一致性。",
+            document_id="doc-ocv",
+            section_path="终检 / OCV异常排查",
+        ),
+        _hit(
+            0.63,
+            "复核通过后上传测试结果和处理记录。",
+            document_id="doc-ocv",
+            section_path="终检 / OCV异常排查",
+        ),
+    ]
+
+    profile = retrieve_module._build_confidence_profile(
+        "OCV异常怎么处理？",
+        hits,
+        filters={"document_id": "doc-ocv", "section_path": "OCV异常排查"},
+        query_understanding={"confidence": 0.91, "needs_confirmation": False},
+    )
+
+    assert profile["confidence"] >= 0.8
+    assert profile["components"]["topk_distribution"] > 0.75
+    assert profile["components"]["citation_count"] == 1.0
+    assert profile["components"]["citation_coverage"] >= 0.9
+    assert profile["components"]["document_filter_match"] == 1.0
+    assert profile["components"]["section_filter_match"] == 1.0
+    assert profile["components"]["query_understanding"] == 0.91
+
+
+def test_confidence_profile_caps_low_query_understanding() -> None:
+    hits = [
+        _hit(0.86, "这个流程需要先确认测试对象，再执行复测。"),
+        _hit(0.79, "复测结果通过后才允许放行。"),
+    ]
+
+    profile = retrieve_module._build_confidence_profile(
+        "这个呢？",
+        hits,
+        query_understanding={"confidence": 0.2, "needs_confirmation": True},
+    )
+
+    assert profile["confidence"] <= 0.55
+    assert "low_query_understanding" in profile["caps"]
+
+
 def test_estimate_confidence_caps_weak_evidence() -> None:
     hits = [
         _hit(0.18, "设备维护周期和日常点检要求。", context_window=""),

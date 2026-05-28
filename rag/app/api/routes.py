@@ -7,8 +7,8 @@ from ..core.pipeline import (
     REFUSAL_ANSWER,
     RagPipeline,
     _assess_insufficient_context,
+    _build_confidence_profile,
     _enrich_query_understanding_with_recall,
-    _estimate_confidence,
     _keyword_rerank,
     _rewrite_query_with_trace,
     _suggest_followups,
@@ -264,7 +264,14 @@ def chat_stream(request: ChatRequest):
 
             from ..llm.prompt_builder import build_messages, extract_sources
             sources = extract_sources(hits)
-            confidence = _estimate_confidence(request.query, hits, request.filters, matched_assets)
+            confidence_profile = _build_confidence_profile(
+                request.query,
+                hits,
+                filters=request.filters,
+                knowledge_assets=matched_assets,
+                query_understanding=query_rewrite,
+            )
+            confidence = confidence_profile["confidence"]
             refusal = _assess_insufficient_context(
                 query=request.query,
                 query_rewrite=query_rewrite,
@@ -283,7 +290,10 @@ def chat_stream(request: ChatRequest):
                     confidence=confidence,
                     status="insufficient_context",
                     warnings=refusal.warnings,
-                    metadata=refusal.metadata,
+                    metadata={
+                        **refusal.metadata,
+                        "confidence_profile": confidence_profile,
+                    },
                 )
                 yield f"data: {_sse_json({'type': 'token', 'content': REFUSAL_ANSWER})}\n\n"
                 visual_plan = plan_visual_artifacts(
@@ -329,16 +339,20 @@ def chat_stream(request: ChatRequest):
                         query_rewrite=query_rewrite,
                         confidence=confidence,
                         warnings=refusal.warnings,
-                        metadata={"knowledge_assets": [
-                            {
-                                "asset_type": str(asset.get("asset_type") or ""),
-                                "id": str(asset.get("id") or ""),
-                                "label": str(asset.get("label") or ""),
-                                "status": str(asset.get("status") or ""),
-                                "retrieval_terms": asset.get("retrieval_terms", []),
-                            }
-                            for asset in matched_assets
-                        ], **refusal.metadata},
+                        metadata={
+                            "knowledge_assets": [
+                                {
+                                    "asset_type": str(asset.get("asset_type") or ""),
+                                    "id": str(asset.get("id") or ""),
+                                    "label": str(asset.get("label") or ""),
+                                    "status": str(asset.get("status") or ""),
+                                    "retrieval_terms": asset.get("retrieval_terms", []),
+                                }
+                                for asset in matched_assets
+                            ],
+                            **refusal.metadata,
+                            "confidence_profile": confidence_profile,
+                        },
                     )
                     visual_plan = plan_visual_artifacts(
                         question=request.query,
