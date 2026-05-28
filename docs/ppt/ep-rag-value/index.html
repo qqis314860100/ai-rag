@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EP 平台痛点与 RAG + LLM Wiki 知识平台价值</title>
+  <link rel="stylesheet" href="/Users/tomtong/.agents/skills/html-ppt/assets/fonts.css" />
+  <link rel="stylesheet" href="/Users/tomtong/.agents/skills/html-ppt/assets/base.css" />
+  <link rel="stylesheet" href="/Users/tomtong/.agents/skills/html-ppt/assets/themes/engineering-whiteprint.css" />
+  <link rel="stylesheet" href="/Users/tomtong/.agents/skills/html-ppt/assets/animations/animations.css" />
+  <style>
+    :root {
+      --brand: #0f766e;
+      --ink: #102033;
+      --muted: #5b6676;
+      --line: #cbd5e1;
+      --paper: #f7f3ea;
+      --soft: #edf7f4;
+      --blue: #1d4ed8;
+      --amber: #b45309;
+      --red: #b42318;
+    }
+
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Inter", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    .slide {
+      background:
+        linear-gradient(rgba(16, 32, 51, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 32, 51, 0.045) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      border: 2px solid #0f172a;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+      padding: 56px 70px;
+    }
+
+    .deck-header,
+    .deck-footer {
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .kicker {
+      display: inline-flex;
+      border: 2px solid var(--ink);
+      background: #fff;
+      padding: 7px 12px;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--brand);
+      margin: 0 0 24px;
+    }
+
+    h1 {
+      font-size: 64px;
+      line-height: 1.02;
+      letter-spacing: 0;
+      margin: 0;
+      max-width: 920px;
+    }
+
+    h2 {
+      font-size: 42px;
+      line-height: 1.12;
+      letter-spacing: 0;
+      margin: 0 0 28px;
+      max-width: 980px;
+    }
+
+    .lead {
+      font-size: 22px;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 880px;
+      margin: 24px 0 0;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .g2 { grid-template-columns: repeat(2, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+
+    .card {
+      background: rgba(255, 255, 255, 0.88);
+      border: 2px solid var(--ink);
+      padding: 22px;
+      min-height: 150px;
+    }
+
+    .card.soft {
+      background: var(--soft);
+      border-color: var(--brand);
+    }
+
+    .card.warn {
+      background: #fff7ed;
+      border-color: var(--amber);
+    }
+
+    .card.danger {
+      background: #fff1f2;
+      border-color: var(--red);
+    }
+
+    .card h3 {
+      font-size: 22px;
+      line-height: 1.2;
+      margin: 0 0 12px;
+    }
+
+    .card p,
+    .card li {
+      font-size: 17px;
+      line-height: 1.48;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .card ul {
+      margin: 0;
+      padding-left: 19px;
+    }
+
+    .quote {
+      margin-top: 34px;
+      padding: 26px 30px;
+      border-left: 10px solid var(--brand);
+      background: #fff;
+      font-size: 28px;
+      line-height: 1.35;
+      font-weight: 800;
+      max-width: 980px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-top: 42px;
+    }
+
+    .step {
+      position: relative;
+      background: #fff;
+      border: 2px solid var(--ink);
+      padding: 18px 14px;
+      min-height: 96px;
+      text-align: center;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -24px;
+      top: 31px;
+      color: var(--brand);
+      font-size: 26px;
+      z-index: 2;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: #fff;
+      border: 2px solid var(--ink);
+      font-size: 16px;
+    }
+
+    th {
+      background: var(--ink);
+      color: #fff;
+      text-align: left;
+      padding: 13px 15px;
+      font-size: 15px;
+    }
+
+    td {
+      border-top: 1px solid var(--line);
+      padding: 13px 15px;
+      color: var(--muted);
+      vertical-align: top;
+      line-height: 1.38;
+    }
+
+    td:first-child {
+      color: var(--ink);
+      font-weight: 800;
+      width: 22%;
+    }
+
+    .big {
+      font-size: 86px;
+      line-height: 0.95;
+      font-weight: 900;
+      color: var(--brand);
+      margin: 12px 0 20px;
+    }
+
+    .tag {
+      display: inline-flex;
+      border: 2px solid var(--brand);
+      background: var(--soft);
+      color: var(--brand);
+      padding: 7px 10px;
+      font-weight: 800;
+      margin: 0 8px 8px 0;
+      font-size: 14px;
+    }
+
+    .notes {
+      display: none;
+    }
+  </style>
+</head>
+<body data-themes="engineering-whiteprint,corporate-clean,swiss-grid,minimal-white">
+  <main class="deck">
+    <section class="slide is-active" data-title="封面">
+      <div class="deck-header">内部方案说明</div>
+      <p class="kicker">EP / Rosefinch → 智能知识能力</p>
+      <h1>为什么要做<br />RAG + LLM Wiki 知识平台？</h1>
+      <p class="lead">底层用 RAG 做可信问答，上层用 LLM Wiki 式知识资产层做沉淀治理，把产线文档、SOP、设备手册、质量标准和工程经验变成可复用的平台能力。</p>
+      <div class="flow">
+        <div class="step">文档管理</div>
+        <div class="step">内容解析</div>
+        <div class="step">带证据问答</div>
+        <div class="step">知识沉淀</div>
+        <div class="step">平台融合</div>
+      </div>
+      <div class="deck-footer">← → 翻页 · T 切换主题 · S 查看备注</div>
+      <div class="notes">开场先把定位讲清楚：这不是一个聊天工具，也不是为了替代现有 Agent。它是把企业已有文档里的知识真正变成平台能力。</div>
+    </section>
+
+    <section class="slide" data-title="EP 痛点">
+      <div class="deck-header">01 / 当前痛点</div>
+      <p class="kicker">EP 平台的问题不是不能管文件，而是不能直接用知识</p>
+      <h2>传统文件平台能“找到文件”，但很难“回答问题”。</h2>
+      <div class="grid g3">
+        <div class="card danger">
+          <h3>只搜元数据</h3>
+          <ul>
+            <li>文件名、标签、分类、筛选项有效</li>
+            <li>PDF / Word 正文里的内容难以被理解</li>
+          </ul>
+        </div>
+        <div class="card warn">
+          <h3>查找链路长</h3>
+          <ul>
+            <li>用户搜索后还要打开文件、翻页、判断</li>
+            <li>异常处理和参数确认依赖人工经验</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>知识难沉淀</h3>
+          <ul>
+            <li>工程师答过的问题散落在口头、群聊和会议里</li>
+            <li>缺少 FAQ、知识卡、版本和审核机制</li>
+          </ul>
+        </div>
+      </div>
+      <div class="quote">痛点不是“文件没地方放”，而是“文件里的知识没有被可靠地使用”。</div>
+      <div class="deck-footer">EP 管文件，RAG 负责可信回答，LLM Wiki 负责长期沉淀。</div>
+      <div class="notes">这一页不要否定 EP。EP 的文件管理、权限、存储仍然重要。我们要补的是内容级检索、带证据回答和知识治理。</div>
+    </section>
+
+    <section class="slide" data-title="为什么做">
+      <div class="deck-header">02 / 建设原因</div>
+      <p class="kicker">为什么要做这样一个平台</p>
+      <h2>企业产线需要的是可信知识工作台，不是通用聊天窗口。</h2>
+      <div class="grid g2">
+        <div class="card soft">
+          <h3>业务问题天然是知识问题</h3>
+          <ul>
+            <li>某个 SOP 怎么执行？</li>
+            <li>某个参数范围是多少？</li>
+            <li>某个报警怎么排查？</li>
+            <li>不同版本规范差异在哪里？</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>企业回答必须可验证</h3>
+          <ul>
+            <li>回答要有引用来源</li>
+            <li>证据不足要拒答或提示</li>
+            <li>文档冲突要暴露风险</li>
+            <li>权限、审计、版本要可追溯</li>
+          </ul>
+        </div>
+      </div>
+      <div class="quote">目标是从“文件管理”升级到“知识使用”：问问题 → 查证据 → 得答案 → 沉淀资产。</div>
+      <div class="deck-footer">RAG 知识库的核心价值在可信链路，而不是生成一段漂亮文字。</div>
+      <div class="notes">这里强调企业场景的特殊性。普通 AI 回答看起来合理还不够，产线、质量、安全场景必须知道依据在哪里。</div>
+    </section>
+
+    <section class="slide" data-title="系统干什么">
+      <div class="deck-header">03 / 系统定位</div>
+      <p class="kicker">这个系统到底是干嘛的</p>
+      <h2>它做三件事：RAG 让知识可问，LLM Wiki 让知识可沉淀。</h2>
+      <div class="grid g3">
+        <div class="card soft">
+          <h3>1. 文档变知识库</h3>
+          <p>解析 PDF、Word、Markdown、SOP 和设备手册，切分、向量化、建立语义检索能力。</p>
+        </div>
+        <div class="card soft">
+          <h3>2. 回答变可信输出</h3>
+          <p>回答绑定引用、片段、claim、confidence；低信息、无引用、低证据时不强行回答。</p>
+        </div>
+        <div class="card soft">
+          <h3>3. 问答变知识资产</h3>
+          <p>高价值回答沉淀为知识卡、FAQ、术语库、流程图和关系网络，经人工审核后复用。</p>
+        </div>
+      </div>
+      <div class="flow">
+        <div class="step">上传文档</div>
+        <div class="step">解析切分</div>
+        <div class="step">语义检索</div>
+        <div class="step">引用回答</div>
+        <div class="step">审核沉淀</div>
+      </div>
+      <div class="deck-footer">RAG 是问答链路，LLM Wiki 式知识资产层是沉淀链路。</div>
+      <div class="notes">这一页把系统定位压得非常清楚。它不是一个大而全平台，而是企业知识能力底座。</div>
+    </section>
+
+    <section class="slide" data-title="使用场景">
+      <div class="deck-header">04 / 使用场景</div>
+      <p class="kicker">典型用户和问题</p>
+      <h2>围绕产线、工艺、质量、设备、安全的高频知识场景。</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>角色</th>
+            <th>典型问题</th>
+            <th>系统输出</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>产线操作员</td>
+            <td>模组 EOL 测试前需要确认哪些步骤？</td>
+            <td>步骤化回答、SOP 引用、流程图</td>
+          </tr>
+          <tr>
+            <td>工艺工程师</td>
+            <td>Busbar 激光焊接关键参数范围是什么？</td>
+            <td>参数表、版本信息、来源片段</td>
+          </tr>
+          <tr>
+            <td>设备工程师</td>
+            <td>CCD 连续误报应该怎么排查？</td>
+            <td>故障路径、设备手册引用、关联文档</td>
+          </tr>
+          <tr>
+            <td>质量工程师</td>
+            <td>什么情况算 Pack EOL 测试不合格？</td>
+            <td>判定标准、处理流程、风险提示</td>
+          </tr>
+          <tr>
+            <td>知识管理员</td>
+            <td>哪些问题经常拒答？哪些文档需要补充？</td>
+            <td>知识缺口、低质量文档、待审核资产</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="deck-footer">最终体验：用户在业务页面内直接提问，答案能回到原文和业务对象。</div>
+      <div class="notes">这些场景都不是“写代码”或“让 Agent 帮忙总结”。它们是普通业务用户每天会遇到的知识使用问题。</div>
+    </section>
+
+    <section class="slide" data-title="价值">
+      <div class="deck-header">05 / 平台价值</div>
+      <p class="kicker">价值在哪里</p>
+      <h2>减少查找成本，降低误用风险，沉淀组织知识。</h2>
+      <div class="grid g4">
+        <div class="card">
+          <div class="big">快</div>
+          <h3>查得更快</h3>
+          <p>从人工翻文档变成自然语言检索和定位。</p>
+        </div>
+        <div class="card">
+          <div class="big">准</div>
+          <h3>答得更准</h3>
+          <p>回答必须带引用，能回到原文确认。</p>
+        </div>
+        <div class="card">
+          <div class="big">稳</div>
+          <h3>风险更可控</h3>
+          <p>低证据拒答，冲突提示，不把猜测包装成结论。</p>
+        </div>
+        <div class="card">
+          <div class="big">沉</div>
+          <h3>知识可沉淀</h3>
+          <p>高价值回答进入 FAQ、知识卡和术语库。</p>
+        </div>
+      </div>
+      <div class="quote">最终不是让某个会 AI 的人更强，而是让整个组织都能稳定使用可信知识。</div>
+      <div class="deck-footer">价值评估可看：引用打开率、采纳率、误拒率、知识卡发布率。</div>
+      <div class="notes">这一页可以用来回答管理层最关心的问题：这个东西不是炫技，而是降低查找、判断、培训和知识流失成本。</div>
+    </section>
+
+    <section class="slide" data-title="对比 Opencode">
+      <div class="deck-header">06 / 与 Opencode / Agent 的区别</div>
+      <p class="kicker">公司内部已有 Agent，为什么还需要这个系统</p>
+      <h2>Opencode 是个人工作台；RAG + LLM Wiki 是企业知识基础设施。</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>Opencode / Agent + Skill</th>
+            <th>RAG + LLM Wiki 知识平台</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>使用对象</td>
+            <td>开发者、AI 熟练用户</td>
+            <td>产线、工艺、质量、设备、安全、管理人员</td>
+          </tr>
+          <tr>
+            <td>使用方式</td>
+            <td>会写 prompt、会操作 Agent</td>
+            <td>在业务页面内直接提问</td>
+          </tr>
+          <tr>
+            <td>知识来源</td>
+            <td>临时读文件或指定上下文</td>
+            <td>企业文档统一解析、索引、权限过滤</td>
+          </tr>
+          <tr>
+            <td>可信机制</td>
+            <td>可做，但依赖使用者约束</td>
+            <td>引用、claim、置信度、拒答、审计标准化</td>
+          </tr>
+          <tr>
+            <td>知识治理</td>
+            <td>偏一次性任务和个人效率</td>
+            <td>FAQ、知识卡、术语、审核、版本、归档</td>
+          </tr>
+          <tr>
+            <td>业务嵌入</td>
+            <td>不适合直接嵌入 MES / EP / 天枢页面</td>
+            <td>可作为平台能力嵌入业务系统</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="deck-footer">二者不是替代关系：Agent 做个人增强，RAG 知识库做组织级服务。</div>
+      <div class="notes">这一页是核心。不要说 Opencode 不好，它非常适合开发者和自动化。但企业知识库要面向普通业务用户、权限、审计、长期治理。</div>
+    </section>
+
+    <section class="slide" data-title="RAG 与 LLM Wiki">
+      <div class="deck-header">07 / RAG 与 LLM Wiki</div>
+      <p class="kicker">不是二选一，而是两层能力</p>
+      <h2>RAG 解决“基于文档怎么答”，LLM Wiki 解决“优质答案怎么沉淀”。</h2>
+      <div class="grid g2">
+        <div class="card soft">
+          <h3>RAG 层：即时可信问答</h3>
+          <ul>
+            <li>用户提问后检索相关文档片段</li>
+            <li>LLM 基于引用证据生成回答</li>
+            <li>适合长尾问题、临时查询、跨文档查找</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>LLM Wiki 层：长期知识资产</h3>
+          <ul>
+            <li>高置信回答沉淀为知识卡、FAQ、术语和主题页</li>
+            <li>人工审核、版本管理、反向引用和失效标记</li>
+            <li>适合高频问题、培训内容、标准流程和组织复用</li>
+          </ul>
+        </div>
+      </div>
+      <div class="flow">
+        <div class="step">原始文档</div>
+        <div class="step">RAG 问答</div>
+        <div class="step">高置信答案</div>
+        <div class="step">知识资产审核</div>
+        <div class="step">反哺检索</div>
+      </div>
+      <div class="deck-footer">准确口径：当前是企业级 RAG 知识库底座，PRD 规划了 LLM Wiki 式知识资产层。</div>
+      <div class="notes">这里要承认 PRD 的表述：我们确实要做 LLM Wiki 式知识资产层。但它不是替代 RAG，而是在 RAG 之上做沉淀、治理和复用。</div>
+    </section>
+
+    <section class="slide" data-title="产线闭环">
+      <div class="deck-header">08 / 赋能产线闭环</div>
+      <p class="kicker">怎么真正进入产线，而不是停留在演示问答</p>
+      <h2>把“查资料、问专家、改文档、复盘问题”变成一条可治理闭环。</h2>
+      <div class="grid g4">
+        <div class="card soft">
+          <h3>权限控制</h3>
+          <p>按用户、角色、产线、工艺、客户资料和安全等级控制可见范围。</p>
+        </div>
+        <div class="card soft">
+          <h3>统一知识源</h3>
+          <p>员工不再各自维护一份过期资料，统一从受控文档和已发布知识资产取数。</p>
+        </div>
+        <div class="card soft">
+          <h3>引用可追溯</h3>
+          <p>回答必须定位到文档、章节、页码、chunk 或片段，方便现场复核。</p>
+        </div>
+        <div class="card soft">
+          <h3>协作沉淀</h3>
+          <p>好回答可以沉淀为知识卡、FAQ、SOP 片段、流程图，经审核后复用。</p>
+        </div>
+        <div class="card">
+          <h3>质量闭环</h3>
+          <p>错答、拒答、低置信和高频失败问题进入治理队列，反向驱动补文档和调检索。</p>
+        </div>
+        <div class="card">
+          <h3>审计合规</h3>
+          <p>谁问了什么、用了哪些资料、生成了什么结论、是否被采纳都可追踪。</p>
+        </div>
+        <div class="card">
+          <h3>企业语境</h3>
+          <p>越用越懂公司术语、设备别名、产线结构、客户代号和文档组织方式。</p>
+        </div>
+        <div class="card">
+          <h3>业务集成</h3>
+          <p>可接入 MES、工位看板、工单和 EP/天枢页面，在业务现场直接触发问答。</p>
+        </div>
+      </div>
+      <div class="flow">
+        <div class="step">现场提问</div>
+        <div class="step">权限过滤</div>
+        <div class="step">证据回答</div>
+        <div class="step">反馈审核</div>
+        <div class="step">知识反哺</div>
+      </div>
+      <div class="deck-footer">产线闭环的关键：把 AI 输出纳入权限、证据、协作、审计和治理，而不是让它自由发挥。</div>
+      <div class="notes">这一页要讲“闭环”。现场人员提问后，系统先按权限过滤资料，再基于证据回答；用户反馈会进入治理队列；高价值回答审核后沉淀为知识资产，再反哺下一次检索。MES 等业务系统接入后，问答发生在业务现场，而不是另开一个孤立聊天工具。</div>
+    </section>
+
+    <section class="slide" data-title="意义与下一步">
+      <div class="deck-header">09 / 意义与下一步</div>
+      <p class="kicker">项目意义</p>
+      <h2>让 EP / 天枢从“文件入口”升级为“智能知识入口”。</h2>
+      <div class="grid g3">
+        <div class="card soft">
+          <h3>当前阶段</h3>
+          <ul>
+            <li>RAG 原型链路跑通</li>
+            <li>具备问答、引用、知识资产雏形</li>
+            <li>仍需真实数据和平台接入验证</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>近期建议</h3>
+          <ul>
+            <li>选 1 个真实业务入口试点</li>
+            <li>导入 50-200 份真实文档</li>
+            <li>建立 30-50 条验收问题</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>融合方向</h3>
+          <ul>
+            <li>对接 SSO、权限和审计</li>
+            <li>嵌入文档页 / 工单页 / 看板</li>
+            <li>沉淀 FAQ、知识卡和治理流程</li>
+          </ul>
+        </div>
+      </div>
+      <div class="quote">这个系统的意义：把“个人会不会用 AI”变成“组织能不能稳定、安全、可追溯地使用知识”。</div>
+      <div class="deck-footer">建议先做小范围真实试点，再扩大到平台化。</div>
+      <div class="notes">最后收束到下一步：不要一上来做大平台重构。先选一个真实入口，把价值跑出来，再进入正式融合。</div>
+    </section>
+  </main>
+
+  <script src="/Users/tomtong/.agents/skills/html-ppt/assets/runtime.js"></script>
+</body>
+</html>
