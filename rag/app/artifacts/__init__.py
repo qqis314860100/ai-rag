@@ -1,17 +1,19 @@
-from .diagram_ir import (
+from .diagram_models import (
     DiagramEdge,
     DiagramIR,
     DiagramLayoutSuggestion,
     DiagramNode,
     DiagramQualityWarning,
     DiagramValidationResult,
+)
+from .diagram_ir import (
     build_keyword_diagram_ir,
     build_llm_diagram_ir,
     build_placeholder_diagram_ir,
     extract_diagram_keywords,
     extract_diagram_steps,
-    validate_diagram_ir,
 )
+from .diagram_validation import validate_diagram_ir
 from .visual_planner import plan_visual_artifacts
 from .image_artifact import build_image_artifact_contract
 from .knowledge_assets import (

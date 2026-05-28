@@ -83,7 +83,8 @@ def build_image_artifact_contract(
             severity="info",
         ))
 
-    allowed = config.image_gen_enabled and requested_by_user and bool(source_ids)
+    # allowed 表示“图片产物契约是否满足证据和用户授权”，不等同于本机是否已经开启外发生成。
+    allowed = requested_by_user and bool(source_ids)
     return ImageArtifactContract(
         allowed=allowed,
         sanitized_prompt=sanitized_prompt[:1600],
