@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "./components/ChatThread";
 import { SessionList } from "./components/SessionList";
 import ChatInput from "./components/ChatInput";
-import DocPreview from "./components/DocPreview";
 import ConversationNavigator from "./components/ConversationNavigator";
 import { api } from "../../services/api";
 import { useStreamChat } from "./hooks/useStreamChat";
@@ -15,6 +14,8 @@ import { showToast } from "../../components/ui/Toast";
 import { track } from "../../services/tracking";
 import type { ChatMessage, Source } from "./types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
+
+const DocPreview = lazy(() => import("./components/DocPreview"));
 
 function MessagesSkeleton() {
   return (
@@ -778,14 +779,16 @@ export default function ChatPage() {
         <>
           <div className="fixed inset-0 bg-black/20 z-40 lg:hidden" onClick={() => setPreviewSource(null)} />
           <aside className="fixed right-0 top-0 bottom-0 w-[384px] max-w-[90vw] bg-surface shadow-xl-soft z-50 animate-fade-in-right border-l border-divider overflow-hidden">
-            <DocPreview
-              source={previewSource}
-              onClose={() => setPreviewSource(null)}
-              onAskAbout={(src) => {
-                setPreviewSource(null);
-                handleFollowUp(`请详细解释《${src.document_title}》中"${src.section_path}"的相关内容`);
-              }}
-            />
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-text-muted">预览加载中...</div>}>
+              <DocPreview
+                source={previewSource}
+                onClose={() => setPreviewSource(null)}
+                onAskAbout={(src) => {
+                  setPreviewSource(null);
+                  handleFollowUp(`请详细解释《${src.document_title}》中"${src.section_path}"的相关内容`);
+                }}
+              />
+            </Suspense>
           </aside>
         </>
       )}

@@ -1,9 +1,8 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useMemo, useState, type CSSProperties } from "react";
 import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, FileCheck, MessageSquare, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
 import type { ChatMessage, DiagramType, Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
 import ArtifactCard from "./ArtifactCard";
-import ArtifactModal from "./ArtifactModal";
 import { showToast } from "../../../components/ui/Toast";
 import { ActionButton } from "../../../components/ui";
 import { ChatEmptyWelcome } from "./ChatEmptyWelcome";
@@ -30,6 +29,8 @@ import { useChatThreadScroll } from "../hooks/useChatThreadScroll";
 import { useMessageArtifacts } from "../hooks/useMessageArtifacts";
 import { useMessageFavorites } from "../hooks/useMessageFavorites";
 import { useMessageFeedback } from "../hooks/useMessageFeedback";
+
+const ArtifactModal = lazy(() => import("./ArtifactModal"));
 
 interface ChatThreadProps {
   messages: ChatMessage[];
@@ -595,7 +596,9 @@ export default function ChatThread({ messages, loading, streamingContent, stream
       )}
 
       {activeArtifact && (
-        <ArtifactModal artifact={activeArtifact} onClose={() => setActiveArtifact(null)} />
+        <Suspense fallback={null}>
+          <ArtifactModal artifact={activeArtifact} onClose={() => setActiveArtifact(null)} />
+        </Suspense>
       )}
 
       <div ref={bottomRef} />
