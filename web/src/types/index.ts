@@ -120,6 +120,24 @@ export interface QueryUnderstanding {
 export interface ChatMessageMetadata extends Record<string, unknown> {
   trace?: ChatMessageTrace;
   query_understanding?: QueryUnderstanding | null;
+  answer_quality?: ChatAnswerQuality;
+}
+
+export type AnswerQualityTier = "answerable" | "grey_answer" | "partial_answer" | "refused";
+
+export interface ChatAnswerQualityReason {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+}
+
+export interface ChatAnswerQuality {
+  tier: AnswerQualityTier;
+  label: string;
+  reason: string;
+  reasons: ChatAnswerQualityReason[];
+  confidence: number;
+  answer_ir_status?: string;
 }
 
 export interface ChatMessage {

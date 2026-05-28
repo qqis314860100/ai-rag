@@ -1,5 +1,6 @@
 export type {
   ApiResponse,
+  AnswerQualityTier,
   ChatArtifact,
   ChatMessage,
   ChatMessageMetadata,

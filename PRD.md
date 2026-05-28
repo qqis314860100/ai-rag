@@ -328,7 +328,7 @@
 - [x] `rag`: 增加 rerank 精排适配层，先支持本地轻量 rerank 或 LLM rerank 配置开关；rerank 结果必须记录 topK 分布和命中特征。
 - [x] `rag`: 重构综合 confidence，纳入 top1 分数、topK 分布、关键词覆盖、引用数量、引用覆盖率、章节/文档过滤命中、query understanding 置信度和上下文可用性。
 - [x] `rag`: 将 `context_conflict` 从硬拦截降级为 warning + precise verification，只有无引用、低信息或证据完全不支持时才拒答。
-- [ ] `api` / `web`: 将低置信状态分为可回答、灰度回答、部分回答、拒答四档，并在回答 metadata 与 UI 中展示对应原因。
+- [x] `api` / `web`: 将低置信状态分为可回答、灰度回答、部分回答、拒答四档，并在回答 metadata 与 UI 中展示对应原因。
 
 #### 阶段 3：Answer IR 与可信回答核验
 

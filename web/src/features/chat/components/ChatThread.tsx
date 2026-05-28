@@ -13,6 +13,7 @@ import {
   canUsePersistedAssistantActions,
   canUsePersistedUserActions,
   formatTime,
+  getAnswerQualityNotice,
   getDiagramActionLabel,
   getDiagramButtonLabel,
   getDiagramKey,
@@ -21,6 +22,7 @@ import {
   isAnswerReadyForRefinement,
   isConfirmedAnswer,
   mergeArtifacts,
+  type AnswerQualityNotice,
   type QueryUnderstandingNotice,
 } from "./chatThreadUtils";
 import { useChatThreadScroll } from "../hooks/useChatThreadScroll";
@@ -55,6 +57,13 @@ const queryNoticeToneClass: Record<QueryUnderstandingNotice["tone"], string> = {
   confirmation: "border-warning/25 bg-warning-soft text-warning",
 };
 
+const answerQualityToneClass: Record<AnswerQualityNotice["tone"], string> = {
+  answerable: "border-success/20 bg-success-soft/60 text-success",
+  grey_answer: "border-accent/20 bg-accent-soft/60 text-accent",
+  partial_answer: "border-warning/25 bg-warning-soft text-warning",
+  refused: "border-danger/20 bg-danger-soft text-danger",
+};
+
 function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }) {
   const Icon = notice.tone === "confirmed" ? FileCheck : notice.tone === "confirmation" ? AlertCircle : CircleHelp;
 
@@ -68,6 +77,30 @@ function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }
       {notice.terms.map((term) => (
         <span key={term} className="max-w-full truncate rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
           {term}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AnswerQualityHint({ notice }: { notice: AnswerQualityNotice }) {
+  const Icon = notice.tone === "answerable" ? FileCheck : notice.tone === "refused" ? X : notice.tone === "partial_answer" ? AlertCircle : CircleHelp;
+
+  return (
+    <div className={`mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[12px] leading-relaxed ${answerQualityToneClass[notice.tone]}`}>
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold">
+        <Icon className="h-3.5 w-3.5" />
+        {notice.label}
+      </span>
+      <span className="min-w-0 flex-1 text-text-secondary">{notice.text}</span>
+      {notice.confidence !== undefined && notice.confidence > 0 && (
+        <span className="shrink-0 rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
+          {Math.round(notice.confidence * 100)}%
+        </span>
+      )}
+      {notice.reasons.map((reason) => (
+        <span key={reason} className="max-w-full truncate rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">
+          {reason}
         </span>
       ))}
     </div>
@@ -123,6 +156,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
         const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
+        const answerQualityNotice = !isUser && !msg.streaming ? getAnswerQualityNotice(msg) : null;
         const queryUnderstandingNotice = !isUser && !msg.streaming ? getQueryUnderstandingNotice(msg) : null;
 
         return (
@@ -217,13 +251,7 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                       </button>
                     </div>
                   )}
-                  {/* Low confidence warning */}
-                  {!msg.streaming && msg.confidence !== undefined && msg.confidence > 0 && msg.confidence < 0.6 && (
-                    <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-warning-soft border border-warning/20 text-[13px] text-warning">
-                      <AlertCircle className="h-4 w-4 shrink-0" />
-                      <span>本回答置信度较低（{(msg.confidence * 100).toFixed(0)}%），请人工核对原文</span>
-                    </div>
-                  )}
+                  {answerQualityNotice && <AnswerQualityHint notice={answerQualityNotice} />}
                   {queryUnderstandingNotice && <QueryUnderstandingHint notice={queryUnderstandingNotice} />}
                   <div className="text-[15px] leading-relaxed text-text">
                     <MarkdownContent

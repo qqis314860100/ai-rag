@@ -1,4 +1,4 @@
-import type { ChatArtifact, ChatMessage, DiagramType, QueryCandidateTerm } from "../types";
+import type { AnswerQualityTier, ChatArtifact, ChatMessage, DiagramType, QueryCandidateTerm } from "../types";
 
 export type DiagramState = {
   loading: boolean;
@@ -11,6 +11,14 @@ export type QueryUnderstandingNotice = {
   label: string;
   text: string;
   terms: string[];
+};
+
+export type AnswerQualityNotice = {
+  tone: AnswerQualityTier;
+  label: string;
+  text: string;
+  reasons: string[];
+  confidence?: number;
 };
 
 const UNCERTAIN_ANSWER_PATTERN = /(?:暂时无法确认|无法确认|无法回答|没有足够(?:信息|证据)|信息不足|不能确定|请补充|问题不够具体)/;
@@ -65,6 +73,8 @@ export function isAnswerReadyForRefinement(message: ChatMessage) {
 }
 
 export function isConfirmedAnswer(message: ChatMessage) {
+  const quality = message.metadata?.answer_quality;
+  if (quality?.tier && quality.tier !== "answerable") return false;
   const status = answerStatus(message);
   if (status && status !== "answered") return false;
   return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
@@ -127,6 +137,33 @@ export function getQueryUnderstandingNotice(message: ChatMessage): QueryUndersta
   return null;
 }
 
+export function getAnswerQualityNotice(message: ChatMessage): AnswerQualityNotice | null {
+  const quality = message.metadata?.answer_quality;
+  if (!quality || !quality.tier) {
+    if (typeof message.confidence === "number" && message.confidence > 0 && message.confidence < 0.6) {
+      return {
+        tone: "partial_answer",
+        label: "部分回答",
+        text: `回答可信度 ${Math.round(message.confidence * 100)}%，请人工核对原文。`,
+        reasons: [],
+        confidence: message.confidence,
+      };
+    }
+    return null;
+  }
+
+  const reasons = Array.isArray(quality.reasons)
+    ? quality.reasons.map((reason) => reason.message).filter(Boolean).slice(0, 3)
+    : [];
+  return {
+    tone: quality.tier,
+    label: quality.label || qualityLabel(quality.tier),
+    text: quality.reason || reasons[0] || qualityLabel(quality.tier),
+    reasons: reasons.filter((reason) => reason !== quality.reason),
+    confidence: typeof quality.confidence === "number" ? quality.confidence : message.confidence,
+  };
+}
+
 function answerStatus(message: ChatMessage) {
   const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
   return typeof answerSummary?.status === "string" ? answerSummary.status : "";
@@ -143,4 +180,11 @@ function uniqueStrings(values: Array<string | undefined>) {
 function hasOnlyInferredTerms(candidateTerms: QueryCandidateTerm[]) {
   if (candidateTerms.length === 0) return false;
   return candidateTerms.every((term) => INFERRED_TERM_KINDS.has(term.matched_kind || ""));
+}
+
+function qualityLabel(tier: AnswerQualityTier) {
+  if (tier === "refused") return "拒答";
+  if (tier === "partial_answer") return "部分回答";
+  if (tier === "grey_answer") return "灰度回答";
+  return "可回答";
 }
