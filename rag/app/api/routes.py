@@ -9,8 +9,10 @@ from ..core.pipeline import (
     _assess_insufficient_context,
     _build_confidence_profile,
     _enrich_query_understanding_with_recall,
+    _knowledge_asset_trace,
     _keyword_rerank,
     _rewrite_query_with_trace,
+    _select_knowledge_assets,
     _suggest_followups,
 )
 from ..core.pipeline.answer_verification import verify_answer_ir
@@ -255,11 +257,7 @@ def chat_stream(request: ChatRequest):
         try:
             yield f"data: {_sse_json({'type': 'stage', 'stage': 'accepted', 'message': 'RAG 流式请求已接收。'})}\n\n"
             # 1. Search
-            matched_assets = [
-                asset for asset in request.knowledge_assets
-                if str(asset.get("label") or "").lower() in request.query.lower()
-                or any(str(term).lower() in request.query.lower() for term in asset.get("retrieval_terms", []) if len(str(term)) >= 2)
-            ][:8]
+            matched_assets = _select_knowledge_assets(request.query, request.knowledge_assets)
             query_rewrite = _rewrite_query_with_trace(request.query, request.history, matched_assets)
             rewritten_query = query_rewrite.rewritten_query
             search_result = pipeline.search(
@@ -358,16 +356,7 @@ def chat_stream(request: ChatRequest):
                         confidence=confidence,
                         warnings=refusal.warnings,
                         metadata={
-                            "knowledge_assets": [
-                                {
-                                    "asset_type": str(asset.get("asset_type") or ""),
-                                    "id": str(asset.get("id") or ""),
-                                    "label": str(asset.get("label") or ""),
-                                    "status": str(asset.get("status") or ""),
-                                    "retrieval_terms": asset.get("retrieval_terms", []),
-                                }
-                                for asset in matched_assets
-                            ],
+                            "knowledge_assets": _knowledge_asset_trace(matched_assets),
                             **refusal.metadata,
                             "confidence_profile": confidence_profile,
                         },

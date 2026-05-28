@@ -21,12 +21,23 @@ def _asset_terms(asset: dict) -> list[str]:
     return [value.strip() for value in values if value and value.strip()]
 
 
+def _asset_version(asset: dict) -> int:
+    try:
+        return int(asset.get("asset_version") or asset.get("version") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def _select_knowledge_assets(query: str, knowledge_assets: list[dict] | None = None) -> list[dict]:
     if not knowledge_assets:
         return []
     normalized_query = query.lower()
     matched: list[dict] = []
     for asset in knowledge_assets:
+        # API 已经完成发布资产过滤时，match_type 代表可审计的命中方式，RAG 侧不再降级为纯字面猜测。
+        if asset.get("match_type") in {"strong_term", "semantic_candidate"}:
+            matched.append(asset)
+            continue
         terms = _asset_terms(asset)
         if any(len(term) >= 2 and term.lower() in normalized_query for term in terms):
             matched.append(asset)
@@ -37,7 +48,13 @@ def _knowledge_asset_trace(assets: list[dict]) -> list[dict]:
     return [
         {
             "asset_type": str(asset.get("asset_type") or ""),
-            "id": str(asset.get("id") or ""),
+            "id": str(asset.get("id") or asset.get("asset_id") or ""),
+            "asset_id": str(asset.get("asset_id") or asset.get("id") or ""),
+            "version": _asset_version(asset),
+            "asset_version": _asset_version(asset),
+            "match_type": str(asset.get("match_type") or "semantic_candidate"),
+            "retrieval_type": str(asset.get("match_type") or "semantic_candidate"),
+            "match_terms": asset.get("match_terms") if isinstance(asset.get("match_terms"), list) else [],
             "label": str(asset.get("label") or ""),
             "status": str(asset.get("status") or ""),
             "retrieval_terms": asset.get("retrieval_terms") if isinstance(asset.get("retrieval_terms"), list) else [],
@@ -323,13 +340,16 @@ def _query_candidate_terms(
         label = str(asset.get("label") or "")
         if not label:
             continue
+        match_type = str(asset.get("match_type") or "semantic_candidate")
+        asset_id = str(asset.get("asset_id") or asset.get("id") or "")
+        asset_version = int(asset.get("asset_version") or asset.get("version") or 1)
         candidates.append(QueryCandidateTerm(
             term=label,
-            matched_text=label,
-            matched_kind=str(asset.get("asset_type") or "knowledge_asset"),
-            source=f"knowledge_asset:{asset.get('id') or ''}".rstrip(":"),
-            confidence=0.76,
-            reason="命中已发布知识资产",
+            matched_text=", ".join(str(term) for term in asset.get("match_terms", []) if str(term).strip()) or label,
+            matched_kind=match_type,
+            source=f"knowledge_asset:{asset.get('asset_type') or 'asset'}:{asset_id}:v{asset_version}",
+            confidence=0.9 if match_type == "strong_term" else 0.76,
+            reason="强术语命中已发布资产" if match_type == "strong_term" else "命中已发布知识资产语义候选",
         ))
     return _dedupe_candidate_terms(candidates)
 

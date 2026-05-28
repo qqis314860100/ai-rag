@@ -203,9 +203,13 @@ export interface RagVisualPlan {
 export interface RagKnowledgeAssetContext {
   asset_type: string;
   id: string;
+  asset_id?: string;
+  version?: number;
   label: string;
   summary?: string;
   retrieval_terms?: string[];
+  match_type?: "strong_term" | "semantic_candidate" | string;
+  match_terms?: string[];
   status?: string;
   metadata?: Record<string, unknown>;
 }
