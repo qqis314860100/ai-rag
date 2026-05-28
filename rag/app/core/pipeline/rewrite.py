@@ -1,7 +1,13 @@
 import re
 
-from ...schemas.models import AnswerQueryRewrite
-from ..terminology import TermExpansionResult, expand_query_with_terms
+from ...schemas.models import (
+    AnswerQueryRewrite,
+    QueryAmbiguity,
+    QueryCandidateTerm,
+    QuerySpellCorrection,
+    QueryUnderstanding,
+)
+from ..terminology import TermExpansionResult, expand_query_with_terms, list_term_entries
 
 
 def _asset_terms(asset: dict) -> list[str]:
@@ -69,11 +75,25 @@ def _rewrite_query_with_trace(
     signals: list[str] = []
     strategies: list[str] = []
     reasons: list[str] = []
+    spell_corrections = _detect_spell_corrections(original_query)
 
     if topic:
         signals.append("history_topic")
 
     if _is_low_information_query(original_query) and not topic:
+        understanding = _build_query_understanding(
+            original_query=original_query,
+            rewritten_query=rewritten_query,
+            intent=_infer_query_intent(original_query),
+            candidate_terms=[],
+            spell_corrections=[],
+            ambiguity=QueryAmbiguity(
+                is_ambiguous=True,
+                reason="问题信息量过低，无法稳定判断用户意图",
+            ),
+            signals=["low_information"],
+            strategy="low_information",
+        )
         return AnswerQueryRewrite(
             original_query=original_query,
             rewritten_query=rewritten_query,
@@ -82,7 +102,14 @@ def _rewrite_query_with_trace(
             reason="问题信息量过低，且没有可用于补全的历史上下文",
             signals=["low_information"],
             history_turns=history_turns,
+            query_understanding=understanding,
         )
+
+    if spell_corrections:
+        rewritten_query = _apply_spell_corrections(rewritten_query, spell_corrections)
+        signals.append("spell_correction")
+        strategies.append("spell_correction")
+        reasons.append("根据企业术语库修正常见缩写错写")
 
     if topic and _has_reference_pronoun(original_query):
         candidate = _replace_reference_with_topic(original_query, topic)
@@ -133,6 +160,18 @@ def _rewrite_query_with_trace(
         reasons.append("问题已包含明确主题，无需改写")
 
     strategy = strategies[0] if len(strategies) == 1 else "compound"
+    candidate_terms = _query_candidate_terms(term_expansion, knowledge_assets or [], spell_corrections)
+    ambiguity = _query_ambiguity(original_query, candidate_terms, spell_corrections)
+    understanding = _build_query_understanding(
+        original_query=original_query,
+        rewritten_query=rewritten_query,
+        intent=_infer_query_intent(original_query),
+        candidate_terms=candidate_terms,
+        spell_corrections=spell_corrections,
+        ambiguity=ambiguity,
+        signals=signals,
+        strategy=strategy,
+    )
     return AnswerQueryRewrite(
         original_query=original_query,
         rewritten_query=rewritten_query,
@@ -142,11 +181,263 @@ def _rewrite_query_with_trace(
         signals=_dedupe_preserve_order(signals),
         history_turns=history_turns,
         term_expansion_hits=term_expansion_hits,
+        query_understanding=understanding,
     )
 
 
 def _term_expansion_hits_dump(result: TermExpansionResult) -> list[dict]:
     return [hit.as_dict() for hit in result.hits]
+
+
+def _detect_spell_corrections(query: str) -> list[QuerySpellCorrection]:
+    corrections: list[QuerySpellCorrection] = []
+    tokens = re.findall(r"[A-Za-z]{2,8}", query)
+    if not tokens:
+        return corrections
+
+    abbreviations = [
+        str(entry.get("abbreviation") or entry.get("canonical_term") or "")
+        for entry in list_term_entries()
+        if str(entry.get("abbreviation") or entry.get("canonical_term") or "")
+    ]
+    seen: set[tuple[str, str]] = set()
+    for token in tokens:
+        normalized = token.lower()
+        for abbreviation in abbreviations:
+            target = abbreviation.lower()
+            if normalized == target or abs(len(normalized) - len(target)) > 1:
+                continue
+            distance = _damerau_levenshtein(normalized, target, max_distance=1)
+            transposed = len(normalized) == len(target) and sorted(normalized) == sorted(target)
+            if distance <= 1 or transposed:
+                key = (token, abbreviation)
+                if key in seen:
+                    continue
+                seen.add(key)
+                corrections.append(QuerySpellCorrection(
+                    original=token,
+                    correction=abbreviation,
+                    source="built_in_battery_line_glossary",
+                    confidence=0.82 if transposed else 0.78,
+                    reason="疑似企业术语缩写错写",
+                ))
+                break
+    return corrections
+
+
+def _apply_spell_corrections(query: str, corrections: list[QuerySpellCorrection]) -> str:
+    rewritten = query
+    for correction in corrections:
+        if not correction.original or not correction.correction:
+            continue
+        rewritten = re.sub(
+            rf"(?<![A-Za-z0-9]){re.escape(correction.original)}(?![A-Za-z0-9])",
+            correction.correction,
+            rewritten,
+            flags=re.IGNORECASE,
+        )
+    return rewritten
+
+
+def _query_candidate_terms(
+    term_expansion: TermExpansionResult,
+    knowledge_assets: list[dict],
+    spell_corrections: list[QuerySpellCorrection],
+) -> list[QueryCandidateTerm]:
+    candidates: list[QueryCandidateTerm] = []
+    for hit in term_expansion.hits:
+        candidates.append(QueryCandidateTerm(
+            term=hit.canonical_term,
+            matched_text=hit.matched_text,
+            matched_kind=hit.matched_kind,
+            source=hit.source,
+            confidence=0.9,
+            reason="命中企业术语库",
+        ))
+    for correction in spell_corrections:
+        candidates.append(QueryCandidateTerm(
+            term=correction.correction,
+            matched_text=correction.original,
+            matched_kind="spell_correction",
+            source=correction.source,
+            confidence=correction.confidence,
+            reason=correction.reason,
+        ))
+    for asset in knowledge_assets:
+        label = str(asset.get("label") or "")
+        if not label:
+            continue
+        candidates.append(QueryCandidateTerm(
+            term=label,
+            matched_text=label,
+            matched_kind=str(asset.get("asset_type") or "knowledge_asset"),
+            source=f"knowledge_asset:{asset.get('id') or ''}".rstrip(":"),
+            confidence=0.76,
+            reason="命中已发布知识资产",
+        ))
+    return _dedupe_candidate_terms(candidates)
+
+
+def _query_ambiguity(
+    query: str,
+    candidate_terms: list[QueryCandidateTerm],
+    spell_corrections: list[QuerySpellCorrection],
+) -> QueryAmbiguity:
+    if _is_low_information_query(query):
+        return QueryAmbiguity(is_ambiguous=True, reason="问题信息量过低")
+    correction_targets = _dedupe_preserve_order([item.correction for item in spell_corrections if item.correction])
+    if len(correction_targets) > 1:
+        return QueryAmbiguity(
+            is_ambiguous=True,
+            candidates=correction_targets,
+            reason="存在多个可能的术语纠错候选",
+        )
+    terms = _dedupe_preserve_order([item.term for item in candidate_terms if item.term])
+    if len(terms) > 3:
+        return QueryAmbiguity(
+            is_ambiguous=True,
+            candidates=terms[:5],
+            reason="命中过多候选术语，需要结合召回证据确认主语义",
+        )
+    return QueryAmbiguity()
+
+
+def _build_query_understanding(
+    *,
+    original_query: str,
+    rewritten_query: str,
+    intent: str,
+    candidate_terms: list[QueryCandidateTerm],
+    spell_corrections: list[QuerySpellCorrection],
+    ambiguity: QueryAmbiguity,
+    signals: list[str],
+    strategy: str,
+) -> QueryUnderstanding:
+    confidence = _estimate_understanding_confidence(
+        candidate_terms=candidate_terms,
+        spell_corrections=spell_corrections,
+        ambiguity=ambiguity,
+        signals=signals,
+        strategy=strategy,
+    )
+    needs_confirmation = ambiguity.is_ambiguous and confidence < 0.75
+    grey_answer_hint = _grey_answer_hint(spell_corrections, candidate_terms, needs_confirmation)
+    trace = [
+        {"source": "rewrite_strategy", "value": strategy},
+        *({"source": "signal", "value": signal} for signal in _dedupe_preserve_order(signals)),
+    ]
+    return QueryUnderstanding(
+        original_query=original_query,
+        rewritten_query=rewritten_query,
+        intent=intent,
+        candidate_terms=candidate_terms,
+        spell_corrections=spell_corrections,
+        ambiguity=ambiguity,
+        confidence=confidence,
+        needs_confirmation=needs_confirmation,
+        grey_answer_hint=grey_answer_hint,
+        trace=trace,
+    )
+
+
+def _infer_query_intent(query: str) -> str:
+    if re.search(r"(流程图|思维导图|画图|图解|整理成图)", query):
+        return "artifact_generation"
+    if re.search(r"(异常|故障|报警|不良|失效|排查|怎么处理|怎么办)", query):
+        return "troubleshooting"
+    if re.search(r"(步骤|流程|操作|规程|SOP|作业|如何)", query, re.IGNORECASE):
+        return "procedure"
+    if re.search(r"(阈值|标准|参数|多少|电压|电流|温度|压力|范围)", query):
+        return "parameter"
+    if re.search(r"(区别|差异|对比|比较)", query):
+        return "comparison"
+    if re.search(r"(第\s*[\d一二三四五六七八九十]+\s*章|章节)", query):
+        return "chapter_lookup"
+    if re.search(r"(是什么|定义|介绍|说明)", query):
+        return "definition"
+    return "general"
+
+
+def _estimate_understanding_confidence(
+    *,
+    candidate_terms: list[QueryCandidateTerm],
+    spell_corrections: list[QuerySpellCorrection],
+    ambiguity: QueryAmbiguity,
+    signals: list[str],
+    strategy: str,
+) -> float:
+    if strategy == "low_information":
+        return 0.2
+    confidence = 0.62
+    if candidate_terms:
+        confidence += min(0.18, len(candidate_terms) * 0.06)
+    if spell_corrections:
+        confidence += min(item.confidence for item in spell_corrections) * 0.12
+    if any(signal in {"pronoun", "ellipsis", "chapter_number"} for signal in signals):
+        confidence += 0.08
+    if ambiguity.is_ambiguous:
+        confidence -= 0.18
+    return round(max(0.0, min(1.0, confidence)), 2)
+
+
+def _grey_answer_hint(
+    spell_corrections: list[QuerySpellCorrection],
+    candidate_terms: list[QueryCandidateTerm],
+    needs_confirmation: bool,
+) -> str:
+    if needs_confirmation:
+        return "当前问题存在歧义，需要用户确认后再回答。"
+    if spell_corrections:
+        corrections = "、".join(
+            f"{item.original} -> {item.correction}"
+            for item in spell_corrections
+            if item.original and item.correction
+        )
+        if corrections:
+            return f"系统按术语库推测为 {corrections}。"
+    if candidate_terms:
+        terms = "、".join(_dedupe_preserve_order([item.term for item in candidate_terms if item.term])[:3])
+        if terms:
+            return f"已命中术语：{terms}。"
+    return ""
+
+
+def _damerau_levenshtein(source: str, target: str, *, max_distance: int) -> int:
+    if source == target:
+        return 0
+    if abs(len(source) - len(target)) > max_distance:
+        return max_distance + 1
+    previous = list(range(len(target) + 1))
+    current = [0] * (len(target) + 1)
+    for i, source_char in enumerate(source, 1):
+        current[0] = i
+        row_min = current[0]
+        for j, target_char in enumerate(target, 1):
+            cost = 0 if source_char == target_char else 1
+            current[j] = min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + cost,
+            )
+            if i > 1 and j > 1 and source_char == target[j - 2] and source[i - 2] == target_char:
+                current[j] = min(current[j], previous[j - 2] + 1)
+            row_min = min(row_min, current[j])
+        if row_min > max_distance:
+            return max_distance + 1
+        previous, current = current, previous
+    return previous[-1]
+
+
+def _dedupe_candidate_terms(candidates: list[QueryCandidateTerm]) -> list[QueryCandidateTerm]:
+    seen: set[tuple[str, str, str]] = set()
+    result: list[QueryCandidateTerm] = []
+    for candidate in candidates:
+        key = (candidate.term, candidate.matched_text, candidate.source)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(candidate)
+    return result
 
 
 def _expand_chapter_query(query: str) -> tuple[str, bool]:

@@ -72,6 +72,38 @@ def test_rewrite_expands_battery_terms_with_trace() -> None:
     assert result.term_expansion_hits[0].canonical_term == "OCV"
     assert result.term_expansion_hits[0].matched_kind == "abbreviation"
     assert "开路电压" in result.term_expansion_hits[0].expansions
+    assert result.query_understanding.intent == "troubleshooting"
+    assert result.query_understanding.candidate_terms[0].term == "OCV"
+    assert result.query_understanding.needs_confirmation is False
+
+
+def test_query_understanding_corrects_misspelled_abbreviation() -> None:
+    result = _rewrite_query_with_trace("elo测试异常怎么处理？")
+
+    understanding = result.query_understanding
+    assert result.changed is True
+    assert result.strategy == "compound"
+    assert "EOL" in result.rewritten_query
+    assert "spell_correction" in result.signals
+    assert understanding.original_query == "elo测试异常怎么处理？"
+    assert understanding.rewritten_query == result.rewritten_query
+    assert understanding.intent == "troubleshooting"
+    assert understanding.spell_corrections[0].original == "elo"
+    assert understanding.spell_corrections[0].correction == "EOL"
+    assert any(term.term == "EOL" for term in understanding.candidate_terms)
+    assert understanding.needs_confirmation is False
+    assert "elo -> EOL" in understanding.grey_answer_hint
+
+
+def test_query_understanding_marks_low_information_confirmation() -> None:
+    result = _rewrite_query_with_trace("这个呢？")
+
+    understanding = result.query_understanding
+    assert understanding.original_query == "这个呢？"
+    assert understanding.intent == "general"
+    assert understanding.ambiguity.is_ambiguous is True
+    assert understanding.needs_confirmation is True
+    assert understanding.confidence == 0.2
 
 
 def test_terminology_contract_covers_initial_battery_line_terms() -> None:
@@ -128,7 +160,11 @@ def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> Non
     )
 
     rewrite = result["answer_ir"]["query_rewrite"]
+    understanding = result["answer_ir"]["query_understanding"]
     assert captured["retrieval_query"] == "绝缘电阻测试标准的异常怎么处理？"
     assert captured["prompt_query"] == "它的异常怎么处理？"
     assert rewrite["strategy"] == "history_pronoun_resolution"
     assert rewrite["rewritten_query"] == captured["retrieval_query"]
+    assert understanding["original_query"] == "它的异常怎么处理？"
+    assert understanding["rewritten_query"] == captured["retrieval_query"]
+    assert understanding["intent"] == "troubleshooting"

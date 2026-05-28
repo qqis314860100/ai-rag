@@ -81,6 +81,42 @@ class TermExpansionHit(BaseModel):
     source: str = ""
 
 
+class QueryCandidateTerm(BaseModel):
+    term: str = ""
+    matched_text: str = ""
+    matched_kind: str = ""
+    source: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = ""
+
+
+class QuerySpellCorrection(BaseModel):
+    original: str = ""
+    correction: str = ""
+    source: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = ""
+
+
+class QueryAmbiguity(BaseModel):
+    is_ambiguous: bool = False
+    candidates: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class QueryUnderstanding(BaseModel):
+    original_query: str = ""
+    rewritten_query: str = ""
+    intent: str = "general"
+    candidate_terms: list[QueryCandidateTerm] = Field(default_factory=list)
+    spell_corrections: list[QuerySpellCorrection] = Field(default_factory=list)
+    ambiguity: QueryAmbiguity = Field(default_factory=QueryAmbiguity)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    needs_confirmation: bool = False
+    grey_answer_hint: str = ""
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SearchResult(BaseModel):
     query: str
     expanded_query: str = ""
@@ -176,6 +212,7 @@ class AnswerQueryRewrite(BaseModel):
     signals: list[str] = Field(default_factory=list)
     history_turns: int = 0
     term_expansion_hits: list[TermExpansionHit] = Field(default_factory=list)
+    query_understanding: QueryUnderstanding = Field(default_factory=QueryUnderstanding)
 
 
 class AnswerCitation(BaseModel):
@@ -233,6 +270,7 @@ class AnswerIR(BaseModel):
     claims: list[AnswerClaim] = Field(default_factory=list)
     citations: list[AnswerCitation] = Field(default_factory=list)
     query_rewrite: AnswerQueryRewrite = Field(default_factory=AnswerQueryRewrite)
+    query_understanding: QueryUnderstanding = Field(default_factory=QueryUnderstanding)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     warnings: list[AnswerWarning] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -296,6 +334,7 @@ class AnswerIR(BaseModel):
             claims=claims,
             citations=citations,
             query_rewrite=rewrite,
+            query_understanding=rewrite.query_understanding,
             confidence=answer_confidence,
             warnings=derived_warnings,
             metadata=metadata or {},

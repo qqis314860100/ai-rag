@@ -314,7 +314,7 @@
 
 目标：解决 `elo测试` 这类“用户表达不标准但知识库有答案”的误拒问题，避免靠前端或静态术语表硬穷举。
 
-- [ ] `rag`: 新增 Query Understanding 结构化输出，包含 original_query、rewritten_query、intent、candidate_terms、spell_corrections、ambiguity、confidence、needs_confirmation 和 grey_answer_hint。
+- [x] `rag`: 新增 Query Understanding 结构化输出，包含 original_query、rewritten_query、intent、candidate_terms、spell_corrections、ambiguity、confidence、needs_confirmation 和 grey_answer_hint。
 - [ ] `rag`: 基于拼写相似度、文档标题、章节标题、历史问题、已发布术语/别名和首轮召回结果生成候选理解；候选来源必须写入 trace，禁止不可追踪黑盒改写。
 - [ ] `rag`: 将 `elo测试`、大小写错写、缩写倒置、中文别名、章节省略、多轮指代纳入查询理解评估集，覆盖“应纠错回答”和“不应乱纠错”两类样本。
 - [ ] `api`: 将 query understanding 结果持久化到回答 metadata，前端可展示“按推测理解为 EOL 测试”的灰度提示。
