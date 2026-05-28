@@ -4,7 +4,7 @@ import { sendSuccess } from "../../utils/response";
 import { AppError, ErrorCodes } from "../../utils/errors";
 import { auditFromRequest } from "../../services/auditService";
 import { createArtifact, formatArtifact, getArtifactById, listArtifactsByMessage, softDeleteArtifact, updateArtifact } from "../../db/chatArtifacts";
-import { artifactRenderer, artifactSummary, buildDiagramForMessage, diagramQualityWarnings, generateDiagramArtifact, getPreviousUserQuestion, imageArtifactStatus, normalizeDiagramType, parseMessageSources, requireReadableAssistantMessage } from "./shared";
+import { createPendingDiagramArtifact, generateDiagramArtifact, getPreviousUserQuestion, imageArtifactStatus, normalizeDiagramType, parseMessageSources, queueDiagramArtifactGeneration, requireReadableAssistantMessage } from "./shared";
 
 const router = Router();
 
@@ -46,7 +46,25 @@ router.post("/chat/messages/:id/artifacts/generate", async (req: Request, res: R
   try {
     const messageId = req.params.id as string;
     const diagramType = normalizeDiagramType(req.body?.type ?? req.body?.diagram_type);
-    const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, req.body?.title);
+    const artifact = createPendingDiagramArtifact(req, messageId, diagramType, req.body?.title);
+    queueDiagramArtifactGeneration(req, artifact.id, messageId, diagramType, req.body?.title);
+    res.status(202);
+    sendSuccess(res, formatArtifact(artifact), req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/chat/artifacts/:id - 轮询单个产物生成状态
+router.get("/chat/artifacts/:id", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const artifactId = req.params.id as string;
+    const artifact = getArtifactById(artifactId);
+    if (!artifact || artifact.status === "deleted") {
+      throw new AppError(ErrorCodes.MESSAGE_NOT_FOUND, "Artifact 不存在。", 404);
+    }
+
+    requireReadableAssistantMessage(req, artifact.message_id, "查看");
     sendSuccess(res, formatArtifact(artifact), req.requestId);
   } catch (err) {
     next(err);
@@ -114,43 +132,37 @@ router.post("/chat/artifacts/:id/regenerate", async (req: Request, res: Response
 
     requireReadableAssistantMessage(req, artifact.message_id, "重新生成");
     const diagramType = normalizeDiagramType(req.body?.type ?? req.body?.diagram_type ?? artifact.type);
-    const { diagram, sourceIds, confidence, quality } = await buildDiagramForMessage(req, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
     const updated = updateArtifact(artifactId, {
       type: diagramType,
-      renderer: artifactRenderer(diagram),
+      renderer: "diagram-ir",
       title: typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : artifact.title,
-      summary: artifactSummary(diagram),
-      reason: "重新生成结构化图解。",
-      status: "ready",
-      confidence: quality.artifactConfidence,
-      payload: diagram,
-      sourceIds,
+      summary: "图解重新生成已进入后台队列。",
+      reason: "主流程不等待重生成结果，完成后通过 artifact 状态轮询查看。",
+      status: "pending",
+      confidence: 0,
+      payload: {
+        type: diagramType,
+        title: typeof req.body?.title === "string" && req.body.title.trim() ? req.body.title.trim() : artifact.title,
+        status: "pending",
+      },
+      sourceIds: [],
       metadata: {
         ...JSON.parse(artifact.metadata_json || "{}"),
         type: diagramType,
-        objective: diagram.objective,
-        layout_hint: diagram.layout_hint,
-        lanes: diagram.lanes ?? [],
-        lane_count: diagram.lanes?.length ?? 0,
-        message_confidence: confidence,
-        diagram_confidence: diagram.confidence,
-        artifact_confidence: quality.artifactConfidence,
-        quality_score: quality.qualityScore,
-        can_generate: quality.canGenerate,
-        quality_warnings: diagramQualityWarnings(diagram),
-        validation: quality.validation,
+        async_status: "queued",
+        queued_at: new Date().toISOString(),
         regenerated_from: artifactId,
       },
     });
+    queueDiagramArtifactGeneration(req, artifactId, artifact.message_id, diagramType, req.body?.title ?? artifact.title);
 
     auditFromRequest(req, "chat.artifact.regenerate", "chat_artifact", artifactId, {
       message_id: artifact.message_id,
       type: diagramType,
-      quality_score: quality.qualityScore,
-      can_generate: quality.canGenerate,
-      confidence: quality.artifactConfidence,
+      async_status: "queued",
     });
 
+    res.status(202);
     sendSuccess(res, formatArtifact(updated!), req.requestId);
   } catch (err) {
     next(err);

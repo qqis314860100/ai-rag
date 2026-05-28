@@ -8,7 +8,7 @@ import { formatMessage, getMessageById, listMessagesBySession } from "../../db/c
 import { getMessageSourceDetail } from "../../db/messageSources";
 import { isNoteScope } from "../../db/chatNotes";
 import type { NoteTarget } from "../../db/chatNotes";
-import { createArtifact, formatArtifact } from "../../db/chatArtifacts";
+import { createArtifact, formatArtifact, getArtifactById, updateArtifact } from "../../db/chatArtifacts";
 import type { ChatArtifactRow } from "../../db/chatArtifacts";
 
 export { buildAnswerMessageMetadata } from "./answerMetadata";
@@ -535,6 +535,176 @@ export async function generateDiagramArtifact(
   return { diagram, artifact, sourceIds, existing };
 }
 
+function artifactMetadata(row: ChatArtifactRow): Record<string, unknown> {
+  try {
+    return JSON.parse(row.metadata_json || "{}") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function diagramFailurePayload(error: unknown): {
+  message: string;
+  code?: string;
+  detail?: Record<string, unknown>;
+} {
+  if (error instanceof AppError) {
+    return {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+    };
+  }
+  return {
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+export function createPendingDiagramArtifact(
+  req: Request,
+  messageId: string,
+  diagramType: "mindmap" | "flowchart",
+  titleInput?: unknown
+): ChatArtifactRow {
+  const { existing, session } = requireReadableAssistantMessage(req, messageId, "生成图解");
+  const title = typeof titleInput === "string" && titleInput.trim()
+    ? titleInput.trim()
+    : session.title || "AI 整理";
+  const artifact = createArtifact({
+    sessionId: existing.session_id,
+    messageId,
+    type: diagramType,
+    renderer: "diagram-ir",
+    title,
+    summary: "图解生成已进入后台队列。",
+    reason: "主回答优先返回，结构化图解在后台异步生成。",
+    status: "pending",
+    confidence: 0,
+    payload: {
+      type: diagramType,
+      title,
+      status: "pending",
+    },
+    sourceIds: [],
+    metadata: {
+      type: diagramType,
+      async_status: "queued",
+      queued_at: new Date().toISOString(),
+      request_id: req.requestId,
+      user_id: req.user?.id,
+    },
+  });
+
+  auditFromRequest(req, "chat.artifact.queue", "chat_message", messageId, {
+    session_id: existing.session_id,
+    artifact_id: artifact.id,
+    type: diagramType,
+  });
+
+  return artifact;
+}
+
+export function queueDiagramArtifactGeneration(
+  req: Request,
+  artifactId: string,
+  messageId: string,
+  diagramType: "mindmap" | "flowchart",
+  titleInput?: unknown
+): void {
+  setImmediate(async () => {
+    const queued = getArtifactById(artifactId);
+    if (!queued || queued.status === "deleted") return;
+
+    updateArtifact(artifactId, {
+      status: "pending",
+      metadata: {
+        ...artifactMetadata(queued),
+        async_status: "running",
+        started_at: new Date().toISOString(),
+      },
+    });
+
+    try {
+      const { diagram, existing, sourceIds, title, confidence, quality } = await buildDiagramForMessage(
+        req,
+        messageId,
+        diagramType,
+        titleInput
+      );
+      const updated = getArtifactById(artifactId);
+      updateArtifact(artifactId, {
+        type: diagramType,
+        renderer: artifactRenderer(diagram),
+        title,
+        summary: artifactSummary(diagram),
+        reason: diagram.reason || "基于回答正文和引用证据生成结构化图解。",
+        status: "ready",
+        confidence: quality.artifactConfidence,
+        payload: diagram,
+        sourceIds,
+        metadata: {
+          ...artifactMetadata(updated ?? queued),
+          type: diagramType,
+          async_status: "succeeded",
+          completed_at: new Date().toISOString(),
+          objective: diagram.objective,
+          layout_hint: diagram.layout_hint,
+          lanes: diagram.lanes ?? [],
+          lane_count: diagram.lanes?.length ?? 0,
+          message_confidence: confidence,
+          diagram_confidence: diagram.confidence,
+          artifact_confidence: quality.artifactConfidence,
+          quality_score: quality.qualityScore,
+          can_generate: quality.canGenerate,
+          quality_warnings: diagramQualityWarnings(diagram),
+          validation: quality.validation,
+        },
+      });
+
+      auditFromRequest(req, "chat.artifact.generate", "chat_message", messageId, {
+        session_id: existing.session_id,
+        artifact_id: artifactId,
+        type: diagramType,
+        node_count: diagram.nodes.length,
+        edge_count: diagram.edges.length,
+        source_count: sourceIds.length,
+        quality_score: quality.qualityScore,
+        can_generate: quality.canGenerate,
+        confidence: quality.artifactConfidence,
+      });
+    } catch (error) {
+      const current = getArtifactById(artifactId);
+      const failure = diagramFailurePayload(error);
+      updateArtifact(artifactId, {
+        status: "failed",
+        summary: "图解生成失败。",
+        reason: failure.message,
+        payload: {
+          type: diagramType,
+          status: "failed",
+          failure_reason: failure.message,
+          failure_code: failure.code,
+          detail: failure.detail,
+        },
+        metadata: {
+          ...artifactMetadata(current ?? queued),
+          async_status: "failed",
+          completed_at: new Date().toISOString(),
+          failure_code: failure.code,
+          failure_reason: failure.message,
+          failure_detail: failure.detail,
+        },
+      });
+      auditFromRequest(req, "chat.artifact.generate_failed", "chat_message", messageId, {
+        artifact_id: artifactId,
+        type: diagramType,
+        error: failure.message,
+        code: failure.code,
+      });
+    }
+  });
+}
+
 function plannedDiagramType(plan: RagVisualArtifactPlan): "mindmap" | "flowchart" | null {
   if (plan.type === "mindmap" || plan.type === "flowchart") return plan.type;
   return null;
@@ -557,7 +727,8 @@ export async function createAutoArtifactsFromVisualPlan(
     const diagramType = plannedDiagramType(plan);
     if (!diagramType) continue;
     try {
-      const { artifact } = await generateDiagramArtifact(req, messageId, diagramType, plan.title);
+      const artifact = createPendingDiagramArtifact(req, messageId, diagramType, plan.title);
+      queueDiagramArtifactGeneration(req, artifact.id, messageId, diagramType, plan.title);
       artifacts.push(formatArtifact(artifact));
     } catch (error) {
       // 自动产物不能影响主回答保存，失败原因留在审计和回答 metadata 中供排查。

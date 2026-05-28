@@ -67,6 +67,7 @@ import {
   submitKnowledgeCardForReview,
 } from "../services/knowledgeCardReviewService";
 import { auditFromRequest } from "../services/auditService";
+import { createAsyncJob, formatAsyncJob, getAsyncJob, runAsyncJob } from "../services/asyncJobService";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 
@@ -84,6 +85,14 @@ function currentUser(req: Request): { id: string; name: string } {
     id: req.user?.id || "anonymous",
     name: req.user?.name || "匿名",
   };
+}
+
+function sendQueuedJob(res: Response, job: ReturnType<typeof createAsyncJob>, requestId?: string): void {
+  res.status(202);
+  sendSuccess(res, {
+    job: formatAsyncJob(job),
+    poll_url: `/api/knowledge/jobs/${job.id}`,
+  }, requestId);
 }
 
 function requireReadableMessage(req: Request, messageId: string) {
@@ -153,6 +162,22 @@ function knowledgeAssetStatusesForMessages(messageIds: string[]) {
   }
   return result;
 }
+
+router.get(
+  "/knowledge/jobs/:id",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const job = getAsyncJob(String(req.params.id));
+      if (!job) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "异步任务不存在或已过期。", 404);
+      }
+      sendSuccess(res, formatAsyncJob(job), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 router.get(
   "/knowledge/terms/contract",
@@ -595,20 +620,33 @@ router.post(
   requirePermission("evaluation.run"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await generateKnowledgeGapClusterDrafts({
+      const options = {
         minFrequency: queryNumber(req.body.min_frequency, 2),
         maxClusters: queryNumber(req.body.max_clusters, 20),
         sampleLimit: queryNumber(req.body.sample_limit, 200),
         persist: req.body.persist !== false,
         requestId: req.requestId,
         userId: req.user?.id,
+      };
+      const job = createAsyncJob("knowledge_gap.cluster_drafts", {
+        min_frequency: options.minFrequency,
+        max_clusters: options.maxClusters,
+        sample_limit: options.sampleLimit,
+        persist: options.persist,
       });
-      auditFromRequest(req, "knowledge_gap.cluster_drafts.generate", "knowledge_gap", "batch", {
-        cluster_count: result.clusters.length,
-        persisted_count: result.persisted.length,
-        ignored_count: result.ignored_count,
+
+      runAsyncJob(job.id, async () => {
+        const result = await generateKnowledgeGapClusterDrafts(options);
+        auditFromRequest(req, "knowledge_gap.cluster_drafts.generate", "knowledge_gap", "batch", {
+          job_id: job.id,
+          cluster_count: result.clusters.length,
+          persisted_count: result.persisted.length,
+          ignored_count: result.ignored_count,
+        });
+        return result;
       });
-      sendSuccess(res, result, req.requestId);
+
+      sendQueuedJob(res, job, req.requestId);
     } catch (err) {
       next(err);
     }
@@ -736,13 +774,24 @@ router.post(
         throw new AppError(ErrorCodes.VALIDATION_ERROR, "必须指定 message_id。", 400);
       }
       requireReadableMessage(req, messageId);
-      const faq = createKnowledgeFaqDraftFromMessage(messageId, currentUser(req));
-      auditFromRequest(req, "knowledge_faq.draft.create", "knowledge_faq", faq.id, {
+      const user = currentUser(req);
+      const job = createAsyncJob("knowledge_faq.draft_from_message", {
         message_id: messageId,
-        source_count: faq.source_refs.length,
-        frequency_count: faq.frequency_count,
+        user_id: user.id,
       });
-      sendSuccess(res, faq, req.requestId);
+
+      runAsyncJob(job.id, async () => {
+        const faq = createKnowledgeFaqDraftFromMessage(messageId, user);
+        auditFromRequest(req, "knowledge_faq.draft.create", "knowledge_faq", faq.id, {
+          job_id: job.id,
+          message_id: messageId,
+          source_count: faq.source_refs.length,
+          frequency_count: faq.frequency_count,
+        });
+        return faq;
+      });
+
+      sendQueuedJob(res, job, req.requestId);
     } catch (err) {
       next(err);
     }
@@ -761,20 +810,32 @@ router.post(
 
       requireReadableMessage(req, messageId);
       const user = currentUser(req);
-      const card = createKnowledgeCardDraftFromMessage(messageId, user, {
-        includeSessionNotes: req.body.include_session_notes === true,
-      });
-
-      auditFromRequest(req, "knowledge_card.draft.create", "knowledge_card", card.id, {
+      const includeSessionNotes = req.body.include_session_notes === true;
+      const job = createAsyncJob("knowledge_card.draft_from_message", {
         message_id: messageId,
-        session_id: card.metadata.session_id,
-        source_count: card.source_refs.length,
-        note_count: card.metadata.note_count,
-        artifact_count: card.metadata.artifact_count,
-        confidence: card.metadata.confidence,
+        user_id: user.id,
+        include_session_notes: includeSessionNotes,
       });
 
-      sendSuccess(res, card, req.requestId);
+      runAsyncJob(job.id, async () => {
+        const card = createKnowledgeCardDraftFromMessage(messageId, user, {
+          includeSessionNotes,
+        });
+
+        auditFromRequest(req, "knowledge_card.draft.create", "knowledge_card", card.id, {
+          job_id: job.id,
+          message_id: messageId,
+          session_id: card.metadata.session_id,
+          source_count: card.source_refs.length,
+          note_count: card.metadata.note_count,
+          artifact_count: card.metadata.artifact_count,
+          confidence: card.metadata.confidence,
+        });
+
+        return card;
+      });
+
+      sendQueuedJob(res, job, req.requestId);
     } catch (err) {
       next(err);
     }
