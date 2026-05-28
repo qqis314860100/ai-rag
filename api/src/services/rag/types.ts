@@ -101,6 +101,43 @@ export interface RagAnswerQueryRewrite {
   reason?: string;
   signals?: string[];
   history_turns?: number;
+  query_understanding?: RagQueryUnderstanding;
+}
+
+export interface RagQueryCandidateTerm {
+  term?: string;
+  matched_text?: string;
+  matched_kind?: string;
+  source?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface RagQuerySpellCorrection {
+  original?: string;
+  correction?: string;
+  source?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface RagQueryAmbiguity {
+  is_ambiguous?: boolean;
+  candidates?: string[];
+  reason?: string;
+}
+
+export interface RagQueryUnderstanding {
+  original_query?: string;
+  rewritten_query?: string;
+  intent?: string;
+  candidate_terms?: RagQueryCandidateTerm[];
+  spell_corrections?: RagQuerySpellCorrection[];
+  ambiguity?: RagQueryAmbiguity;
+  confidence?: number;
+  needs_confirmation?: boolean;
+  grey_answer_hint?: string;
+  trace?: Array<Record<string, unknown>>;
 }
 
 export interface RagAnswerCitation {
@@ -135,6 +172,7 @@ export interface RagAnswerIR {
   claims?: RagAnswerClaim[];
   citations?: RagAnswerCitation[];
   query_rewrite?: RagAnswerQueryRewrite;
+  query_understanding?: RagQueryUnderstanding;
   confidence?: number;
   warnings?: RagAnswerWarning[];
   metadata?: Record<string, unknown>;

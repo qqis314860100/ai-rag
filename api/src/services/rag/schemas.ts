@@ -21,6 +21,36 @@ const ragAnswerWarningSchema = z.object({
   citation_ids: z.array(z.string()).optional(),
 }).passthrough();
 
+const ragQueryUnderstandingSchema = z.object({
+  original_query: z.string().optional(),
+  rewritten_query: z.string().optional(),
+  intent: z.string().optional(),
+  candidate_terms: z.array(z.object({
+    term: z.string().optional(),
+    matched_text: z.string().optional(),
+    matched_kind: z.string().optional(),
+    source: z.string().optional(),
+    confidence: z.number().optional(),
+    reason: z.string().optional(),
+  }).passthrough()).optional(),
+  spell_corrections: z.array(z.object({
+    original: z.string().optional(),
+    correction: z.string().optional(),
+    source: z.string().optional(),
+    confidence: z.number().optional(),
+    reason: z.string().optional(),
+  }).passthrough()).optional(),
+  ambiguity: z.object({
+    is_ambiguous: z.boolean().optional(),
+    candidates: z.array(z.string()).optional(),
+    reason: z.string().optional(),
+  }).passthrough().optional(),
+  confidence: z.number().optional(),
+  needs_confirmation: z.boolean().optional(),
+  grey_answer_hint: z.string().optional(),
+  trace: z.array(unknownRecordSchema).optional(),
+}).passthrough();
+
 const ragAnswerIRSchema = z.object({
   schema_version: z.string().optional(),
   status: z.string().optional(),
@@ -49,7 +79,9 @@ const ragAnswerIRSchema = z.object({
     reason: z.string().optional(),
     signals: z.array(z.string()).optional(),
     history_turns: z.number().optional(),
+    query_understanding: ragQueryUnderstandingSchema.optional(),
   }).passthrough().optional(),
+  query_understanding: ragQueryUnderstandingSchema.optional(),
   confidence: z.number().optional(),
   warnings: z.array(ragAnswerWarningSchema).optional(),
   metadata: unknownRecordSchema.optional(),

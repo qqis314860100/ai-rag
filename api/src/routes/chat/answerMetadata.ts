@@ -1,4 +1,4 @@
-import type { RagAnswerIR, RagAnswerQueryRewrite, RagVisualPlan } from "../../services/ragClient";
+import type { RagAnswerIR, RagAnswerQueryRewrite, RagQueryUnderstanding, RagVisualPlan } from "../../services/ragClient";
 
 type AnswerMessageMetadataInput = {
   originalQuestion: string;
@@ -73,6 +73,23 @@ function buildAnswerIrSummary(answerIr: RagAnswerIR | null | undefined) {
   };
 }
 
+function buildQueryUnderstandingSummary(queryUnderstanding: RagQueryUnderstanding | null | undefined) {
+  if (!queryUnderstanding) return null;
+
+  return {
+    original_query: queryUnderstanding.original_query ?? "",
+    rewritten_query: queryUnderstanding.rewritten_query ?? "",
+    intent: queryUnderstanding.intent ?? "general",
+    candidate_terms: queryUnderstanding.candidate_terms ?? [],
+    spell_corrections: queryUnderstanding.spell_corrections ?? [],
+    ambiguity: queryUnderstanding.ambiguity ?? { is_ambiguous: false, candidates: [], reason: "" },
+    confidence: queryUnderstanding.confidence ?? 0,
+    needs_confirmation: queryUnderstanding.needs_confirmation ?? false,
+    grey_answer_hint: queryUnderstanding.grey_answer_hint ?? "",
+    trace: queryUnderstanding.trace ?? [],
+  };
+}
+
 function displayConfidence(input: AnswerMessageMetadataInput): number {
   if (input.answerIr?.status && input.answerIr.status !== "answered") return 0;
   if (typeof input.answerIr?.confidence === "number") return input.answerIr.confidence;
@@ -81,6 +98,9 @@ function displayConfidence(input: AnswerMessageMetadataInput): number {
 
 export function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): Record<string, unknown> {
   const queryRewrite = input.answerIr?.query_rewrite ?? input.queryRewrite ?? null;
+  const queryUnderstanding = buildQueryUnderstandingSummary(
+    input.answerIr?.query_understanding ?? queryRewrite?.query_understanding ?? null
+  );
   const rewrittenQuestion = queryRewrite?.rewritten_query || input.originalQuestion;
   const confidence = displayConfidence(input);
 
@@ -97,7 +117,11 @@ export function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): R
       rewrite_reason: queryRewrite?.reason ?? "",
       rewrite_signals: queryRewrite?.signals ?? [],
       history_turns: queryRewrite?.history_turns ?? 0,
+      understanding_confidence: queryUnderstanding?.confidence ?? 0,
+      needs_confirmation: queryUnderstanding?.needs_confirmation ?? false,
+      grey_answer_hint: queryUnderstanding?.grey_answer_hint ?? "",
     },
+    query_understanding: queryUnderstanding,
     answer_ir_summary: buildAnswerIrSummary(input.answerIr),
     citation_coverage: buildCitationCoverage(input.answerIr, input.sources ?? []),
     visual_plan: input.visualPlan ?? null,
