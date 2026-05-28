@@ -1,12 +1,30 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, Search, FileCheck, MessageSquare, FlaskConical, Wrench, Zap, ShieldCheck, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
-import type { ApiResponse, ChatArtifact, ChatMessage, DiagramType, Source } from "../types";
+import { useState } from "react";
+import { ThumbsUp, ThumbsDown, Copy, Trash2, Check, X, StopCircle, FileSearch, ChevronRight, RefreshCw, AlertCircle, FileCheck, MessageSquare, ChevronDown, Star, Pencil, Brain, Workflow, Loader2, BookMarked, CircleHelp } from "lucide-react";
+import type { ChatMessage, DiagramType, Source } from "../types";
 import { MarkdownContent } from "./MarkdownContent";
 import ArtifactCard from "./ArtifactCard";
 import ArtifactModal from "./ArtifactModal";
-import { api } from "../../../services/api";
 import { showToast } from "../../../components/ui/Toast";
 import { ActionButton } from "../../../components/ui";
+import { ChatEmptyWelcome } from "./ChatEmptyWelcome";
+import { StreamStages } from "./StreamStages";
+import {
+  assetStatusLabel,
+  canUsePersistedAssistantActions,
+  canUsePersistedUserActions,
+  formatTime,
+  getDiagramActionLabel,
+  getDiagramButtonLabel,
+  getDiagramKey,
+  getPersistedMessageId,
+  isAnswerReadyForRefinement,
+  isConfirmedAnswer,
+  mergeArtifacts,
+} from "./chatThreadUtils";
+import { useChatThreadScroll } from "../hooks/useChatThreadScroll";
+import { useMessageArtifacts } from "../hooks/useMessageArtifacts";
+import { useMessageFavorites } from "../hooks/useMessageFavorites";
+import { useMessageFeedback } from "../hooks/useMessageFeedback";
 
 interface ChatThreadProps {
   messages: ChatMessage[];
@@ -29,334 +47,19 @@ interface ChatThreadProps {
   onCreateKnowledgeAssetDraft?: (messageId: string, type: "card" | "faq") => Promise<void>;
 }
 
-function formatTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-}
-
-function canUsePersistedAssistantActions(messageId: string) {
-  return !messageId.startsWith("stream-") && !messageId.startsWith("interrupted-");
-}
-
-function canUsePersistedUserActions(messageId: string) {
-  return !messageId.startsWith("user-") && !messageId.startsWith("pending-");
-}
-
-function getPersistedMessageId(message: ChatMessage) {
-  return message.persistedId || message.id;
-}
-
-function getDiagramKey(messageId: string, diagramType: DiagramType) {
-  return `${messageId}:${diagramType}`;
-}
-
-function getDiagramButtonLabel(diagramType: DiagramType, hasData: boolean) {
-  if (diagramType === "mindmap") return hasData ? "查看思维导图" : "生成思维导图";
-  return hasData ? "查看流程图" : "生成流程图";
-}
-
-function getDiagramActionLabel(diagramType: DiagramType, hasData: boolean) {
-  if (diagramType === "mindmap") return hasData ? "查看导图" : "思维导图";
-  return hasData ? "查看流程" : "流程图";
-}
-
-function assetStatusLabel(status?: string) {
-  if (status === "published") return "已发布";
-  if (status === "pending_review") return "待审核";
-  if (status === "returned") return "已退回";
-  if (status === "archived") return "已归档";
-  if (status === "ai_draft") return "AI 草稿";
-  return "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-const UNCERTAIN_ANSWER_PATTERN = /(?:暂时无法确认|无法确认|无法回答|没有足够(?:信息|证据)|信息不足|不能确定|请补充|问题不够具体)/;
-
-function isAnswerReadyForRefinement(message: ChatMessage) {
-  const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
-  const status = typeof answerSummary?.status === "string" ? answerSummary.status : "";
-  if (status && status !== "answered") return false;
-  if (typeof message.confidence === "number" && message.confidence > 0 && message.confidence < 0.6) return false;
-  return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
-}
-
-function answerStatus(message: ChatMessage) {
-  const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
-  return typeof answerSummary?.status === "string" ? answerSummary.status : "";
-}
-
-function isConfirmedAnswer(message: ChatMessage) {
-  const status = answerStatus(message);
-  if (status && status !== "answered") return false;
-  return !UNCERTAIN_ANSWER_PATTERN.test(message.content);
-}
-
-type DiagramState = {
-  loading: boolean;
-  data?: ChatArtifact;
-  error?: string;
-};
-
-function mergeArtifacts(base: ChatArtifact[] | undefined, extra: ChatArtifact[] | undefined) {
-  const byId = new Map<string, ChatArtifact>();
-  [...(base || []), ...(extra || [])].forEach((artifact) => {
-    if (artifact.status !== "deleted") byId.set(artifact.id, artifact);
-  });
-  return Array.from(byId.values());
-}
-
-// Empty welcome state with categorized prompt suggestions
-function EmptyWelcome({ onQuestion }: { onQuestion: (q: string) => void }) {
-  const categories = [
-    {
-      icon: FlaskConical, label: "测试标准",
-      prompts: ["绝缘电阻测试的标准是什么？", "OCV 测试包含哪些流程？", "气密测试参数如何设定？"],
-    },
-    {
-      icon: Wrench, label: "异常排查",
-      prompts: ["焊接飞溅的常见原因有哪些？", "CCD 检测误判怎么分析？", "绝缘不良如何快速定位？"],
-    },
-    {
-      icon: Zap, label: "设备操作",
-      prompts: ["Busbar 激光焊接关键参数", "电芯分选的标准是什么？", "模组堆叠精度要求是多少？"],
-    },
-    {
-      icon: ShieldCheck, label: "安全规范",
-      prompts: ["EOL 测试安全注意事项", "高压测试防护要求", "化学品存储规范"],
-    },
-  ];
-
-  return (
-    <div className="flex flex-col items-center py-12 px-4 text-center animate-fade-in-up">
-      <div className="w-16 h-16 rounded-2xl bg-accent-soft flex items-center justify-center mb-6 shadow-sm-soft">
-        <FileSearch className="h-7 w-7 text-accent" />
-      </div>
-      <h2 className="text-lg font-semibold text-text tracking-tight">电池产线知识库</h2>
-      <p className="mt-2 max-w-lg text-[15px] text-text-secondary leading-relaxed">
-        基于产线技术文档，为你提供即时、可追溯的工艺问答。
-        <br />
-        选择一个下方问题开始，或直接输入你的疑问。
-      </p>
-
-      {/* Categorized prompts */}
-      <div className="mt-8 w-full max-w-2xl grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {categories.map(({ icon: Icon, label, prompts }) => (
-          <div key={label} className="rounded-xl border border-border bg-surface-page p-4 text-left hover:border-accent/25 hover:shadow-sm-soft transition-all duration-normal">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="flex items-center justify-center w-6 h-6 rounded-lg bg-accent-soft text-accent">
-                <Icon className="h-3.5 w-3.5" />
-              </span>
-              <span className="text-sm font-semibold text-text">{label}</span>
-            </div>
-            <div className="space-y-1.5">
-              {prompts.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => onQuestion(q)}
-                  className="w-full text-left px-3 py-1.5 rounded-lg text-[13px] text-text-secondary hover:bg-accent-soft/50 hover:text-accent transition-all duration-fast"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-8 text-[11px] text-text-muted">
-        AI 生成内容仅供参考，请以正式文档为准
-      </p>
-    </div>
-  );
-}
-
-// Animated multi-stage loading indicator
-function StreamStages() {
-  const [stage, setStage] = useState(0);
-
-  useEffect(() => {
-    const t1 = setTimeout(() => setStage(1), 600);
-    const t2 = setTimeout(() => setStage(2), 1600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, []);
-
-  const stages = [
-    { icon: Search, label: "检索知识库...", color: "text-accent" },
-    { icon: FileCheck, label: "匹配相关文档...", color: "text-accent" },
-    { icon: MessageSquare, label: "生成答案中...", color: "text-accent" },
-  ];
-
-  return (
-    <div className="flex flex-col gap-2">
-      {stages.map((s, i) => {
-        const isActive = i <= stage;
-        const isCurrent = i === stage;
-        const StepIcon = s.icon;
-        return (
-          <div
-            key={i}
-            className={`flex items-center gap-2.5 text-sm transition-all duration-normal ${
-              isActive ? "text-text-secondary" : "text-text-muted/30"
-            } ${isCurrent ? "font-medium" : ""}`}
-          >
-            <span className={`flex items-center justify-center w-5 h-5 rounded-full transition-all duration-normal ${
-              isCurrent ? "bg-accent-soft text-accent animate-pulseGlow" :
-              i < stage ? "bg-success-soft text-success" :
-              "bg-surface-hover text-text-muted/30"
-            }`}>
-              {i < stage ? <Check className="h-3 w-3" /> : <StepIcon className="h-3 w-3" />}
-            </span>
-            <span>{s.label}</span>
-            {isCurrent && (
-              <span className="flex gap-1 ml-1">
-                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:0ms]" />
-                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:150ms]" />
-                <span className="h-1 w-1 rounded-full bg-accent animate-bounce [animation-delay:300ms]" />
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function ChatThread({ messages, loading, streamingContent, streamError, streamStopped, scrollToBottomSignal, selectedSources, onSelectSources, onFollowUp, onCancelStream, onInitialQuestion, onRetry, onEditUser, onDeleteMessage, onSourceAnchor, assetDraftStatusByMessage = {}, onCreateKnowledgeAssetDraft }: ChatThreadProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [feedbackCounts, setFeedbackCounts] = useState<Record<string, { up: number; down: number; userVote?: string }>>({});
-  const [voting, setVoting] = useState<Record<string, boolean>>({});
-  const [feedbackReason, setFeedbackReason] = useState<string | null>(null); // message id needing reason
-  const [favoriteStatus, setFavoriteStatus] = useState<Record<string, boolean>>({});
-  const [favoriting, setFavoriting] = useState<Record<string, boolean>>({});
-  const [diagramStates, setDiagramStates] = useState<Record<string, DiagramState>>({});
-  const [generatedArtifacts, setGeneratedArtifacts] = useState<Record<string, ChatArtifact[]>>({});
-  const [activeArtifact, setActiveArtifact] = useState<ChatArtifact | null>(null);
-
-  const prevContentLen = useRef(0);
-  const scrollRaf = useRef<number>(0);
-  const wasLoading = useRef(false);
-  const containerRef = useRef<HTMLElement | null>(null);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const nearBottom = useRef(true);
-  const lastFeedbackFetchKey = useRef("");
-  const lastFavoriteFetchKey = useRef("");
+  const { bottomRef, showScrollBtn, scrollToBottom } = useChatThreadScroll({ loading, streamingContent, scrollToBottomSignal });
 
   const persistedAssistantMessageIds = messages
     .filter((m) => m.role === "assistant" && !m.streaming && canUsePersistedAssistantActions(getPersistedMessageId(m)))
     .map((m) => getPersistedMessageId(m));
   const persistedAssistantMessageKey = persistedAssistantMessageIds.join(",");
-
-  // Find and observe the scroll container
-  useEffect(() => {
-    const el = bottomRef.current?.closest(".chat-scroll-area") as HTMLElement | null;
-    if (!el) return;
-    containerRef.current = el;
-
-    const handleScroll = () => {
-      const threshold = 80;
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      nearBottom.current = distFromBottom <= threshold;
-      setShowScrollBtn(!nearBottom.current);
-    };
-
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    const c = containerRef.current;
-    if (c) {
-      c.scrollTo({ top: c.scrollHeight, behavior });
-      nearBottom.current = true;
-      setShowScrollBtn(false);
-      return;
-    }
-
-    bottomRef.current?.scrollIntoView({ block: "end", behavior });
-  }, []);
-
-  useEffect(() => {
-    if (!scrollToBottomSignal) return;
-
-    let raf = 0;
-    const timer = window.setTimeout(() => scrollToBottom("auto"), 180);
-    raf = requestAnimationFrame(() => {
-      scrollToBottom("smooth");
-    });
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.clearTimeout(timer);
-    };
-  }, [scrollToBottom, scrollToBottomSignal]);
-
-  // Smart scroll: only auto-scroll when user is near bottom
-  useEffect(() => {
-    if (loading) {
-      wasLoading.current = true;
-      if (streamingContent.length > prevContentLen.current && !scrollRaf.current) {
-        scrollRaf.current = requestAnimationFrame(() => {
-          if (nearBottom.current) {
-            scrollToBottom();
-          }
-          scrollRaf.current = 0;
-        });
-      }
-    } else if (wasLoading.current) {
-      wasLoading.current = false;
-      if (nearBottom.current) {
-        // 等一次 layout（finalize 写回 messages）后再追加一次滚动，
-        // 用 rAF 链替代旧的 3 次 setTimeout(0/100/350ms) 兜底。
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => scrollToBottom("auto"));
-        });
-      }
-    }
-    prevContentLen.current = streamingContent.length;
-    return () => { if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current); };
-  }, [streamingContent, loading, scrollToBottom]);
-
-  // Fetch feedback counts — skip during streaming to avoid flicker
-  const streamJustEnded = useRef(false);
-  useEffect(() => {
-    if (loading) { streamJustEnded.current = true; return; }
-    if (!persistedAssistantMessageKey) {
-      lastFeedbackFetchKey.current = "";
-      setFeedbackCounts({});
-      return;
-    }
-    if (lastFeedbackFetchKey.current === persistedAssistantMessageKey) return;
-
-    // Delay feedback fetch slightly after stream ends to avoid flicker
-    const timer = setTimeout(() => {
-      const msgIds = persistedAssistantMessageKey.split(",");
-      lastFeedbackFetchKey.current = persistedAssistantMessageKey;
-      api.get<{ data: Record<string, { up: number; down: number; userVote?: string }> }>(`/stats/feedback-counts?message_ids=${msgIds.join(",")}`)
-        .then(res => setFeedbackCounts(res.data || {}))
-        .catch(() => {});
-    }, streamJustEnded.current ? 300 : 0);
-    streamJustEnded.current = false;
-    return () => clearTimeout(timer);
-  }, [loading, persistedAssistantMessageKey]);
-
-  useEffect(() => {
-    if (!persistedAssistantMessageKey) {
-      lastFavoriteFetchKey.current = "";
-      setFavoriteStatus({});
-      return;
-    }
-    if (lastFavoriteFetchKey.current === persistedAssistantMessageKey) return;
-
-    lastFavoriteFetchKey.current = persistedAssistantMessageKey;
-    api.get<{ data: Record<string, boolean> }>(`/favorites/status?message_ids=${persistedAssistantMessageKey}`)
-      .then((res) => setFavoriteStatus(res.data || {}))
-      .catch(() => {});
-  }, [persistedAssistantMessageKey]);
+  const { feedbackCounts, voting, feedbackReason, setFeedbackReason, handleFeedback, submitFeedbackReason } =
+    useMessageFeedback(persistedAssistantMessageKey, loading);
+  const { favoriteStatus, favoriting, handleFavorite } = useMessageFavorites(persistedAssistantMessageKey);
+  const { diagramStates, generatedArtifacts, activeArtifact, setActiveArtifact, generateDiagram } = useMessageArtifacts();
 
   const handleCopy = (content: string) => {
     navigator.clipboard.writeText(content);
@@ -376,149 +79,8 @@ export default function ChatThread({ messages, loading, streamingContent, stream
     onDeleteMessage(msg.id);
   };
 
-  const handleFavorite = async (messageId: string) => {
-    if (favoriting[messageId]) return;
-
-    const isSaved = !!favoriteStatus[messageId];
-    setFavoriting((prev) => ({ ...prev, [messageId]: true }));
-    setFavoriteStatus((prev) => ({ ...prev, [messageId]: !isSaved }));
-
-    try {
-      if (isSaved) {
-        await api.delete(`/favorites/${encodeURIComponent(messageId)}`);
-        showToast("success", "已取消收藏");
-      } else {
-        await api.post("/favorites", { message_id: messageId });
-        showToast("success", "已收藏");
-      }
-    } catch {
-      setFavoriteStatus((prev) => ({ ...prev, [messageId]: isSaved }));
-      showToast("error", "收藏操作失败");
-    } finally {
-      setFavoriting((prev) => ({ ...prev, [messageId]: false }));
-    }
-  };
-
-  const handleFeedback = async (messageId: string, rating: "up" | "down") => {
-    if (voting[messageId]) return;
-    const current = feedbackCounts[messageId] || { up: 0, down: 0 };
-    const isToggle = current.userVote === rating;
-
-    if (isToggle) {
-      setVoting(v => ({ ...v, [messageId]: true }));
-      try {
-        setFeedbackCounts(f => ({ ...f, [messageId]: { ...current, userVote: undefined, [rating]: Math.max(0, current[rating] - 1) } }));
-        showToast("success", "已取消反馈");
-      } catch {
-        showToast("error", "反馈提交失败");
-      } finally {
-        setVoting(v => ({ ...v, [messageId]: false }));
-      }
-      return;
-    }
-
-    if (rating === "down") {
-      // Ask for reason before submitting
-      setFeedbackReason(messageId);
-      return;
-    }
-
-    // Thumbs-up — submit immediately
-    setVoting(v => ({ ...v, [messageId]: true }));
-    try {
-      await api.post("/feedback", { message_id: messageId, rating });
-      setFeedbackCounts(f => ({
-        ...f,
-        [messageId]: {
-          up: current.up + 1 - (current.userVote === "up" ? 1 : 0),
-          down: current.down - (current.userVote === "down" ? 1 : 0),
-          userVote: rating,
-        },
-      }));
-      showToast("success", "感谢点赞！");
-    } catch {
-      showToast("error", "反馈提交失败");
-    } finally {
-      setVoting(v => ({ ...v, [messageId]: false }));
-    }
-  };
-
-  const submitFeedbackReason = async (messageId: string, reason: string) => {
-    setFeedbackReason(null);
-    setVoting(v => ({ ...v, [messageId]: true }));
-    try {
-      const current = feedbackCounts[messageId] || { up: 0, down: 0 };
-      await api.post("/feedback", { message_id: messageId, rating: "down", reason });
-      setFeedbackCounts(f => ({
-        ...f,
-        [messageId]: {
-          up: current.up - (current.userVote === "up" ? 1 : 0),
-          down: current.down + 1 - (current.userVote === "down" ? 1 : 0),
-          userVote: "down",
-        },
-      }));
-      showToast("success", "感谢反馈，我们会持续改进");
-    } catch {
-      showToast("error", "反馈提交失败");
-    } finally {
-      setVoting(v => ({ ...v, [messageId]: false }));
-    }
-  };
-
-  const generateDiagram = async (message: ChatMessage, diagramType: DiagramType, existingArtifact?: ChatArtifact) => {
-    const messageId = getPersistedMessageId(message);
-    if (!canUsePersistedAssistantActions(messageId)) return;
-
-    if (existingArtifact?.status === "ready") {
-      setActiveArtifact(existingArtifact);
-      return;
-    }
-
-    const key = getDiagramKey(messageId, diagramType);
-    const existing = diagramStates[key];
-    if (existing?.data) {
-      setActiveArtifact(existing.data);
-      return;
-    }
-    if (existing?.loading) return;
-
-    setDiagramStates((prev) => ({
-      ...prev,
-      [key]: { loading: true },
-    }));
-
-    try {
-      const res = await api.post<ApiResponse<ChatArtifact>>(
-        `/chat/messages/${encodeURIComponent(messageId)}/artifacts/generate`,
-        {
-          type: diagramType,
-          title: "AI 整理",
-        }
-      );
-      setGeneratedArtifacts((prev) => ({
-        ...prev,
-        [messageId]: mergeArtifacts(prev[messageId], [res.data]),
-      }));
-      setDiagramStates((prev) => ({
-        ...prev,
-        [key]: { loading: false, data: res.data },
-      }));
-      setActiveArtifact(res.data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "生成图谱失败";
-      setDiagramStates((prev) => ({
-        ...prev,
-        [key]: {
-          loading: false,
-          error: message,
-        },
-      }));
-      showToast("error", message);
-    }
-  };
-
   if (messages.length === 0 && !loading) {
-    return <EmptyWelcome onQuestion={onInitialQuestion} />;
+    return <ChatEmptyWelcome onQuestion={onInitialQuestion} />;
   }
 
   return (
