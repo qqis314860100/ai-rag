@@ -185,6 +185,59 @@ def _rewrite_query_with_trace(
     )
 
 
+def _enrich_query_understanding_with_recall(
+    query_rewrite: AnswerQueryRewrite,
+    *,
+    history: list[dict[str, str]] | None = None,
+    recall_hits: list[dict] | None = None,
+) -> AnswerQueryRewrite:
+    """把首轮召回和多轮上下文产生的候选理解补回 Query Understanding。
+
+    检索前只能看到用户问题、历史和术语资产；文档标题、章节标题属于首轮召回证据，
+    因此在 search 完成后补充，并保留每个候选的可审计来源。
+    """
+    understanding = query_rewrite.query_understanding
+    extra_candidates = [
+        *_history_candidate_terms(query_rewrite.original_query, history, query_rewrite.signals),
+        *_recall_candidate_terms(recall_hits or []),
+    ]
+    if not extra_candidates:
+        return query_rewrite
+
+    signals = list(query_rewrite.signals)
+    if any(candidate.matched_kind == "history_question" for candidate in extra_candidates):
+        signals.append("history_question_candidate")
+    if any(candidate.matched_kind == "document_title" for candidate in extra_candidates):
+        signals.append("recall_document_title_candidate")
+    if any(candidate.matched_kind == "section_title" for candidate in extra_candidates):
+        signals.append("recall_section_title_candidate")
+    signals = _dedupe_preserve_order(signals)
+
+    candidate_terms = _dedupe_candidate_terms([
+        *understanding.candidate_terms,
+        *extra_candidates,
+    ])
+    ambiguity = _query_ambiguity(
+        query_rewrite.original_query,
+        candidate_terms,
+        understanding.spell_corrections,
+    )
+    enriched = _build_query_understanding(
+        original_query=understanding.original_query,
+        rewritten_query=understanding.rewritten_query,
+        intent=understanding.intent,
+        candidate_terms=candidate_terms,
+        spell_corrections=understanding.spell_corrections,
+        ambiguity=ambiguity,
+        signals=signals,
+        strategy=query_rewrite.strategy,
+    )
+    return query_rewrite.model_copy(update={
+        "signals": signals,
+        "query_understanding": enriched,
+    })
+
+
 def _term_expansion_hits_dump(result: TermExpansionResult) -> list[dict]:
     return [hit.as_dict() for hit in result.hits]
 
@@ -278,6 +331,67 @@ def _query_candidate_terms(
     return _dedupe_candidate_terms(candidates)
 
 
+def _history_candidate_terms(
+    original_query: str,
+    history: list[dict[str, str]] | None,
+    signals: list[str],
+) -> list[QueryCandidateTerm]:
+    if not history or not any(signal in {"pronoun", "ellipsis"} for signal in signals):
+        return []
+
+    candidates: list[QueryCandidateTerm] = []
+    for index, item in enumerate(reversed(history[-8:]), 1):
+        if item.get("role") != "user":
+            continue
+        content = _normalize_query_text(str(item.get("content") or ""))
+        topic = _extract_rewrite_topic(content)
+        if not topic or topic == original_query:
+            continue
+        candidates.append(QueryCandidateTerm(
+            term=topic,
+            matched_text=content[:80],
+            matched_kind="history_question",
+            source=f"history_question:{index}",
+            confidence=0.72,
+            reason="来自最近多轮用户问题，用于补全指代或省略主题",
+        ))
+        if len(candidates) >= 3:
+            break
+    return candidates
+
+
+def _recall_candidate_terms(hits: list[dict]) -> list[QueryCandidateTerm]:
+    candidates: list[QueryCandidateTerm] = []
+    seen: set[tuple[str, str]] = set()
+    for rank, hit in enumerate(hits[:5], 1):
+        score = _coerce_score(hit.get("score"))
+        chunk_id = str(hit.get("chunk_id") or f"rank-{rank}")
+        title = _clean_candidate_label(str(hit.get("document_title") or ""))
+        if title and (title, "document_title") not in seen:
+            seen.add((title, "document_title"))
+            candidates.append(QueryCandidateTerm(
+                term=title,
+                matched_text=title,
+                matched_kind="document_title",
+                source=f"first_recall:{rank}:document_title:{chunk_id}",
+                confidence=round(min(0.84, 0.66 + score * 0.12), 2),
+                reason="来自首轮召回结果的文档标题",
+            ))
+
+        section = _clean_candidate_label(_last_section_title(str(hit.get("section_path") or "")))
+        if section and (section, "section_title") not in seen:
+            seen.add((section, "section_title"))
+            candidates.append(QueryCandidateTerm(
+                term=section,
+                matched_text=section,
+                matched_kind="section_title",
+                source=f"first_recall:{rank}:section_title:{chunk_id}",
+                confidence=round(min(0.8, 0.6 + score * 0.12), 2),
+                reason="来自首轮召回结果的章节标题",
+            ))
+    return candidates[:8]
+
+
 def _query_ambiguity(
     query: str,
     candidate_terms: list[QueryCandidateTerm],
@@ -325,6 +439,31 @@ def _build_query_understanding(
     trace = [
         {"source": "rewrite_strategy", "value": strategy},
         *({"source": "signal", "value": signal} for signal in _dedupe_preserve_order(signals)),
+        *(
+            {
+                "source": "spell_similarity",
+                "value": f"{correction.original} -> {correction.correction}",
+                "candidate": correction.correction,
+                "matched_text": correction.original,
+                "confidence": correction.confidence,
+                "reason": correction.reason,
+            }
+            for correction in spell_corrections
+            if correction.original and correction.correction
+        ),
+        *(
+            {
+                "source": "candidate_source",
+                "value": candidate.source,
+                "term": candidate.term,
+                "matched_text": candidate.matched_text,
+                "matched_kind": candidate.matched_kind,
+                "confidence": candidate.confidence,
+                "reason": candidate.reason,
+            }
+            for candidate in candidate_terms
+            if candidate.term or candidate.matched_text or candidate.source
+        ),
     ]
     return QueryUnderstanding(
         original_query=original_query,
@@ -429,10 +568,10 @@ def _damerau_levenshtein(source: str, target: str, *, max_distance: int) -> int:
 
 
 def _dedupe_candidate_terms(candidates: list[QueryCandidateTerm]) -> list[QueryCandidateTerm]:
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str]] = set()
     result: list[QueryCandidateTerm] = []
     for candidate in candidates:
-        key = (candidate.term, candidate.matched_text, candidate.source)
+        key = (candidate.term, candidate.matched_kind)
         if key in seen:
             continue
         seen.add(key)
@@ -512,6 +651,31 @@ def _replace_reference_with_topic(query: str, topic: str) -> str:
     if replaced != normalized:
         return replaced
     return re.sub(r"(这个|那个|这些|那些|它|其|该|上述|前述|前面|刚才|这里|其中)", topic, normalized, count=1)
+
+
+def _last_section_title(section_path: str) -> str:
+    parts = re.split(r"\s*(?:/|>|›|»|->|→)\s*", section_path)
+    for part in reversed(parts):
+        cleaned = part.strip()
+        if cleaned:
+            return cleaned
+    return section_path.strip()
+
+
+def _clean_candidate_label(value: str) -> str:
+    cleaned = _normalize_query_text(value)
+    cleaned = re.sub(r"^[\s#\-•·\d.、]+", "", cleaned).strip()
+    if len(cleaned) < 2 or cleaned.lower() in {"unknown", "untitled"}:
+        return ""
+    return cleaned[:80]
+
+
+def _coerce_score(value: object) -> float:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, score))
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:

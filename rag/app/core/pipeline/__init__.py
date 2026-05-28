@@ -34,6 +34,7 @@ from .retrieve import (
     _keyword_rerank,
 )
 from .rewrite import (
+    _enrich_query_understanding_with_recall,
     _knowledge_asset_trace,
     _rewrite_query,
     _rewrite_query_with_trace,
@@ -238,6 +239,11 @@ class RagPipeline:
         # 原问题和扩展 query 一起参与关键词融合，保留用户原词和术语别名命中。
         if rewritten_query != query:
             hits = _keyword_rerank(f"{query} {rewritten_query}", hits, filters)
+        query_rewrite = _enrich_query_understanding_with_recall(
+            query_rewrite,
+            history=history,
+            recall_hits=hits,
+        )
 
         sources = extract_sources(hits)
         confidence = _estimate_confidence(query, hits, filters, matched_assets)
@@ -298,6 +304,7 @@ __all__ = [
     "RagPipeline",
     "_assess_insufficient_context",
     "_build_ingest_metadata",
+    "_enrich_query_understanding_with_recall",
     "_estimate_confidence",
     "_extract_query_terms",
     "_keyword_rerank",

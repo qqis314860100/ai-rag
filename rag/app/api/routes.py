@@ -7,6 +7,7 @@ from ..core.pipeline import (
     REFUSAL_ANSWER,
     RagPipeline,
     _assess_insufficient_context,
+    _enrich_query_understanding_with_recall,
     _estimate_confidence,
     _keyword_rerank,
     _rewrite_query_with_trace,
@@ -252,6 +253,11 @@ def chat_stream(request: ChatRequest):
             hits = search_result["results"]
             if rewritten_query != request.query:
                 hits = _keyword_rerank(f"{request.query} {rewritten_query}", hits, request.filters)
+            query_rewrite = _enrich_query_understanding_with_recall(
+                query_rewrite,
+                history=request.history,
+                recall_hits=hits,
+            )
 
             # Send search metadata
             yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})}\n\n"

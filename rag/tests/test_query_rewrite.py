@@ -93,6 +93,16 @@ def test_query_understanding_corrects_misspelled_abbreviation() -> None:
     assert any(term.term == "EOL" for term in understanding.candidate_terms)
     assert understanding.needs_confirmation is False
     assert "elo -> EOL" in understanding.grey_answer_hint
+    assert any(
+        item["source"] == "spell_similarity" and item["value"] == "elo -> EOL"
+        for item in understanding.trace
+    )
+    assert any(
+        item["source"] == "candidate_source"
+        and item["term"] == "EOL"
+        and item["value"] == "built_in_battery_line_glossary"
+        for item in understanding.trace
+    )
 
 
 def test_query_understanding_marks_low_information_confirmation() -> None:
@@ -168,3 +178,67 @@ def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> Non
     assert understanding["original_query"] == "它的异常怎么处理？"
     assert understanding["rewritten_query"] == captured["retrieval_query"]
     assert understanding["intent"] == "troubleshooting"
+
+
+def test_chat_query_understanding_records_history_and_recall_candidates(monkeypatch) -> None:
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+        return {
+            "latency_ms": 3,
+            "results": [
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": "doc-1",
+                    "document_title": "绝缘电阻测试规范",
+                    "section_path": "质量标准 / 异常处理",
+                    "page_number": 5,
+                    "score": 0.9,
+                    "content": "绝缘电阻测试异常时需要先检查夹具、线缆和测试电压。",
+                    "snippet": "绝缘电阻测试异常时需要先检查夹具、线缆和测试电压。",
+                }
+            ],
+        }
+
+    def fake_llm_chat(messages, temperature=0.2):
+        return {
+            "content": "结论：先检查夹具、线缆和测试电压。[来源 1]",
+            "latency_ms": 4,
+        }
+
+    monkeypatch.setattr(RagPipeline, "search", fake_search)
+    monkeypatch.setattr(pipeline_module, "llm_chat", fake_llm_chat)
+
+    result = RagPipeline().chat(
+        query="它的异常怎么处理？",
+        top_k=1,
+        allowed_security_levels=["internal"],
+        history=[{"role": "user", "content": "绝缘电阻测试标准是什么？"}],
+    )
+
+    understanding = result["answer_ir"]["query_understanding"]
+    candidates = {
+        (candidate["term"], candidate["matched_kind"])
+        for candidate in understanding["candidate_terms"]
+    }
+    assert ("绝缘电阻测试标准", "history_question") in candidates
+    assert ("绝缘电阻测试规范", "document_title") in candidates
+    assert ("异常处理", "section_title") in candidates
+
+    trace = understanding["trace"]
+    assert any(
+        item["source"] == "candidate_source"
+        and item["matched_kind"] == "history_question"
+        and item["value"].startswith("history_question:")
+        for item in trace
+    )
+    assert any(
+        item["source"] == "candidate_source"
+        and item["matched_kind"] == "document_title"
+        and item["value"].startswith("first_recall:1:document_title:")
+        for item in trace
+    )
+    assert any(
+        item["source"] == "candidate_source"
+        and item["matched_kind"] == "section_title"
+        and item["value"].startswith("first_recall:1:section_title:")
+        for item in trace
+    )
