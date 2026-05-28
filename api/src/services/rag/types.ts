@@ -239,8 +239,36 @@ export interface RagFailedQuestionSignal {
   created_at?: string;
 }
 
+export interface RagManualNoteSignal {
+  id?: string;
+  content: string;
+  scope?: string;
+  session_id?: string;
+  message_id?: string | null;
+  source_id?: string | null;
+  document_id?: string | null;
+  chunk_id?: string | null;
+  query_understanding?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface RagHighConfidenceAnswerSignal {
+  id?: string;
+  question: string;
+  answer: string;
+  confidence: number;
+  query_understanding?: Array<Record<string, unknown>>;
+  retrieval_evidence?: Array<Record<string, unknown>>;
+  source_ids?: string[];
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
 export interface RagKnowledgeGapClusterRequest {
   failed_questions: RagFailedQuestionSignal[];
+  manual_notes?: RagManualNoteSignal[];
+  high_confidence_answers?: RagHighConfidenceAnswerSignal[];
   min_frequency?: number;
   max_clusters?: number;
 }

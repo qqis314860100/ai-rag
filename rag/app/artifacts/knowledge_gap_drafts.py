@@ -53,6 +53,8 @@ class FailedQuestionSignal(BaseModel):
 
 class KnowledgeGapClusterRequest(BaseModel):
     failed_questions: list[FailedQuestionSignal] = Field(default_factory=list)
+    manual_notes: list[dict[str, Any]] = Field(default_factory=list)
+    high_confidence_answers: list[dict[str, Any]] = Field(default_factory=list)
     min_frequency: int = Field(default=2, ge=1, le=20)
     max_clusters: int = Field(default=20, ge=1, le=100)
 
@@ -126,11 +128,21 @@ class KnowledgeGapClusterResult(BaseModel):
 def build_knowledge_gap_cluster_drafts(request: KnowledgeGapClusterRequest) -> KnowledgeGapClusterResult:
     buckets: dict[str, list[FailedQuestionSignal]] = defaultdict(list)
     ignored = 0
+    context_signals = [
+        *_signals_from_context(request.manual_notes, "manual_note"),
+        *_signals_from_context(request.high_confidence_answers, "high_confidence_answer"),
+    ]
     for signal in request.failed_questions:
         if not signal.question.strip():
             ignored += 1
             continue
         buckets[_cluster_key(signal)].append(signal)
+    for signal in context_signals:
+        if not signal.question.strip():
+            ignored += 1
+            continue
+        matched_key = _matching_bucket_key(signal, buckets)
+        buckets[matched_key or _cluster_key(signal)].append(signal)
 
     clusters: list[KnowledgeGapClusterDraft] = []
     for key, signals in buckets.items():
@@ -146,12 +158,48 @@ def build_knowledge_gap_cluster_drafts(request: KnowledgeGapClusterRequest) -> K
         clusters=limited,
         ignored_count=ignored,
         metadata={
-            "input_count": len(request.failed_questions),
+            "input_count": len(request.failed_questions) + len(context_signals),
+            "failed_question_count": len(request.failed_questions),
+            "manual_note_count": len(request.manual_notes),
+            "high_confidence_answer_count": len(request.high_confidence_answers),
             "min_frequency": request.min_frequency,
             "max_clusters": request.max_clusters,
             "algorithm": "term-intent-bucket/v1",
         },
     )
+
+
+def _signals_from_context(items: list[dict[str, Any]], event_type: str) -> list[FailedQuestionSignal]:
+    signals: list[FailedQuestionSignal] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or item.get("content") or item.get("answer") or "").strip()
+        if not question:
+            continue
+        signals.append(FailedQuestionSignal(
+            id=str(item.get("id") or f"{event_type}-{index}"),
+            question=question,
+            event_type=event_type,
+            confidence=_float_or_none(item.get("confidence")),
+            feedback_comment=str(item.get("comment") or item.get("summary") or ""),
+            answer_snapshot=str(item.get("answer") or ""),
+            query_understanding=_as_dict_list(item.get("query_understanding")),
+            retrieval_evidence=_as_dict_list(item.get("retrieval_evidence")),
+            metadata={"source": event_type, **{k: v for k, v in item.items() if k not in {"question", "content", "answer"}}},
+        ))
+    return signals
+
+
+def _matching_bucket_key(signal: FailedQuestionSignal, buckets: dict[str, list[FailedQuestionSignal]]) -> str:
+    signal_terms = {term.lower() for term in _terms_from_signal(signal)}
+    if not signal_terms:
+        return ""
+    for key, bucket_signals in buckets.items():
+        bucket_terms = {term.lower() for item in bucket_signals for term in _terms_from_signal(item)}
+        if signal_terms.intersection(bucket_terms):
+            return key
+    return ""
 
 
 def _build_cluster(key: str, signals: list[FailedQuestionSignal]) -> KnowledgeGapClusterDraft:
@@ -196,7 +244,7 @@ def _cluster_key(signal: FailedQuestionSignal) -> str:
     terms = _candidate_terms_from_understanding(signal) or _terms_from_signal(signal)
     intent = _intent_from_question(signal.question)
     if terms:
-        return "|".join([intent, *terms[:3]]).lower()
+        return terms[0].lower()
     return "|".join([intent, _normalize_question(signal.question)[:32]]).lower()
 
 
@@ -460,5 +508,16 @@ def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _as_dict_list(value: Any) -> list[dict[str, Any]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
 def _as_string_list(value: Any) -> list[str]:
     return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

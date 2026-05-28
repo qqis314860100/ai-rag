@@ -9,9 +9,9 @@ import type {
 import { getMessageById, listMessagesBySession } from "../db/chatMessages";
 import { getSessionById } from "../db/chatSessions";
 import { listMessageSourceDetails } from "../db/messageSources";
-import { listNotesBySession } from "../db/chatNotes";
 import { formatArtifact, listArtifactsByMessage } from "../db/chatArtifacts";
 import { emitWebhookEvent } from "./webhookService";
+import { buildKnowledgeDraftContext } from "./knowledgeDraftContextService";
 import { AppError, ErrorCodes } from "../utils/errors";
 
 const MIN_KNOWLEDGE_CARD_CONFIDENCE = 0.65;
@@ -119,15 +119,6 @@ function buildSourceRefs(messageId: string): KnowledgeCardSourceRef[] {
     snippet: compactText(source.snippet || source.content, 260),
     score: source.score,
   }));
-}
-
-function notesForDraft(sessionId: string, messageId: string, userId: string, includeSessionNotes: boolean) {
-  return listNotesBySession(sessionId, userId)
-    .filter((note) =>
-      note.scope === "message" && note.message_id === messageId ||
-      note.scope === "source" && note.message_id === messageId ||
-      includeSessionNotes && note.scope === "session"
-    );
 }
 
 function artifactsForDraft(messageId: string) {
@@ -247,17 +238,23 @@ export function createKnowledgeCardDraftFromMessage(
     });
   }
 
-  const notes = notesForDraft(message.session_id, message.id, user.id, options.includeSessionNotes ?? false);
   const artifacts = artifactsForDraft(message.id);
-  const noteText = notes.map((note) => note.content).join("。");
   const artifactText = artifacts.map((artifact) => `${artifact.title}。${artifact.summary}`).join("。");
   const sourceText = sourceRefs.map((source) => source.snippet ?? "").join("。");
-  const corpus = [message.content, sourceText, noteText, artifactText].filter(Boolean).join("。");
+  const topic = getQuestionFromThread(message.session_id, message.id, metadata);
+  const draftContext = buildKnowledgeDraftContext({
+    sessionId: message.session_id,
+    messageId: message.id,
+    userId: user.id,
+    metadata,
+    question: topic,
+    answer: message.content,
+    includeSessionNotes: options.includeSessionNotes ?? false,
+  });
+  const corpus = [message.content, sourceText, draftContext.contextText, artifactText].filter(Boolean).join("。");
   const sentences = splitSentences(corpus);
   const sourceIds = sourceRefs.map((source) => source.source_id || source.chunk_id || "").filter(Boolean);
-  const noteIds = notes.map((note) => note.id);
   const artifactIds = artifacts.map((artifact) => artifact.id);
-  const topic = getQuestionFromThread(message.session_id, message.id, metadata);
 
   const card = createKnowledgeCard({
     topic: compactText(topic, 80),
@@ -267,7 +264,7 @@ export function createKnowledgeCardDraftFromMessage(
     risks: buildRisks(sentences),
     handlingMethods: buildHandlingMethods(sentences),
     sourceRefs,
-    relatedTerms: extractRelatedTerms(`${topic} ${corpus}`),
+    relatedTerms: extractRelatedTerms(`${topic} ${corpus} ${draftContext.termText}`),
     status: "ai_draft",
     createdBy: user.id,
     createdByName: user.name,
@@ -277,11 +274,12 @@ export function createKnowledgeCardDraftFromMessage(
       session_id: message.session_id,
       confidence,
       source_ids: uniqueStrings(sourceIds),
-      note_ids: noteIds,
+      note_ids: draftContext.noteIds,
       artifact_ids: artifactIds,
-      note_count: notes.length,
+      note_count: draftContext.noteIds.length,
       artifact_count: artifacts.length,
       min_confidence: MIN_KNOWLEDGE_CARD_CONFIDENCE,
+      draft_context: draftContext.metadata,
     },
     changeNote: "从高置信回答生成 AI 知识卡草稿",
   });

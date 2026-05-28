@@ -5,6 +5,7 @@ import { getMessageById } from "../db/chatMessages";
 import { listMessagesBySession } from "../db/chatMessages";
 import { getSessionById } from "../db/chatSessions";
 import { listMessageSourceDetails } from "../db/messageSources";
+import { buildKnowledgeDraftContext } from "./knowledgeDraftContextService";
 import { AppError, ErrorCodes } from "../utils/errors";
 
 const MIN_FAQ_CONFIDENCE = 0.55;
@@ -120,14 +121,22 @@ export function createKnowledgeFaqDraftFromMessage(messageId: string, user: Know
   }
 
   const question = compactText(questionFromThread(message.session_id, message.id, metadata), 180);
+  const draftContext = buildKnowledgeDraftContext({
+    sessionId: message.session_id,
+    messageId: message.id,
+    userId: user.id,
+    metadata,
+    question,
+    answer: message.content,
+  });
   const faq = createOrUpdateKnowledgeFaq({
     question,
     answer: compactText(message.content, 800),
     sourceRefs: refs,
     applicableScope: applicableScopeFromSources(refs),
-    invalidConditions: invalidConditionsFromText(message.content),
+    invalidConditions: invalidConditionsFromText(`${message.content}。${draftContext.contextText}`),
     relatedCardIds: relatedCards(question, message.content),
-    tags: tagsFromText(`${question} ${message.content}`),
+    tags: tagsFromText(`${question} ${message.content} ${draftContext.termText}`),
     status: "ai_draft",
     createdBy: user.id,
     createdByName: user.name,
@@ -137,6 +146,7 @@ export function createKnowledgeFaqDraftFromMessage(messageId: string, user: Know
       session_id: message.session_id,
       confidence,
       min_confidence: MIN_FAQ_CONFIDENCE,
+      draft_context: draftContext.metadata,
     },
   });
 

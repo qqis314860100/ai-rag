@@ -200,7 +200,7 @@ router.get(
           requires_answer_status: "answered",
           requires_citations: true,
           blocks: ["low_confidence", "refusal_answer", "missing_citations", "evidence_conflict"],
-          inputs: ["answer_message", "source_refs", "chat_notes", "chat_artifacts"],
+          inputs: ["answer_message", "source_refs", "query_understanding_candidates", "failure_clusters", "chat_notes", "chat_artifacts"],
         },
       }, req.requestId);
     } catch (err) {
@@ -299,6 +299,7 @@ router.get(
           min_confidence: 0.55,
           requires_citations: true,
           duplicate_policy: "按 normalized_question 合并并增加 frequency_count",
+          inputs: ["answer_message", "source_refs", "query_understanding_candidates", "failure_clusters", "chat_notes"],
         },
       }, req.requestId);
     } catch (err) {
