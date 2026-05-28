@@ -17,6 +17,7 @@ import { AppError, ErrorCodes } from "../utils/errors";
 import { auditFromRequest } from "../services/auditService";
 import { requirePermission } from "../middleware/auth";
 import { ingestDocument, reindexDocument } from "../services/ragClient";
+import { buildDocumentInsights } from "../services/documentInsightsService";
 import { importOfflinePackage } from "../services/offlineImportService";
 import { getDb } from "../db";
 import { listComments, createComment, updateComment, softDeleteComment } from "../db/docComments";
@@ -203,6 +204,20 @@ router.get("/documents/:id", async (req: Request, res: Response, next: NextFunct
     }
 
     sendSuccess(res, formatted, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/documents/:id/insights - document usage and governance detail
+router.get("/documents/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const documentId = req.params.id as string;
+    const doc = getDocumentById(documentId);
+    if (!doc) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
+    }
+    sendSuccess(res, buildDocumentInsights(documentId), req.requestId);
   } catch (err) {
     next(err);
   }
