@@ -54,6 +54,51 @@ def test_keyword_rerank_promotes_exact_domain_match_over_noisy_vector_score() ->
     assert reranked[0]["metadata"]["ranking"]["keyword_coverage"] > reranked[1]["metadata"]["ranking"]["keyword_coverage"]
 
 
+def test_keyword_rerank_records_explainable_hybrid_retrieval_signals() -> None:
+    hits = [
+        _hit(
+            0.58,
+            "OCV异常时需要复核静置时间、采样线和电压阈值。",
+            document_id="doc-ocv",
+            document_title="OCV异常处理SOP",
+            section_path="终检 / OCV异常排查",
+        ),
+        _hit(
+            0.64,
+            "设备维护周期和日常点检要求。",
+            document_id="doc-maintain",
+            document_title="设备维护规范",
+            section_path="点检",
+        ),
+    ]
+
+    reranked = _keyword_rerank(
+        "OCV异常怎么处理？",
+        hits,
+        filters={"document_id": "doc-ocv"},
+        term_expansion_hits=[{
+            "canonical_term": "OCV",
+            "matched_text": "OCV",
+            "matched_kind": "abbreviation",
+            "expansions": ["开路电压", "OCV异常"],
+            "source": "built_in_battery_line_glossary",
+        }],
+    )
+
+    ranking = reranked[0]["metadata"]["ranking"]
+    signals = reranked[0]["metadata"]["retrieval_signals"]
+    signal_names = {signal["name"] for signal in signals}
+
+    assert reranked[0]["document_id"] == "doc-ocv"
+    assert reranked[0]["metadata"]["retrieval_mode"] == "hybrid"
+    assert {"vector_recall", "keyword_bm25", "title_hit", "section_hit", "term_hit", "document_filter_hit"} == signal_names
+    assert ranking["bm25_score"] > 0
+    assert ranking["title_coverage"] > 0
+    assert ranking["section_coverage"] > 0
+    assert ranking["term_match"] > 0
+    assert ranking["filter_match"] == 1.0
+
+
 def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
@@ -82,6 +127,9 @@ def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatc
     domain_hit = next(hit for hit in result["results"] if hit["content"].startswith("开路电压异常"))
     noisy_hit = next(hit for hit in result["results"] if hit["content"].startswith("设备维护周期"))
     assert domain_hit["metadata"]["ranking"]["keyword_coverage"] > noisy_hit["metadata"]["ranking"]["keyword_coverage"]
+    assert domain_hit["metadata"]["ranking"]["term_match"] > noisy_hit["metadata"]["ranking"]["term_match"]
+    assert domain_hit["metadata"]["retrieval_signals"]
+
 
 
 def test_estimate_confidence_uses_keywords_filters_sources_and_context() -> None:

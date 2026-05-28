@@ -1,3 +1,4 @@
+import math
 import re
 
 from ..source_metadata import (
@@ -61,35 +62,199 @@ def _estimate_confidence(query: str, hits: list[dict], filters: dict | None = No
     return round(_clamp_float(confidence), 2)
 
 
-def _keyword_rerank(query: str, hits: list[dict], filters: dict | None = None) -> list[dict]:
-    """Boost chunks with exact Chinese/domain term hits in title, section, and body."""
+_HYBRID_SIGNAL_WEIGHTS = {
+    "vector_recall": 0.38,
+    "keyword_bm25": 0.22,
+    "title_hit": 0.12,
+    "section_hit": 0.10,
+    "term_hit": 0.10,
+    "document_filter_hit": 0.08,
+}
+
+
+def _keyword_rerank(
+    query: str,
+    hits: list[dict],
+    filters: dict | None = None,
+    term_expansion_hits: list[dict] | None = None,
+) -> list[dict]:
+    """Hybrid retrieval scoring over vector candidates, with auditable signals."""
     keywords = _extract_query_terms(query)
-    if not keywords or len(hits) <= 1:
+    if not hits:
         return hits
 
-    for h in hits:
+    bm25_scores = _bm25_scores(keywords, hits)
+    for index, h in enumerate(hits):
         metadata = h.get("metadata") if isinstance(h.get("metadata"), dict) else {}
         previous_ranking = metadata.get("ranking") if isinstance(metadata.get("ranking"), dict) else {}
         body_text = _hit_text(h, include_content=True)
-        title_text = _hit_title_text(h)
-        keyword_score = _term_coverage_score(keywords, body_text)
-        title_score = _term_coverage_score(keywords, title_text)
+        keyword_score = _signal_coverage_score(keywords, body_text)
+        bm25_score = bm25_scores[index] if index < len(bm25_scores) else 0.0
+        keyword_bm25_score = max(keyword_score, bm25_score)
+        title_score = _signal_coverage_score(keywords, _hit_document_title_text(h))
+        section_score = _signal_coverage_score(keywords, _hit_section_text(h))
+        term_score = _term_hit_score(term_expansion_hits, h)
+        if term_expansion_hits is None:
+            term_score = _clamp_float(previous_ranking.get("term_match", 0))
         filter_score = _filter_match_score(filters, [h])
         vector_score = _clamp_float(previous_ranking.get("vector_score", h.get("score", 0)))
 
-        fused_score = max(
-            vector_score * 0.85,
-            vector_score * 0.62 + keyword_score * 0.25 + title_score * 0.10 + filter_score * 0.03,
+        hybrid_score = (
+            vector_score * _HYBRID_SIGNAL_WEIGHTS["vector_recall"]
+            + keyword_bm25_score * _HYBRID_SIGNAL_WEIGHTS["keyword_bm25"]
+            + title_score * _HYBRID_SIGNAL_WEIGHTS["title_hit"]
+            + section_score * _HYBRID_SIGNAL_WEIGHTS["section_hit"]
+            + term_score * _HYBRID_SIGNAL_WEIGHTS["term_hit"]
+            + filter_score * _HYBRID_SIGNAL_WEIGHTS["document_filter_hit"]
+        )
+        vector_floor = vector_score * (0.85 if not keywords else 0.35)
+        fused_score = max(vector_floor, hybrid_score)
+        fused_score = _clamp_float(fused_score)
+
+        signals = _build_retrieval_signals(
+            vector_score=vector_score,
+            keyword_score=keyword_bm25_score,
+            bm25_score=bm25_score,
+            title_score=title_score,
+            section_score=section_score,
+            term_score=term_score,
+            filter_score=filter_score,
+            filters=filters,
         )
         h["score"] = round(_clamp_float(fused_score), 4)
         metadata["ranking"] = {
             "vector_score": round(vector_score, 4),
             "keyword_coverage": round(keyword_score, 4),
+            "bm25_score": round(bm25_score, 4),
+            "keyword_bm25": round(keyword_bm25_score, 4),
             "title_coverage": round(title_score, 4),
+            "section_coverage": round(section_score, 4),
+            "term_match": round(term_score, 4),
             "filter_match": round(filter_score, 4),
+            "hybrid_score": round(fused_score, 4),
+            "signal_weights": _HYBRID_SIGNAL_WEIGHTS,
+            "scoring_version": "hybrid_v1",
         }
+        metadata["retrieval_signals"] = signals
+        metadata["retrieval_mode"] = "hybrid"
         h["metadata"] = metadata
     return sorted(hits, key=lambda h: h.get("score", 0), reverse=True)
+
+
+def _bm25_scores(terms: list[str], hits: list[dict]) -> list[float]:
+    if not terms or not hits:
+        return [0.0 for _ in hits]
+
+    documents = [_hit_text(hit, include_content=True).lower() for hit in hits]
+    tokenized = [_document_term_frequencies(terms, document) for document in documents]
+    lengths = [sum(freqs.values()) or 1 for freqs in tokenized]
+    avgdl = sum(lengths) / max(len(lengths), 1)
+    raw_scores: list[float] = []
+    k1 = 1.4
+    b = 0.72
+    total_docs = len(hits)
+
+    for freqs, length in zip(tokenized, lengths):
+        score = 0.0
+        for term in terms:
+            term_key = term.lower()
+            tf = freqs.get(term_key, 0)
+            if tf <= 0:
+                continue
+            document_frequency = sum(1 for item in tokenized if item.get(term_key, 0) > 0)
+            idf = math.log(1 + (total_docs - document_frequency + 0.5) / (document_frequency + 0.5))
+            denominator = tf + k1 * (1 - b + b * length / max(avgdl, 1))
+            score += idf * (tf * (k1 + 1)) / max(denominator, 0.0001)
+        raw_scores.append(score)
+
+    max_score = max(raw_scores) if raw_scores else 0.0
+    if max_score <= 0:
+        return [0.0 for _ in hits]
+    return [round(_clamp_float(score / max_score), 4) for score in raw_scores]
+
+
+def _document_term_frequencies(terms: list[str], document: str) -> dict[str, int]:
+    frequencies: dict[str, int] = {}
+    for term in terms:
+        term_key = term.lower()
+        count = document.count(term_key)
+        if count > 0:
+            frequencies[term_key] = count
+    return frequencies
+
+
+def _signal_coverage_score(terms: list[str], text: str) -> float:
+    if not terms:
+        return 0.0
+    return _term_coverage_score(terms, text)
+
+
+def _term_hit_score(term_expansion_hits: list[dict] | None, hit: dict) -> float:
+    if not term_expansion_hits:
+        return 0.0
+
+    terms: list[str] = []
+    for item in term_expansion_hits:
+        if not isinstance(item, dict):
+            continue
+        terms.extend(
+            str(value).strip()
+            for value in (
+                item.get("canonical_term"),
+                item.get("matched_text"),
+                *(item.get("expansions") if isinstance(item.get("expansions"), list) else []),
+            )
+            if str(value).strip()
+        )
+    return _signal_coverage_score(_dedupe_terms(terms), _hit_text(hit, include_content=True))
+
+
+def _build_retrieval_signals(
+    *,
+    vector_score: float,
+    keyword_score: float,
+    bm25_score: float,
+    title_score: float,
+    section_score: float,
+    term_score: float,
+    filter_score: float,
+    filters: dict | None,
+) -> list[dict]:
+    meaningful_filters = _meaningful_filters(filters)
+    return [
+        {
+            "name": "vector_recall",
+            "score": round(vector_score, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["vector_recall"],
+        },
+        {
+            "name": "keyword_bm25",
+            "score": round(keyword_score, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["keyword_bm25"],
+            "details": {"bm25_score": round(bm25_score, 4)},
+        },
+        {
+            "name": "title_hit",
+            "score": round(title_score, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["title_hit"],
+        },
+        {
+            "name": "section_hit",
+            "score": round(section_score, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["section_hit"],
+        },
+        {
+            "name": "term_hit",
+            "score": round(term_score, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["term_hit"],
+        },
+        {
+            "name": "document_filter_hit",
+            "score": round(filter_score if meaningful_filters else 0.0, 4),
+            "weight": _HYBRID_SIGNAL_WEIGHTS["document_filter_hit"],
+            "details": {"active_filters": sorted(meaningful_filters)},
+        },
+    ]
 
 
 _CONFLICT_PAIRS = (
@@ -338,7 +503,7 @@ def _source_count_score(count: int) -> float:
 
 
 def _filter_match_score(filters: dict | None, hits: list[dict]) -> float:
-    meaningful_filters = {key: value for key, value in (filters or {}).items() if value not in (None, "", [], {})}
+    meaningful_filters = _meaningful_filters(filters)
     if not meaningful_filters:
         return 0.7
     if not hits:
@@ -373,12 +538,57 @@ def _hit_title_text(hit: dict) -> str:
     )
 
 
+def _hit_document_title_text(hit: dict) -> str:
+    metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    return " ".join(
+        str(value)
+        for value in (
+            hit.get("document_title"),
+            metadata.get("document_title"),
+            metadata.get("title"),
+            hit.get("category"),
+            metadata.get("category"),
+        )
+        if value
+    )
+
+
+def _hit_section_text(hit: dict) -> str:
+    metadata = hit.get("metadata") if isinstance(hit.get("metadata"), dict) else {}
+    return " ".join(
+        str(value)
+        for value in (
+            hit.get("section_path"),
+            metadata.get("section_path"),
+            metadata.get("section_title"),
+            metadata.get("chapter_title"),
+        )
+        if value
+    )
+
+
 def _hit_text(hit: dict, include_content: bool = False) -> str:
     parts = [_hit_title_text(hit), str(hit.get("snippet", ""))]
     if include_content:
         parts.append(str(hit.get("content", "")))
         parts.append(str(hit.get("context_window", "")))
     return " ".join(parts)
+
+
+def _meaningful_filters(filters: dict | None) -> dict:
+    return {key: value for key, value in (filters or {}).items() if value not in (None, "", [], {})}
+
+
+def _dedupe_terms(terms: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for term in terms:
+        normalized = term.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(term.strip())
+    return deduped
 
 
 def _clamp_float(value, minimum: float = 0.0, maximum: float = 1.0) -> float:

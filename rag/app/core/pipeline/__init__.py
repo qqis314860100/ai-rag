@@ -139,22 +139,29 @@ class RagPipeline:
         start = time.time()
         term_expansion = expand_query_with_terms(query)
         retrieval_query = term_expansion.expanded_query
+        term_expansion_hits = _term_expansion_hits_dump(term_expansion)
+        candidate_top_k = max(top_k, min(top_k * 3, 30))
 
         q_embedding = embed_query(retrieval_query)
         hits = search(
             query_embedding=q_embedding,
             allowed_security_levels=allowed_security_levels,
-            top_k=top_k,
+            top_k=candidate_top_k,
             filters=filters,
         )
-        hits = _keyword_rerank(retrieval_query, hits, filters)
+        hits = _keyword_rerank(
+            retrieval_query,
+            hits,
+            filters,
+            term_expansion_hits=term_expansion_hits,
+        )[:top_k]
 
         latency_ms = int((time.time() - start) * 1000)
 
         return {
             "query": query,
             "expanded_query": retrieval_query,
-            "term_expansion_hits": _term_expansion_hits_dump(term_expansion),
+            "term_expansion_hits": term_expansion_hits,
             "results": hits,
             "latency_ms": latency_ms,
         }
@@ -195,7 +202,7 @@ class RagPipeline:
             "normalized_query": search_result.get("expanded_query") or query,
             "filters": filters or {},
             "retrieval": {
-                "mode": "vector",
+                "mode": "hybrid",
                 "top_k": top_k,
                 "latency_ms": search_result["latency_ms"],
                 "term_expansion_hits": search_result.get("term_expansion_hits", []),
