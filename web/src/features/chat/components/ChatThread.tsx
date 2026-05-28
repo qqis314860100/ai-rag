@@ -14,15 +14,16 @@ import {
   canUsePersistedUserActions,
   formatTime,
   getAnswerQualityNotice,
+  getAnswerTrustSummary,
   getDiagramActionLabel,
   getDiagramButtonLabel,
   getDiagramKey,
   getPersistedMessageId,
   getQueryUnderstandingNotice,
   isAnswerReadyForRefinement,
-  isConfirmedAnswer,
   mergeArtifacts,
   type AnswerQualityNotice,
+  type AnswerTrustSummary,
   type QueryUnderstandingNotice,
 } from "./chatThreadUtils";
 import { useChatThreadScroll } from "../hooks/useChatThreadScroll";
@@ -64,6 +65,14 @@ const answerQualityToneClass: Record<AnswerQualityNotice["tone"], string> = {
   refused: "border-danger/20 bg-danger-soft text-danger",
 };
 
+const trustToneClass: Record<AnswerTrustSummary["tone"], { text: string; badge: string; icon: string }> = {
+  strong: { text: "text-success", badge: "bg-success-soft text-success", icon: "text-success" },
+  medium: { text: "text-accent", badge: "bg-accent-soft text-accent", icon: "text-accent" },
+  weak: { text: "text-warning", badge: "bg-warning-soft text-warning", icon: "text-warning" },
+  danger: { text: "text-danger", badge: "bg-danger-soft text-danger", icon: "text-danger" },
+  neutral: { text: "text-text-secondary", badge: "bg-surface-hover text-text-secondary", icon: "text-text-muted" },
+};
+
 function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }) {
   const Icon = notice.tone === "confirmed" ? FileCheck : notice.tone === "confirmation" ? AlertCircle : CircleHelp;
 
@@ -103,6 +112,100 @@ function AnswerQualityHint({ notice }: { notice: AnswerQualityNotice }) {
           {reason}
         </span>
       ))}
+    </div>
+  );
+}
+
+function AnswerTrustPanel({
+  summary,
+  sources,
+  isOpen,
+  onToggleSources,
+  onSourceAnchor,
+}: {
+  summary: AnswerTrustSummary;
+  sources?: Source[];
+  isOpen: boolean;
+  onToggleSources: () => void;
+  onSourceAnchor?: (sources: Source[], index: number) => void;
+}) {
+  const tone = trustToneClass[summary.tone];
+  const coverageLabel = summary.claimCount > 0
+    ? `${summary.supportedClaimCount}/${summary.claimCount} 条结论有引用`
+    : summary.citedSourceCount > 0
+      ? `${summary.citedSourceCount} 条引用支撑`
+      : summary.sourceCount > 0
+        ? `${summary.sourceCount} 条相关资料`
+        : "暂无引用";
+  const coverageRatioLabel = summary.claimCoverageRatio !== undefined && summary.claimCount > 0
+    ? `${Math.round(summary.claimCoverageRatio * 100)}%`
+    : "";
+  const visibleWarnings = summary.warnings.slice(0, 3);
+  const hasSources = Boolean(sources?.length);
+
+  return (
+    <div className="mt-4 border-t border-divider/70 pt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px]">
+        <span className={`inline-flex items-center gap-1.5 font-semibold ${tone.text}`}>
+          {summary.tone === "strong" ? <FileCheck className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+          可信度 {summary.confidenceLabel}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-text-secondary">
+          <FileSearch className={`h-3.5 w-3.5 shrink-0 ${tone.icon}`} />
+          <span className="truncate">{coverageLabel}</span>
+          {coverageRatioLabel && <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-medium ${tone.badge}`}>{coverageRatioLabel}</span>}
+        </span>
+        {summary.conflictCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-danger-soft px-1.5 py-0.5 text-[11px] font-semibold text-danger">
+            <AlertCircle className="h-3.5 w-3.5" />
+            {summary.conflictLabels.join("、")}
+          </span>
+        )}
+        {hasSources && (
+          <button
+            onClick={onToggleSources}
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface-page px-2.5 py-1.5 font-medium text-text-secondary transition-colors hover:border-accent/40 hover:bg-accent-soft/50 hover:text-accent"
+          >
+            <FileSearch className="h-3.5 w-3.5" />
+            {isOpen ? "收起证据" : "查看证据"}
+            <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent">{sources?.length}</span>
+          </button>
+        )}
+      </div>
+      {visibleWarnings.length > 0 && (
+        <div className="mt-2 flex flex-col gap-1 text-[12px] leading-relaxed text-text-secondary">
+          {visibleWarnings.map((warning) => (
+            <div key={`${warning.code}:${warning.message}`} className="flex min-w-0 items-start gap-1.5">
+              <AlertCircle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${warning.severity === "error" ? "text-danger" : "text-warning"}`} />
+              <span className="min-w-0 flex-1">{warning.message}</span>
+              {warning.citationIds.length > 0 && (
+                <span className="shrink-0 rounded-md bg-surface-hover px-1.5 py-0.5 text-[11px] text-text-muted">
+                  {warning.citationIds.length} 引用
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {hasSources && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {sources!.slice(0, 3).map((source, index) => (
+            <button
+              key={`${source.chunk_id}-${index}`}
+              onClick={() => onSourceAnchor?.(sources!, index)}
+              className="max-w-full truncate rounded-md border border-border bg-surface-page px-2 py-1 text-[11px] text-text-secondary transition-colors hover:border-accent/40 hover:text-accent"
+              title={source.document_title || source.section_path || `证据 ${index + 1}`}
+            >
+              {index + 1}. {source.document_title || source.section_path || "引用资料"}
+            </button>
+          ))}
+          {sources!.length > 3 && (
+            <span className="rounded-md bg-surface-hover px-2 py-1 text-[11px] text-text-muted">
+              另有 {sources!.length - 3} 条
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -152,11 +255,11 @@ export default function ChatThread({ messages, loading, streamingContent, stream
         const canPersistUserActions = isUser && canUsePersistedUserActions(persistedMessageId);
         const userBranchActionsDisabled = loading || !canPersistUserActions;
         const canRefineAssistantAnswer = canPersistAssistantActions && isAnswerReadyForRefinement(msg);
-        const confirmedAnswer = !isUser && isConfirmedAnswer(msg);
         const fb = feedbackCounts[persistedMessageId] || { up: 0, down: 0 };
         const messageArtifacts = !isUser ? mergeArtifacts(msg.artifacts, generatedArtifacts[persistedMessageId]) : [];
         const assetStatus = assetDraftStatusByMessage[persistedMessageId] || {};
         const answerQualityNotice = !isUser && !msg.streaming ? getAnswerQualityNotice(msg) : null;
+        const answerTrustSummary = !isUser && !msg.streaming ? getAnswerTrustSummary(msg) : null;
         const queryUnderstandingNotice = !isUser && !msg.streaming ? getQueryUnderstandingNotice(msg) : null;
 
         return (
@@ -263,6 +366,15 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}
                   </div>
+                  {answerTrustSummary && (
+                    <AnswerTrustPanel
+                      summary={answerTrustSummary}
+                      sources={msg.sources}
+                      isOpen={selectedSources === msg.sources}
+                      onToggleSources={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources || null)}
+                      onSourceAnchor={onSourceAnchor}
+                    />
+                  )}
                   {!msg.streaming && canRefineAssistantAnswer && (
                     <div className="mt-4 flex flex-wrap items-center justify-end gap-1.5 border-t border-divider/70 pt-3">
                       <span className="mr-auto inline-flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
@@ -333,29 +445,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
             {/* AI: sources + follow-ups (hidden while streaming) */}
             {!isUser && !msg.streaming && (
               <>
-                {msg.sources && msg.sources.length > 0 && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <button
-                      onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-surface-page hover:border-accent/40 hover:bg-accent-soft/50 transition-all duration-normal"
-                    >
-                      <FileSearch className="h-3.5 w-3.5 text-accent" />
-                      <span className="text-xs text-text-secondary">
-                        {confirmedAnswer ? "查看证据" : "查看相关资料"}
-                        <span className="font-semibold text-accent ml-1">{msg.sources.length}</span> 条
-                      </span>
-                      {confirmedAnswer && msg.confidence !== undefined && msg.confidence > 0 && (
-                        <span className={`text-[11px] font-semibold ml-1 px-1.5 py-0.5 rounded-full ${
-                          msg.confidence >= 0.8 ? "bg-success/10 text-success" :
-                          msg.confidence >= 0.6 ? "bg-accent/10 text-accent" :
-                          "bg-warning/10 text-warning"
-                        }`}>
-                          可信度 {(msg.confidence * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                )}
                 {msg.followups && msg.followups.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {msg.followups.map((q, j) => (
@@ -401,15 +490,6 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                     className="p-0.5 rounded text-text-muted hover:text-accent transition-colors" title="重新生成此回答">
                     <RefreshCw className="h-3 w-3" />
                   </button>
-                  {msg.sources && msg.sources.length > 0 && (
-                    <button
-                      onClick={() => onSelectSources(selectedSources === msg.sources ? null : msg.sources!)}
-                      className="p-0.5 rounded text-text-muted hover:text-accent transition-colors"
-                      title="查看证据详情"
-                    >
-                      <FileSearch className="h-3 w-3" />
-                    </button>
-                  )}
                 </div>
               )}
             </div>

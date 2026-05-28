@@ -21,8 +21,33 @@ export type AnswerQualityNotice = {
   confidence?: number;
 };
 
+export type AnswerTrustTone = "strong" | "medium" | "weak" | "danger" | "neutral";
+
+export type AnswerTrustWarning = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+  citationIds: string[];
+};
+
+export type AnswerTrustSummary = {
+  tone: AnswerTrustTone;
+  confidence?: number;
+  confidenceLabel: string;
+  claimCount: number;
+  supportedClaimCount: number;
+  claimCoverageRatio?: number;
+  sourceCount: number;
+  citedSourceCount: number;
+  warnings: AnswerTrustWarning[];
+  conflictCount: number;
+  conflictLabels: string[];
+  hasTrustMetadata: boolean;
+};
+
 const UNCERTAIN_ANSWER_PATTERN = /(?:暂时无法确认|无法确认|无法回答|没有足够(?:信息|证据)|信息不足|不能确定|请补充|问题不够具体)/;
 const INFERRED_TERM_KINDS = new Set(["spell_correction", "history_question", "document_title", "section_title"]);
+const CONFLICT_WARNING_PATTERN = /(?:context_conflict|contradictory_evidence|version_conflict|evidence_conflict|conflict|contradict|冲突)/i;
 
 export function formatTime(iso: string) {
   const d = new Date(iso);
@@ -164,6 +189,58 @@ export function getAnswerQualityNotice(message: ChatMessage): AnswerQualityNotic
   };
 }
 
+export function getAnswerTrustSummary(message: ChatMessage): AnswerTrustSummary | null {
+  if (message.role !== "assistant") return null;
+
+  const verification = isRecord(message.metadata?.answer_verification) ? message.metadata.answer_verification : {};
+  const citationCoverage = isRecord(message.metadata?.citation_coverage) ? message.metadata.citation_coverage : {};
+  const quality = message.metadata?.answer_quality;
+  const confidence =
+    numberValue(verification.confidence) ??
+    (quality && typeof quality.confidence === "number" ? quality.confidence : null) ??
+    message.confidence;
+  const claimCount = numberValue(verification.claim_count) ?? numberValue(citationCoverage.claim_count) ?? 0;
+  const supportedClaimCount =
+    numberValue(verification.supported_claim_count) ??
+    numberValue(citationCoverage.covered_claim_count) ??
+    0;
+  const claimCoverageRatio =
+    numberValue(verification.claim_coverage_ratio) ??
+    numberValue(citationCoverage.claim_coverage_ratio) ??
+    (claimCount > 0 ? supportedClaimCount / claimCount : undefined);
+  const citedSourceCount = numberValue(citationCoverage.cited_source_count) ?? 0;
+  const sourceCount = message.sources?.length ?? numberValue(citationCoverage.returned_source_count) ?? 0;
+  const warnings = trustWarnings(message);
+  const conflictLabels = conflictSummaryLabels(verification, warnings);
+  const tone = trustTone(confidence, warnings, conflictLabels.length, quality?.tier);
+  const hasTrustMetadata = Boolean(
+    confidence ||
+    sourceCount > 0 ||
+    claimCount > 0 ||
+    warnings.length > 0 ||
+    conflictLabels.length > 0 ||
+    isRecord(message.metadata?.answer_verification) ||
+    isRecord(message.metadata?.citation_coverage)
+  );
+
+  if (!hasTrustMetadata) return null;
+
+  return {
+    tone,
+    confidence,
+    confidenceLabel: confidence !== undefined && confidence > 0 ? `${Math.round(confidence * 100)}%` : "待核验",
+    claimCount,
+    supportedClaimCount,
+    claimCoverageRatio,
+    sourceCount,
+    citedSourceCount,
+    warnings,
+    conflictCount: conflictLabels.length,
+    conflictLabels,
+    hasTrustMetadata,
+  };
+}
+
 function answerStatus(message: ChatMessage) {
   const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : null;
   return typeof answerSummary?.status === "string" ? answerSummary.status : "";
@@ -177,6 +254,18 @@ function uniqueStrings(values: Array<string | undefined>) {
   return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
 }
 
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function recordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function hasOnlyInferredTerms(candidateTerms: QueryCandidateTerm[]) {
   if (candidateTerms.length === 0) return false;
   return candidateTerms.every((term) => INFERRED_TERM_KINDS.has(term.matched_kind || ""));
@@ -187,4 +276,78 @@ function qualityLabel(tier: AnswerQualityTier) {
   if (tier === "partial_answer") return "部分回答";
   if (tier === "grey_answer") return "灰度回答";
   return "可回答";
+}
+
+function trustWarnings(message: ChatMessage): AnswerTrustWarning[] {
+  const verification = isRecord(message.metadata?.answer_verification) ? message.metadata.answer_verification : {};
+  const answerSummary = isRecord(message.metadata?.answer_ir_summary) ? message.metadata.answer_ir_summary : {};
+  const rawWarnings = [
+    ...recordList(verification.warnings),
+    ...recordList(answerSummary.warnings),
+  ];
+  const qualityReasons = Array.isArray(message.metadata?.answer_quality?.reasons)
+    ? message.metadata.answer_quality.reasons
+    : [];
+  const warningReasons = qualityReasons
+    .filter((reason) => reason.severity === "warning" || reason.severity === "error")
+    .map((reason) => ({
+      code: reason.code,
+      message: reason.message,
+      severity: reason.severity,
+      citation_ids: [],
+    }));
+
+  const seen = new Set<string>();
+  return [...rawWarnings, ...warningReasons]
+    .map((warning): AnswerTrustWarning | null => {
+      const code = stringValue(warning.code) || "answer_warning";
+      const message = stringValue(warning.message) || warningLabel(code);
+      const rawSeverity = stringValue(warning.severity);
+      const severity = rawSeverity === "error" ? "error" : rawSeverity === "info" ? "info" : "warning";
+      const citationIds = Array.isArray(warning.citation_ids)
+        ? warning.citation_ids.map(stringValue).filter(Boolean)
+        : [];
+      if (!message) return null;
+      return { code, message, severity, citationIds };
+    })
+    .filter((warning): warning is AnswerTrustWarning => Boolean(warning))
+    .filter((warning) => {
+      const key = `${warning.code}:${warning.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
+}
+
+function warningLabel(code: string) {
+  if (code === "context_conflict" || code === "contradictory_evidence") return "引用之间存在冲突，需要人工复核。";
+  if (code === "version_conflict") return "引用版本存在差异，请核对最新版本。";
+  if (code === "unsupported_claims") return "部分结论缺少绑定引用支撑。";
+  if (code === "expired_sources" || code === "deprecated_sources") return "部分来源可能过期或已废弃。";
+  if (code === "no_citations" || code === "missing_citations") return "回答缺少可追溯引用。";
+  if (code === "low_confidence") return "回答可信度偏低，请核对原文。";
+  return code;
+}
+
+function conflictSummaryLabels(verification: Record<string, unknown>, warnings: AnswerTrustWarning[]) {
+  const labels: string[] = [];
+  if (recordList(verification.conflict_sources).length > 0 || recordList(verification.contradictory_evidence).length > 0) {
+    labels.push("证据冲突");
+  }
+  if (recordList(verification.version_conflicts).length > 0) {
+    labels.push("版本冲突");
+  }
+  if (warnings.some((warning) => CONFLICT_WARNING_PATTERN.test(`${warning.code} ${warning.message}`))) {
+    labels.push("冲突提示");
+  }
+  return Array.from(new Set(labels));
+}
+
+function trustTone(confidence: number | undefined, warnings: AnswerTrustWarning[], conflictCount: number, tier?: AnswerQualityTier): AnswerTrustTone {
+  if (tier === "refused" || warnings.some((warning) => warning.severity === "error")) return "danger";
+  if (conflictCount > 0 || tier === "partial_answer" || (confidence !== undefined && confidence > 0 && confidence < 0.6)) return "weak";
+  if (tier === "grey_answer" || (confidence !== undefined && confidence < 0.8)) return "medium";
+  if (confidence !== undefined && confidence >= 0.8) return "strong";
+  return "neutral";
 }
