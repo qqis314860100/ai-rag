@@ -19,12 +19,27 @@ type AnswerQualityReason = {
   severity: "info" | "warning" | "error";
 };
 
+type VerificationWarning = {
+  code: string;
+  message: string;
+  severity: string;
+  citation_ids: string[];
+};
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function recordList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 function sourceIdentity(source: Record<string, unknown>, fallbackIndex: number): string {
@@ -99,6 +114,116 @@ function buildAnswerIrSummary(answerIr: RagAnswerIR | null | undefined) {
       severity: warning.severity,
       citation_ids: warning.citation_ids ?? [],
     })),
+  };
+}
+
+function answerWarnings(answerIr: RagAnswerIR | null | undefined): VerificationWarning[] {
+  return (answerIr?.warnings ?? []).map((warning) => ({
+    code: warning.code || "answer_warning",
+    message: warning.message || "",
+    severity: warning.severity || "warning",
+    citation_ids: warning.citation_ids ?? [],
+  }));
+}
+
+function buildConflictSources(answerVerification: Record<string, unknown>): Record<string, unknown>[] {
+  const contradictoryEvidence = recordList(answerVerification.contradictory_evidence);
+  const versionConflicts = recordList(answerVerification.version_conflicts);
+
+  return [
+    ...contradictoryEvidence.map((item) => ({
+      type: "contradictory_evidence",
+      positive: isRecord(item.positive) ? item.positive : {},
+      negative: isRecord(item.negative) ? item.negative : {},
+      confidence: stringValue(item.confidence) || "candidate",
+    })),
+    ...versionConflicts.map((item) => ({
+      type: "version_conflict",
+      document_id: stringValue(item.document_id),
+      versions: isRecord(item.versions) ? item.versions : {},
+    })),
+  ];
+}
+
+function buildAnswerVerification(
+  answerIr: RagAnswerIR | null | undefined,
+  citationCoverage: ReturnType<typeof buildCitationCoverage>
+) {
+  if (!answerIr) return null;
+
+  const rawVerification = isRecord(answerIr?.metadata?.answer_verification)
+    ? answerIr.metadata.answer_verification
+    : {};
+  const rawDecision = isRecord(answerIr?.metadata?.verification_decision)
+    ? answerIr.metadata.verification_decision
+    : isRecord(rawVerification.decision)
+      ? rawVerification.decision
+      : {};
+  const claimCoverageRatio = numberValue(rawVerification.claim_coverage_ratio)
+    ?? numberValue(answerIr?.metadata?.claim_coverage_ratio)
+    ?? citationCoverage.claim_coverage_ratio;
+  const expiredSources = recordList(rawVerification.expired_sources);
+  const deprecatedSources = recordList(rawVerification.deprecated_sources);
+  const unsupportedClaims = recordList(rawVerification.unsupported_claims);
+  const versionConflicts = recordList(rawVerification.version_conflicts);
+  const contradictoryEvidence = recordList(rawVerification.contradictory_evidence);
+  const warnings = answerWarnings(answerIr);
+
+  return {
+    schema_version: stringValue(rawVerification.schema_version) || "answer-verification/api-v1",
+    status: answerIr?.status ?? "unknown",
+    confidence: answerIr?.confidence ?? null,
+    claim_count: numberValue(rawVerification.claim_count) ?? citationCoverage.claim_count,
+    supported_claim_count: numberValue(rawVerification.supported_claim_count) ?? citationCoverage.covered_claim_count,
+    claim_coverage_ratio: claimCoverageRatio,
+    source_coverage_ratio: citationCoverage.source_coverage_ratio,
+    decision: {
+      downgraded: typeof rawDecision.downgraded === "boolean" ? rawDecision.downgraded : false,
+      previous_status: stringValue(rawDecision.previous_status),
+      status: stringValue(rawDecision.status) || answerIr?.status || "unknown",
+      reason: stringValue(rawDecision.reason),
+      confidence: numberValue(rawDecision.confidence) ?? answerIr?.confidence ?? null,
+      confidence_cap: numberValue(rawDecision.confidence_cap),
+    },
+    warnings,
+    warning_codes: uniqueValues(warnings.map((warning) => warning.code)),
+    unsupported_claims: unsupportedClaims,
+    expired_sources: expiredSources,
+    deprecated_sources: deprecatedSources,
+    version_conflicts: versionConflicts,
+    contradictory_evidence: contradictoryEvidence,
+    conflict_sources: buildConflictSources(rawVerification),
+  };
+}
+
+export function buildAnswerVerificationAuditDetail(metadata: Record<string, unknown>): Record<string, unknown> | null {
+  const verification = isRecord(metadata.answer_verification) ? metadata.answer_verification : null;
+  if (!verification) return null;
+  const decision = isRecord(verification.decision) ? verification.decision : {};
+  const warnings = recordList(verification.warnings);
+
+  return {
+    schema_version: stringValue(verification.schema_version),
+    status: stringValue(verification.status),
+    confidence: numberValue(verification.confidence),
+    claim_count: numberValue(verification.claim_count),
+    supported_claim_count: numberValue(verification.supported_claim_count),
+    claim_coverage_ratio: numberValue(verification.claim_coverage_ratio),
+    source_coverage_ratio: numberValue(verification.source_coverage_ratio),
+    warning_count: warnings.length,
+    warning_codes: Array.isArray(verification.warning_codes) ? verification.warning_codes.map(stringValue).filter(Boolean) : [],
+    decision: {
+      downgraded: typeof decision.downgraded === "boolean" ? decision.downgraded : false,
+      previous_status: stringValue(decision.previous_status),
+      status: stringValue(decision.status),
+      reason: stringValue(decision.reason),
+      confidence: numberValue(decision.confidence),
+      confidence_cap: numberValue(decision.confidence_cap),
+    },
+    unsupported_claim_count: recordList(verification.unsupported_claims).length,
+    conflict_sources: recordList(verification.conflict_sources),
+    expired_sources: recordList(verification.expired_sources),
+    deprecated_sources: recordList(verification.deprecated_sources),
   };
 }
 
@@ -234,6 +359,8 @@ export function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): R
   );
   const rewrittenQuestion = queryRewrite?.rewritten_query || input.originalQuestion;
   const confidence = displayConfidence(input);
+  const citationCoverage = buildCitationCoverage(input.answerIr, input.sources ?? []);
+  const answerVerification = buildAnswerVerification(input.answerIr, citationCoverage);
 
   return {
     confidence,
@@ -255,7 +382,8 @@ export function buildAnswerMessageMetadata(input: AnswerMessageMetadataInput): R
     },
     query_understanding: queryUnderstanding,
     answer_ir_summary: buildAnswerIrSummary(input.answerIr),
-    citation_coverage: buildCitationCoverage(input.answerIr, input.sources ?? []),
+    citation_coverage: citationCoverage,
+    answer_verification: answerVerification,
     visual_plan: input.visualPlan ?? null,
     knowledge_assets: input.answerIr?.metadata?.knowledge_assets ?? input.visualPlan?.metadata?.knowledge_assets ?? [],
   };

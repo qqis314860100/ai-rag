@@ -10,11 +10,22 @@ import { createMessage, deleteMessageAndTruncateSession, formatMessage, getMessa
 import { buildPublishedKnowledgeAssetContext } from "../../services/knowledgeAssetContextService";
 import { recordChatMetric } from "../../services/metricsService";
 import { buildAnswerMessageMetadata, createAutoArtifactsFromVisualPlan, requireUserMessageMutationPermission } from "./shared";
+import { buildAnswerVerificationAuditDetail } from "./answerMetadata";
 
 const router = Router();
 
 function isRefusalAnswer(answer: string, answerIr?: RagAnswerIR | null): boolean {
   return answerIr?.status === "insufficient_context" || /^(根据当前知识库信息|抱歉)/.test(answer.trim());
+}
+
+function auditAnswerVerification(req: Request, sessionId: string, messageId: string, metadata: Record<string, unknown>): void {
+  const answerVerification = buildAnswerVerificationAuditDetail(metadata);
+  if (!answerVerification) return;
+
+  auditFromRequest(req, "chat.answer.verify", "chat_message", messageId, {
+    session_id: sessionId,
+    answer_verification: answerVerification,
+  });
 }
 
 // POST /api/chat - send a message and get RAG answer
@@ -201,7 +212,9 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         query: message.substring(0, 200),
         answer_length: fullAnswer.length,
         source_count: meta.sources?.length ?? 0,
+        answer_verification: buildAnswerVerificationAuditDetail(assistantMetadata),
       });
+      auditAnswerVerification(req, sessionId, assistantMessage.id, assistantMetadata);
       recordChatMetric({
         sourceCount: meta.sources?.length ?? 0,
         llmCalled: (meta.trace?.retrieval_ms ?? 0) >= 0 && fullAnswer.length > 0 && !/^根据当前知识库信息/.test(fullAnswer),
@@ -257,7 +270,9 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       query: message.substring(0, 200),
       answer_length: chatResult.answer.length,
       source_count: chatResult.sources.length,
+      answer_verification: buildAnswerVerificationAuditDetail(assistantMetadata),
     });
+    auditAnswerVerification(req, sessionId, assistantMessage.id, assistantMetadata);
     recordChatMetric({
       sourceCount: chatResult.sources.length,
       llmCalled: (chatResult.trace?.llm_ms ?? 0) > 0,
