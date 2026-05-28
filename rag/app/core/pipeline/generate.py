@@ -4,6 +4,7 @@ from collections.abc import Callable
 from ...artifacts import plan_visual_artifacts
 from ...llm.prompt_builder import build_messages
 from ...schemas.models import AnswerIR, AnswerQueryRewrite, AnswerWarning
+from .answer_verification import verify_answer_ir
 from .refusal import EvidenceAssessment, REFUSAL_ANSWER
 from .rewrite import _knowledge_asset_trace
 
@@ -50,6 +51,7 @@ def _build_answer_chat_result(
             **(evidence_metadata or {}),
         },
     )
+    answer_ir = verify_answer_ir(answer_ir, sources=sources, hits=hits)
     generate_ms = int((time.time() - generate_start) * 1000)
 
     artifact_start = time.time()

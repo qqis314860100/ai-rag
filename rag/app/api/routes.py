@@ -13,6 +13,7 @@ from ..core.pipeline import (
     _rewrite_query_with_trace,
     _suggest_followups,
 )
+from ..core.pipeline.answer_verification import verify_answer_ir
 from ..core.terminology import list_term_entries, terminology_contract
 from ..artifacts import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
 from ..artifacts.knowledge_graph import build_lightweight_knowledge_graph
@@ -354,6 +355,7 @@ def chat_stream(request: ChatRequest):
                             "confidence_profile": confidence_profile,
                         },
                     )
+                    answer_ir = verify_answer_ir(answer_ir, sources=sources, hits=hits)
                     visual_plan = plan_visual_artifacts(
                         question=request.query,
                         answer=full_answer,

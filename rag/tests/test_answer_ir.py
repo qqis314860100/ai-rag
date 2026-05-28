@@ -1,3 +1,4 @@
+from app.core.pipeline.answer_verification import verify_answer_ir
 from app.schemas.models import AnswerIR, ChatResult
 
 
@@ -140,3 +141,94 @@ def test_chat_result_keeps_legacy_payload_compatible_without_answer_ir() -> None
     assert payload["sources"] == []
     assert payload["confidence"] == 0.7
     assert payload["answer_ir"] is None
+
+
+def test_answer_verifier_flags_claims_not_supported_by_citations() -> None:
+    source = {
+        **_source(),
+        "snippet": "绝缘电阻测试电压为500V DC，合格阈值不低于20MΩ。",
+        "content": "绝缘电阻测试电压为500V DC，合格阈值不低于20MΩ。",
+    }
+    ir = AnswerIR.from_chat(
+        answer="参数：绝缘电阻测试电压为1000V DC，合格阈值不低于20MΩ。[来源 1]",
+        sources=[source],
+        original_query="绝缘电阻测试参数是什么？",
+        rewritten_query="绝缘电阻测试参数是什么？",
+        confidence=0.84,
+    )
+
+    verified = verify_answer_ir(ir, sources=[source], hits=[source])
+    warning_codes = [warning.code for warning in verified.warnings]
+
+    assert "unsupported_claims" in warning_codes
+    assert verified.metadata["answer_verification"]["claim_coverage_ratio"] == 0
+    assert verified.metadata["answer_verification"]["unsupported_claims"][0]["claim_id"] == "claim-1"
+
+
+def test_answer_verifier_flags_deprecated_expired_and_version_conflict_sources() -> None:
+    old_source = {
+        **_source(),
+        "chunk_id": "chunk-old",
+        "version": "v1",
+        "status": "deprecated",
+        "metadata": {"valid_until": "2025-01-01"},
+        "snippet": "旧版要求夹具接地后再启动测试。",
+        "content": "旧版要求夹具接地后再启动测试。",
+    }
+    new_source = {
+        **_source(),
+        "chunk_id": "chunk-new",
+        "version": "v2",
+        "snippet": "新版要求夹具接地后再启动测试。",
+        "content": "新版要求夹具接地后再启动测试。",
+    }
+    ir = AnswerIR.from_chat(
+        answer="步骤：夹具接地后再启动测试。[来源 1][来源 2]",
+        sources=[old_source, new_source],
+        original_query="夹具接地后怎么操作？",
+        rewritten_query="夹具接地后怎么操作？",
+        confidence=0.88,
+    )
+
+    verified = verify_answer_ir(ir, sources=[old_source, new_source], hits=[old_source, new_source])
+    warning_codes = [warning.code for warning in verified.warnings]
+    verification = verified.metadata["answer_verification"]
+
+    assert "deprecated_sources" in warning_codes
+    assert "expired_sources" in warning_codes
+    assert "version_conflict" in warning_codes
+    assert verification["deprecated_sources"][0]["citation_id"] == "chunk-old"
+    assert verification["expired_sources"][0]["citation_id"] == "chunk-old"
+    assert verification["version_conflicts"][0]["versions"] == {"v1": ["chunk-old"], "v2": ["chunk-new"]}
+
+
+def test_answer_verifier_flags_contradictory_evidence_candidates() -> None:
+    positive = {
+        **_source(),
+        "chunk_id": "chunk-a",
+        "snippet": "绝缘测试夹具接地前必须检查接地线连续性。",
+        "content": "绝缘测试夹具接地前必须检查接地线连续性。",
+        "context_window": "绝缘测试夹具接地前必须检查接地线连续性。",
+        "source_context": {"window": "绝缘测试夹具接地前必须检查接地线连续性。"},
+    }
+    negative = {
+        **_source(),
+        "chunk_id": "chunk-b",
+        "snippet": "绝缘测试夹具接地前不需要检查接地线连续性。",
+        "content": "绝缘测试夹具接地前不需要检查接地线连续性。",
+        "context_window": "绝缘测试夹具接地前不需要检查接地线连续性。",
+        "source_context": {"window": "绝缘测试夹具接地前不需要检查接地线连续性。"},
+    }
+    ir = AnswerIR.from_chat(
+        answer="结论：资料对接地前是否检查接地线连续性存在差异。[来源 1][来源 2]",
+        sources=[positive, negative],
+        original_query="绝缘测试夹具接地前是否需要检查接地线连续性？",
+        rewritten_query="绝缘测试夹具接地前是否需要检查接地线连续性？",
+        confidence=0.78,
+    )
+
+    verified = verify_answer_ir(ir, sources=[positive, negative], hits=[positive, negative])
+    warning_codes = [warning.code for warning in verified.warnings]
+
+    assert "contradictory_evidence" in warning_codes
+    assert verified.metadata["answer_verification"]["contradictory_evidence"][0]["positive"]["citation_id"] == "chunk-a"
