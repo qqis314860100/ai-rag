@@ -72,6 +72,50 @@ export function createKnowledgeTables(database: Database.Database): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_gaps (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      gap_key TEXT NOT NULL UNIQUE,
+      representative_question TEXT NOT NULL,
+      gap_type TEXT NOT NULL DEFAULT 'mixed' CHECK(gap_type IN ('refusal','low_confidence','user_retry','follow_up_correction','negative_feedback','mixed')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','merged','draft_generated','published','ignored')),
+      severity TEXT NOT NULL DEFAULT 'medium' CHECK(severity IN ('low','medium','high','critical')),
+      frequency_count INTEGER NOT NULL DEFAULT 1,
+      sample_failed_question_ids_json TEXT NOT NULL DEFAULT '[]',
+      query_understanding_json TEXT NOT NULL DEFAULT '[]',
+      retrieval_evidence_json TEXT NOT NULL DEFAULT '[]',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT,
+      last_seen_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS failed_questions (
+      id TEXT PRIMARY KEY,
+      gap_id TEXT REFERENCES knowledge_gaps(id) ON DELETE SET NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN ('refusal','low_confidence','user_retry','follow_up_correction','negative_feedback')),
+      question TEXT NOT NULL,
+      normalized_question TEXT NOT NULL,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
+      user_message_id TEXT REFERENCES chat_messages(id) ON DELETE SET NULL,
+      assistant_message_id TEXT REFERENCES chat_messages(id) ON DELETE SET NULL,
+      feedback_id TEXT REFERENCES feedback(id) ON DELETE SET NULL,
+      retry_of_question_id TEXT REFERENCES failed_questions(id) ON DELETE SET NULL,
+      corrected_question TEXT NOT NULL DEFAULT '',
+      answer_snapshot TEXT NOT NULL DEFAULT '',
+      confidence REAL,
+      feedback_reason TEXT NOT NULL DEFAULT '',
+      feedback_comment TEXT NOT NULL DEFAULT '',
+      query_understanding_json TEXT NOT NULL DEFAULT '[]',
+      retrieval_evidence_json TEXT NOT NULL DEFAULT '[]',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }
 
@@ -85,5 +129,11 @@ export function createKnowledgeIndexes(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_knowledge_card_versions_card_id ON knowledge_card_versions(card_id, version);
     CREATE INDEX IF NOT EXISTS idx_knowledge_faqs_status ON knowledge_faqs(status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_knowledge_faqs_question ON knowledge_faqs(normalized_question);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_status ON knowledge_gaps(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_gaps_type ON knowledge_gaps(gap_type, frequency_count, last_seen_at);
+    CREATE INDEX IF NOT EXISTS idx_failed_questions_gap_id ON failed_questions(gap_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_failed_questions_event_type ON failed_questions(event_type, created_at);
+    CREATE INDEX IF NOT EXISTS idx_failed_questions_session ON failed_questions(session_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_failed_questions_normalized ON failed_questions(normalized_question);
   `);
 }
