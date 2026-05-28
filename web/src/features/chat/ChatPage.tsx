@@ -371,6 +371,7 @@ export default function ChatPage() {
                 sources: stream.sources,
                 confidence: stream.confidence || undefined,
                 followups: stream.followups || undefined,
+                metadata: stream.metadata,
                 streaming: false,
                 created_at: new Date().toISOString(),
               }
@@ -392,6 +393,7 @@ export default function ChatPage() {
     stream.error,
     stream.followups,
     stream.loading,
+    stream.metadata,
     stream.messageId,
     stream.sources,
     stream.stopped,

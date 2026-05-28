@@ -2,6 +2,7 @@ export type {
   ApiResponse,
   ChatArtifact,
   ChatMessage,
+  ChatMessageMetadata,
   ChatNote,
   ChatNoteAggregate,
   ChatNoteAggregateItem,
@@ -16,5 +17,7 @@ export type {
   KnowledgeCard,
   KnowledgeFaq,
   PreviewView,
+  QueryCandidateTerm,
+  QueryUnderstanding,
   Source,
 } from "../../types";

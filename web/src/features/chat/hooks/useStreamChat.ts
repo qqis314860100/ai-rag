@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { sseStream } from "../../../services/api";
-import type { Source } from "../types";
+import type { ChatMessageMetadata, Source } from "../types";
 
 export interface StreamState {
   loading: boolean;
@@ -9,6 +9,7 @@ export interface StreamState {
   confidence: number;
   followups: string[];
   messageId: string;
+  metadata?: ChatMessageMetadata;
   error: string | null;
   stopped: boolean;
 }
@@ -35,7 +36,7 @@ export function useStreamChat() {
   const bufferRef = useRef("");
   const flushScheduledRef = useRef(false);
   const metaRef = useRef<{ sources?: Source[]; confidence?: number; followups?: string[] }>({});
-  const savedRef = useRef<{ message_id?: string }>({});
+  const savedRef = useRef<{ message_id?: string; metadata?: ChatMessageMetadata }>({});
   const errorRef = useRef<string | null>(null);
 
   const scheduleFlush = useCallback((runId: number) => {
@@ -105,7 +106,10 @@ export function useStreamChat() {
                   };
                   break;
                 case "saved":
-                  savedRef.current = { message_id: parsed.message_id };
+                  savedRef.current = {
+                    message_id: parsed.message_id,
+                    metadata: isRecord(parsed.metadata) ? parsed.metadata : undefined,
+                  };
                   break;
                 case "error":
                   errorRef.current = typeof parsed.message === "string" ? parsed.message : "回答生成失败，请重试。";
@@ -128,6 +132,7 @@ export function useStreamChat() {
           confidence: metaRef.current.confidence || 0,
           followups: metaRef.current.followups || [],
           messageId: savedRef.current.message_id || "",
+          metadata: savedRef.current.metadata,
           error: errorRef.current,
           stopped: false,
         });
@@ -168,4 +173,8 @@ export function useStreamChat() {
       return sendingRef.current;
     },
   };
+}
+
+function isRecord(value: unknown): value is ChatMessageMetadata {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

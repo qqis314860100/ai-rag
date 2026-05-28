@@ -81,6 +81,47 @@ export interface ChatMessageTrace {
   hit_count?: number;
 }
 
+export interface QueryCandidateTerm {
+  term?: string;
+  matched_text?: string;
+  matched_kind?: string;
+  source?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface QuerySpellCorrection {
+  original?: string;
+  correction?: string;
+  source?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface QueryAmbiguity {
+  is_ambiguous?: boolean;
+  candidates?: string[];
+  reason?: string;
+}
+
+export interface QueryUnderstanding {
+  original_query?: string;
+  rewritten_query?: string;
+  intent?: string;
+  candidate_terms?: QueryCandidateTerm[];
+  spell_corrections?: QuerySpellCorrection[];
+  ambiguity?: QueryAmbiguity;
+  confidence?: number;
+  needs_confirmation?: boolean;
+  grey_answer_hint?: string;
+  trace?: Array<Record<string, unknown>>;
+}
+
+export interface ChatMessageMetadata extends Record<string, unknown> {
+  trace?: ChatMessageTrace;
+  query_understanding?: QueryUnderstanding | null;
+}
+
 export interface ChatMessage {
   id: string;
   persistedId?: string;
@@ -90,7 +131,7 @@ export interface ChatMessage {
   sources?: Source[];
   confidence?: number;
   followups?: string[];
-  metadata?: Record<string, unknown> & { trace?: ChatMessageTrace };
+  metadata?: ChatMessageMetadata;
   artifacts?: ChatArtifact[];
   latency_ms?: number | null;
   created_at: string;
