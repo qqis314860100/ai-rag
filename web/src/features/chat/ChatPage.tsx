@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatThread from "./components/ChatThread";
 import { SessionList } from "./components/SessionList";
@@ -9,9 +9,11 @@ import { api } from "../../services/api";
 import { useStreamChat } from "./hooks/useStreamChat";
 import { useChatHistory } from "./hooks/useChatHistory";
 import { useChatDrafts } from "./hooks/useChatDrafts";
+import { useAssetDraftStatus } from "./hooks/useAssetDraftStatus";
+import { useSessionNotes } from "./hooks/useSessionNotes";
 import { showToast } from "../../components/ui/Toast";
 import { track } from "../../services/tracking";
-import type { ChatMessage, ChatNote, ChatNoteAggregate, ChatNoteAggregateItem, KnowledgeCard, KnowledgeFaq, Source } from "./types";
+import type { ChatMessage, Source } from "./types";
 import { Menu, X, Plus, PanelRightOpen } from "lucide-react";
 
 function MessagesSkeleton() {
@@ -97,10 +99,6 @@ export default function ChatPage() {
   const [selectedSources, setSelectedSources] = useState<Source[] | null>(null);
   const [previewSource, setPreviewSource] = useState<Source | null>(null);
   const [highlightSourceIdx, setHighlightSourceIdx] = useState<number | null>(null);
-  const [sessionNotes, setSessionNotes] = useState<ChatNote[]>([]);
-  const [noteAggregateItems, setNoteAggregateItems] = useState<ChatNoteAggregateItem[]>([]);
-  const [sessionNotesLoading, setSessionNotesLoading] = useState(false);
-  const [assetDraftStatusByMessage, setAssetDraftStatusByMessage] = useState<Record<string, { card?: string; faq?: string }>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia("(min-width: 1536px)").matches
@@ -118,9 +116,20 @@ export default function ChatPage() {
   const sawLoadingForPendingSessionRef = useRef(false);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const scrollPositionsRef = useRef<Record<string, ChatScrollSnapshot>>(readChatScrollPositions());
-  const lastAssetStatusFetchKey = useRef("");
 
   const { stream, sendStream, cancelStream, isSending } = useStreamChat();
+  const {
+    sessionNotes,
+    noteAggregateItems,
+    sessionNotesLoading,
+    createNote: handleCreateNote,
+    updateNote: handleUpdateNote,
+    deleteNote: handleDeleteNote,
+  } = useSessionNotes(activeSessionId);
+  const {
+    assetDraftStatusByMessage,
+    createKnowledgeAssetDraft: handleCreateKnowledgeAssetDraft,
+  } = useAssetDraftStatus(messages);
 
   // ── Sidebar: close on outside click (mobile overlay) + lock body scroll ──
   useEffect(() => {
@@ -265,40 +274,6 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    let active = true;
-
-    if (!activeSessionId) {
-      setSessionNotes([]);
-      setNoteAggregateItems([]);
-      setSessionNotesLoading(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    setSessionNotesLoading(true);
-    api.get<{ data: ChatNoteAggregate }>(`/chat/notes/aggregate?session_id=${encodeURIComponent(activeSessionId)}`)
-      .then((res) => {
-        if (!active) return;
-        setSessionNotes(res.data.session_notes || []);
-        setNoteAggregateItems(res.data.items || []);
-      })
-      .catch(() => {
-        if (!active) return;
-        setSessionNotes([]);
-        setNoteAggregateItems([]);
-      })
-      .finally(() => {
-        if (!active) return;
-        setSessionNotesLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeSessionId]);
-
-  useEffect(() => {
     if (!activeSessionId) {
       pendingScrollSessionRef.current = null;
       sawLoadingForPendingSessionRef.current = false;
@@ -309,40 +284,6 @@ export default function ChatPage() {
     pendingScrollSessionRef.current = activeSessionId;
     sawLoadingForPendingSessionRef.current = false;
   }, [activeSessionId]);
-
-  const persistedAssistantMessageKey = useMemo(() => {
-    return messages
-      .filter((message) => message.role === "assistant" && !message.streaming)
-      .map(getActionMessageId)
-      .filter((messageId) => !isTemporaryActionMessageId(messageId))
-      .join(",");
-  }, [messages]);
-
-  useEffect(() => {
-    const assistantIds = persistedAssistantMessageKey ? persistedAssistantMessageKey.split(",") : [];
-    if (assistantIds.length === 0) {
-      lastAssetStatusFetchKey.current = "";
-      setAssetDraftStatusByMessage({});
-      return;
-    }
-    if (lastAssetStatusFetchKey.current === persistedAssistantMessageKey) return;
-
-    let active = true;
-    lastAssetStatusFetchKey.current = persistedAssistantMessageKey;
-    api.get<{ data: Record<string, { card?: string; faq?: string }> }>(
-      `/knowledge/assets/status-by-message?message_ids=${assistantIds.map(encodeURIComponent).join(",")}`
-    )
-      .then((res) => {
-        if (active) setAssetDraftStatusByMessage(res.data || {});
-      })
-      .catch(() => {
-        if (active) setAssetDraftStatusByMessage({});
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [persistedAssistantMessageKey]);
 
   useLayoutEffect(() => {
     const pendingSession = pendingScrollSessionRef.current;
@@ -653,73 +594,6 @@ export default function ChatPage() {
         showToast("error", "删除消息失败");
       });
   }, [messages, setMessages]);
-
-  const handleCreateKnowledgeAssetDraft = useCallback(async (messageId: string, type: "card" | "faq") => {
-    if (isTemporaryActionMessageId(messageId)) return;
-    const path = type === "card"
-      ? "/knowledge/cards/draft/from-message"
-      : "/knowledge/faqs/draft/from-message";
-    try {
-      const res = await api.post<{ data: KnowledgeCard | KnowledgeFaq }>(path, { message_id: messageId });
-      const status = "status" in res.data ? res.data.status : "ai_draft";
-      setAssetDraftStatusByMessage((current) => ({
-        ...current,
-        [messageId]: {
-          ...(current[messageId] || {}),
-          [type]: status,
-        },
-      }));
-      showToast("success", type === "card" ? "已生成知识卡 AI 草稿" : "已生成 FAQ AI 草稿");
-    } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "知识沉淀失败");
-    }
-  }, []);
-
-  const handleCreateNote = useCallback(async (content: string) => {
-    if (!activeSessionId || !content.trim()) return false;
-
-    try {
-      const res = await api.post<{ data: ChatNote }>("/chat/notes", {
-        scope: "session",
-        session_id: activeSessionId,
-        content: content.trim(),
-      });
-      setSessionNotes((prev) => [res.data, ...prev]);
-      showToast("success", "笔记已保存");
-      return true;
-    } catch {
-      showToast("error", "添加笔记失败");
-      return false;
-    }
-  }, [activeSessionId]);
-
-  const handleUpdateNote = useCallback(async (noteId: string, content: string) => {
-    if (!content.trim()) return false;
-
-    try {
-      const res = await api.patch<{ data: ChatNote }>(`/chat/notes/${encodeURIComponent(noteId)}`, {
-        content: content.trim(),
-      });
-      setSessionNotes((prev) => prev.map((note) => (note.id === noteId ? res.data : note)));
-      showToast("success", "笔记已更新");
-      return true;
-    } catch {
-      showToast("error", "更新笔记失败");
-      return false;
-    }
-  }, []);
-
-  const handleDeleteNote = useCallback(async (noteId: string) => {
-    try {
-      await api.delete(`/chat/notes/${encodeURIComponent(noteId)}`);
-      setSessionNotes((prev) => prev.filter((note) => note.id !== noteId));
-      showToast("success", "笔记已删除");
-      return true;
-    } catch {
-      showToast("error", "删除笔记失败");
-      return false;
-    }
-  }, []);
 
   const activeTitle = activeSessionId
     ? (sessions.find((s) => s.id === activeSessionId)?.title || "会话")
