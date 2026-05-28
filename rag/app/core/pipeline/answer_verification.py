@@ -11,6 +11,7 @@ from .retrieve import _context_conflict_candidates
 
 ANSWER_VERIFICATION_SCHEMA = "answer-verification/v1"
 SUPPORT_SCORE_THRESHOLD = 0.18
+PARTIAL_VERIFICATION_CONFIDENCE_CAP = 0.59
 DEPRECATED_SOURCE_STATUSES = {
     "deprecated",
     "expired",
@@ -61,7 +62,8 @@ def verify_answer_ir(
 ) -> AnswerIR:
     """核验回答 claim 与引用证据的一致性，并把结果附加到 AnswerIR。
 
-    本轮只做“检查”和风险标记，不改变 answered/partial 状态；后续队列任务再统一处理降级策略。
+    核验失败不能只停留在 warning：全量 claim 不受支撑时降级为 insufficient_context，
+    局部失败、来源过期/废弃、版本冲突或候选矛盾时降级为 partial。
     """
 
     citation_evidence = _citation_evidence_by_id(answer_ir, sources)
@@ -106,12 +108,114 @@ def verify_answer_ir(
             conflict_candidates=conflict_candidates,
         ),
     )
+    downgrade = _verification_downgrade(
+        answer_ir=answer_ir,
+        unsupported_claims=unsupported_claims,
+        deprecated_sources=deprecated_sources,
+        expired_sources=expired_sources,
+        version_conflicts=version_conflicts,
+        conflict_candidates=conflict_candidates,
+        claim_count=claim_count,
+        claim_coverage_ratio=claim_coverage_ratio,
+    )
+    verification["decision"] = downgrade
+    if downgrade["downgraded"]:
+        warnings = _merge_warnings(warnings, [_downgrade_warning(downgrade, warnings)])
+
     metadata = {
         **answer_ir.metadata,
         "answer_verification": verification,
         "claim_coverage_ratio": claim_coverage_ratio,
+        "verification_decision": downgrade,
     }
-    return answer_ir.model_copy(update={"warnings": warnings, "metadata": metadata})
+    return answer_ir.model_copy(update={
+        "status": downgrade["status"],
+        "confidence": downgrade["confidence"],
+        "warnings": warnings,
+        "metadata": metadata,
+    })
+
+
+def _verification_downgrade(
+    *,
+    answer_ir: AnswerIR,
+    unsupported_claims: list[dict[str, Any]],
+    deprecated_sources: list[dict[str, str]],
+    expired_sources: list[dict[str, str]],
+    version_conflicts: list[dict[str, Any]],
+    conflict_candidates: list[dict],
+    claim_count: int,
+    claim_coverage_ratio: float,
+) -> dict[str, Any]:
+    if answer_ir.status in ("insufficient_context", "error"):
+        return {
+            "downgraded": False,
+            "previous_status": answer_ir.status,
+            "status": answer_ir.status,
+            "reason": "",
+            "confidence": answer_ir.confidence,
+            "confidence_cap": None,
+        }
+
+    reason = ""
+    status = answer_ir.status
+    confidence_cap: float | None = None
+    if claim_count and unsupported_claims and claim_coverage_ratio <= 0:
+        status = "insufficient_context"
+        reason = "unsupported_claims"
+        confidence_cap = 0.0
+    elif unsupported_claims:
+        status = "partial"
+        reason = "partial_unsupported_claims"
+        confidence_cap = PARTIAL_VERIFICATION_CONFIDENCE_CAP
+    elif expired_sources or deprecated_sources:
+        status = "partial"
+        reason = "stale_sources"
+        confidence_cap = PARTIAL_VERIFICATION_CONFIDENCE_CAP
+    elif version_conflicts:
+        status = "partial"
+        reason = "version_conflict"
+        confidence_cap = PARTIAL_VERIFICATION_CONFIDENCE_CAP
+    elif conflict_candidates:
+        status = "partial"
+        reason = "contradictory_evidence"
+        confidence_cap = PARTIAL_VERIFICATION_CONFIDENCE_CAP
+
+    if not reason:
+        return {
+            "downgraded": False,
+            "previous_status": answer_ir.status,
+            "status": answer_ir.status,
+            "reason": "",
+            "confidence": answer_ir.confidence,
+            "confidence_cap": None,
+        }
+
+    confidence = answer_ir.confidence if confidence_cap is None else min(answer_ir.confidence, confidence_cap)
+    return {
+        "downgraded": status != answer_ir.status or confidence != answer_ir.confidence,
+        "previous_status": answer_ir.status,
+        "status": status,
+        "reason": reason,
+        "confidence": round(confidence, 4),
+        "confidence_cap": confidence_cap,
+    }
+
+
+def _downgrade_warning(downgrade: dict[str, Any], warnings: list[AnswerWarning]) -> AnswerWarning:
+    citation_ids = _unique_ids(citation_id for warning in warnings for citation_id in warning.citation_ids)
+    if downgrade["status"] == "insufficient_context":
+        return AnswerWarning(
+            code="verification_downgraded",
+            message="回答核验未通过，已降级为证据不足状态，不能作为可追溯结论。",
+            citation_ids=citation_ids,
+        )
+    return AnswerWarning(
+        code="verification_downgraded",
+        message="回答核验存在风险，已降级为部分回答，需要结合引用人工复核。",
+        severity="info",
+        citation_ids=citation_ids,
+    )
 
 
 def _verify_claim_support(claim: dict[str, Any], citation_evidence: dict[str, str]) -> dict[str, Any]:

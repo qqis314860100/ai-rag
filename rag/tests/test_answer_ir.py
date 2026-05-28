@@ -161,8 +161,37 @@ def test_answer_verifier_flags_claims_not_supported_by_citations() -> None:
     warning_codes = [warning.code for warning in verified.warnings]
 
     assert "unsupported_claims" in warning_codes
+    assert "verification_downgraded" in warning_codes
+    assert verified.status == "insufficient_context"
+    assert verified.confidence == 0
+    assert verified.metadata["verification_decision"]["reason"] == "unsupported_claims"
     assert verified.metadata["answer_verification"]["claim_coverage_ratio"] == 0
     assert verified.metadata["answer_verification"]["unsupported_claims"][0]["claim_id"] == "claim-1"
+
+
+def test_answer_verifier_downgrades_partial_when_some_claims_are_unsupported() -> None:
+    source = {
+        **_source(),
+        "snippet": "绝缘电阻测试电压为500V DC，合格阈值不低于20MΩ。",
+        "content": "绝缘电阻测试电压为500V DC，合格阈值不低于20MΩ。",
+    }
+    ir = AnswerIR.from_chat(
+        answer="参数：绝缘电阻测试电压为500V DC。[来源 1] 风险：温度超过80℃必须停线。[来源 1]",
+        sources=[source],
+        original_query="绝缘电阻测试参数和温度限制是什么？",
+        rewritten_query="绝缘电阻测试参数和温度限制是什么？",
+        confidence=0.84,
+    )
+
+    verified = verify_answer_ir(ir, sources=[source], hits=[source])
+    warning_codes = [warning.code for warning in verified.warnings]
+
+    assert verified.status == "partial"
+    assert verified.confidence == 0.59
+    assert "unsupported_claims" in warning_codes
+    assert "verification_downgraded" in warning_codes
+    assert verified.metadata["verification_decision"]["reason"] == "partial_unsupported_claims"
+    assert verified.metadata["answer_verification"]["claim_coverage_ratio"] == 0.5
 
 
 def test_answer_verifier_flags_deprecated_expired_and_version_conflict_sources() -> None:
@@ -194,9 +223,13 @@ def test_answer_verifier_flags_deprecated_expired_and_version_conflict_sources()
     warning_codes = [warning.code for warning in verified.warnings]
     verification = verified.metadata["answer_verification"]
 
+    assert verified.status == "partial"
+    assert verified.confidence == 0.59
     assert "deprecated_sources" in warning_codes
     assert "expired_sources" in warning_codes
     assert "version_conflict" in warning_codes
+    assert "verification_downgraded" in warning_codes
+    assert verified.metadata["verification_decision"]["reason"] == "stale_sources"
     assert verification["deprecated_sources"][0]["citation_id"] == "chunk-old"
     assert verification["expired_sources"][0]["citation_id"] == "chunk-old"
     assert verification["version_conflicts"][0]["versions"] == {"v1": ["chunk-old"], "v2": ["chunk-new"]}
@@ -231,4 +264,8 @@ def test_answer_verifier_flags_contradictory_evidence_candidates() -> None:
     warning_codes = [warning.code for warning in verified.warnings]
 
     assert "contradictory_evidence" in warning_codes
+    assert verified.status == "partial"
+    assert verified.confidence == 0.59
+    assert "verification_downgraded" in warning_codes
+    assert verified.metadata["verification_decision"]["reason"] == "contradictory_evidence"
     assert verified.metadata["answer_verification"]["contradictory_evidence"][0]["positive"]["citation_id"] == "chunk-a"
