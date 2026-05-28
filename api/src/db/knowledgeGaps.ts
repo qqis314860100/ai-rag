@@ -102,6 +102,20 @@ export interface KnowledgeGapInput {
   lastSeenAt?: string;
 }
 
+export interface UpdateKnowledgeGapInput {
+  title?: string;
+  representativeQuestion?: string;
+  gapType?: KnowledgeGapType;
+  status?: KnowledgeGapStatus;
+  severity?: KnowledgeGapSeverity;
+  frequencyCount?: number;
+  sampleFailedQuestionIds?: string[];
+  queryUnderstanding?: QueryUnderstandingCandidate[];
+  retrievalEvidence?: RetrievalEvidenceRef[];
+  metadata?: Record<string, unknown>;
+  lastSeenAt?: string;
+}
+
 export interface FailedQuestionInput {
   eventType: FailedQuestionEventType;
   question: string;
@@ -303,6 +317,66 @@ export function getKnowledgeGapByKey(gapKey: string): KnowledgeGapRow | null {
 export function getFailedQuestionById(id: string): FailedQuestionRow | null {
   const row = getDb().prepare("SELECT * FROM failed_questions WHERE id = ?").get(id) as FailedQuestionRow | undefined;
   return row ?? null;
+}
+
+export function updateKnowledgeGap(id: string, input: UpdateKnowledgeGapInput): KnowledgeGapRow | null {
+  const existing = getKnowledgeGapById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const metadata = {
+    ...parseJson<Record<string, unknown>>(existing.metadata_json, {}),
+    ...(input.metadata ?? {}),
+  };
+
+  getDb().prepare(
+    `UPDATE knowledge_gaps
+     SET title = ?,
+         representative_question = ?,
+         gap_type = ?,
+         status = ?,
+         severity = ?,
+         frequency_count = ?,
+         sample_failed_question_ids_json = ?,
+         query_understanding_json = ?,
+         retrieval_evidence_json = ?,
+         metadata_json = ?,
+         last_seen_at = ?,
+         updated_at = ?
+     WHERE id = ?`
+  ).run(
+    input.title ?? existing.title,
+    input.representativeQuestion ?? existing.representative_question,
+    input.gapType ?? existing.gap_type,
+    input.status ?? existing.status,
+    input.severity ?? existing.severity,
+    Math.max(existing.frequency_count, input.frequencyCount ?? existing.frequency_count),
+    toJson(input.sampleFailedQuestionIds ?? parseJson<string[]>(existing.sample_failed_question_ids_json, [])),
+    toJson(input.queryUnderstanding ?? parseJson<QueryUnderstandingCandidate[]>(existing.query_understanding_json, [])),
+    toJson(input.retrievalEvidence ?? parseJson<RetrievalEvidenceRef[]>(existing.retrieval_evidence_json, [])),
+    toJson(metadata, {}),
+    input.lastSeenAt ?? now,
+    now,
+    id
+  );
+
+  return getKnowledgeGapById(id);
+}
+
+export function attachFailedQuestionsToGap(gapId: string, failedQuestionIds: string[]): number {
+  const existing = getKnowledgeGapById(gapId);
+  if (!existing || failedQuestionIds.length === 0) return 0;
+
+  const update = getDb().prepare("UPDATE failed_questions SET gap_id = ?, updated_at = ? WHERE id = ?");
+  const now = new Date().toISOString();
+  let changed = 0;
+  getDb().transaction(() => {
+    for (const id of failedQuestionIds) {
+      const result = update.run(gapId, now, id);
+      changed += result.changes;
+    }
+  })();
+  return changed;
 }
 
 export function listKnowledgeGaps(filters: KnowledgeGapFilters = {}) {

@@ -225,6 +225,92 @@ export interface RagImageArtifactContract {
   metadata?: Record<string, unknown>;
 }
 
+export interface RagFailedQuestionSignal {
+  id?: string;
+  question: string;
+  event_type?: string;
+  confidence?: number | null;
+  feedback_reason?: string;
+  feedback_comment?: string;
+  answer_snapshot?: string;
+  query_understanding?: Array<Record<string, unknown>>;
+  retrieval_evidence?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface RagKnowledgeGapClusterRequest {
+  failed_questions: RagFailedQuestionSignal[];
+  min_frequency?: number;
+  max_clusters?: number;
+}
+
+export interface RagDraftCandidate {
+  title: string;
+  summary?: string;
+  confidence?: number;
+  source_failed_question_ids?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagTermCandidate extends RagDraftCandidate {
+  canonical_term: string;
+  aliases?: string[];
+  retrieval_terms?: string[];
+}
+
+export interface RagAliasCandidate extends RagDraftCandidate {
+  canonical_term: string;
+  alias: string;
+  reason?: string;
+}
+
+export interface RagFaqDraftCandidate extends RagDraftCandidate {
+  question: string;
+  answer_outline?: string;
+  tags?: string[];
+}
+
+export interface RagKnowledgeCardDraftCandidate extends RagDraftCandidate {
+  topic: string;
+  related_terms?: string[];
+  missing_evidence?: string[];
+}
+
+export interface RagDocumentSupplementSuggestion extends RagDraftCandidate {
+  target_topic: string;
+  suggested_sections?: string[];
+  evidence_gaps?: string[];
+}
+
+export interface RagKnowledgeGapClusterDraft {
+  cluster_id: string;
+  title: string;
+  representative_question: string;
+  normalized_key: string;
+  gap_type: string;
+  severity: string;
+  frequency_count: number;
+  sample_failed_question_ids?: string[];
+  questions?: string[];
+  event_types?: string[];
+  related_terms?: string[];
+  retrieval_evidence?: Array<Record<string, unknown>>;
+  term_candidates?: RagTermCandidate[];
+  alias_candidates?: RagAliasCandidate[];
+  faq_drafts?: RagFaqDraftCandidate[];
+  knowledge_card_drafts?: RagKnowledgeCardDraftCandidate[];
+  document_supplement_suggestions?: RagDocumentSupplementSuggestion[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RagKnowledgeGapClusterResult {
+  schema_version?: string;
+  clusters: RagKnowledgeGapClusterDraft[];
+  ignored_count?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export type DiagramType = "mindmap" | "flowchart";
 
 export interface DiagramNode {

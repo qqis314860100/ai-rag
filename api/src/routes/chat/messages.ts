@@ -8,6 +8,7 @@ import { auditFromRequest } from "../../services/auditService";
 import { createSession, getSessionById, updateSession } from "../../db/chatSessions";
 import { createMessage, deleteMessageAndTruncateSession, formatMessage, getMessageById, listMessagesBySession, updateMessageAndTruncateSession } from "../../db/chatMessages";
 import { buildPublishedKnowledgeAssetContext } from "../../services/knowledgeAssetContextService";
+import { recordFailureSignalFromAssistantMessage } from "../../services/knowledgeFailureSignalService";
 import { recordChatMetric } from "../../services/metricsService";
 import { buildAnswerMessageMetadata, createAutoArtifactsFromVisualPlan, requireUserMessageMutationPermission } from "./shared";
 import { buildAnswerVerificationAuditDetail } from "./answerMetadata";
@@ -201,6 +202,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         metadata: assistantMetadata,
         latencyMs: 0,
       });
+      recordFailureSignalFromAssistantMessage(assistantMessage, req.user?.id || "anonymous");
 
       // Update session title from first message
       if (history.length === 0) {
@@ -258,6 +260,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       metadata: assistantMetadata,
       latencyMs: chatResult.trace?.total_ms,
     });
+    recordFailureSignalFromAssistantMessage(assistantMessage, req.user?.id || "anonymous");
     const autoArtifacts = await createAutoArtifactsFromVisualPlan(req, assistantMessage.id, chatResult.visual_plan);
 
     // Update session title from first message

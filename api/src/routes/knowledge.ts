@@ -27,12 +27,21 @@ import {
   listTerminologyTerms,
 } from "../db/terminology";
 import type { TerminologyStatus } from "../db/terminology";
+import {
+  isFailedQuestionEventType,
+  isKnowledgeGapStatus,
+  isKnowledgeGapType,
+  listFailedQuestions,
+  listKnowledgeGaps,
+} from "../db/knowledgeGaps";
+import type { FailedQuestionEventType, KnowledgeGapStatus, KnowledgeGapType } from "../db/knowledgeGaps";
 import { requirePermission } from "../middleware/auth";
 import { getDb } from "../db";
 import { getSessionById } from "../db/chatSessions";
 import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
 import { createKnowledgeFaqDraftFromMessage } from "../services/knowledgeFaqDraftService";
+import { generateKnowledgeGapClusterDrafts } from "../services/knowledgeGapClusterService";
 import { buildKnowledgeGovernanceView } from "../services/knowledgeGovernanceService";
 import { buildKnowledgeGraph } from "../services/knowledgeGraphService";
 import { emitWebhookEvent } from "../services/webhookService";
@@ -84,6 +93,7 @@ function queryString(value: unknown): string | undefined {
 }
 
 function queryNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value !== "string" || !value.trim()) return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -346,6 +356,94 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       sendSuccess(res, buildKnowledgeGovernanceView(), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/gaps",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const status = queryString(req.query.status);
+      let requestedStatus: KnowledgeGapStatus | undefined;
+      if (status !== undefined) {
+        if (!isKnowledgeGapStatus(status)) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口状态不合法。", 400);
+        }
+        requestedStatus = status;
+      }
+      const gapType = queryString(req.query.gap_type);
+      let requestedGapType: KnowledgeGapType | undefined;
+      if (gapType !== undefined) {
+        if (!isKnowledgeGapType(gapType)) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "知识缺口类型不合法。", 400);
+        }
+        requestedGapType = gapType;
+      }
+
+      sendSuccess(res, listKnowledgeGaps({
+        status: requestedStatus,
+        gapType: requestedGapType,
+        query: queryString(req.query.q),
+        page: queryNumber(req.query.page, 1),
+        pageSize: queryNumber(req.query.page_size, 20),
+      }), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.get(
+  "/knowledge/failed-questions",
+  requirePermission("document.read"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const eventType = queryString(req.query.event_type);
+      let requestedEventType: FailedQuestionEventType | undefined;
+      if (eventType !== undefined) {
+        if (!isFailedQuestionEventType(eventType)) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "失败问题事件类型不合法。", 400);
+        }
+        requestedEventType = eventType;
+      }
+
+      sendSuccess(res, listFailedQuestions({
+        gapId: queryString(req.query.gap_id),
+        eventType: requestedEventType,
+        sessionId: queryString(req.query.session_id),
+        userId: queryString(req.query.user_id),
+        page: queryNumber(req.query.page, 1),
+        pageSize: queryNumber(req.query.page_size, 20),
+      }), req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/gaps/cluster-drafts",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await generateKnowledgeGapClusterDrafts({
+        minFrequency: queryNumber(req.body.min_frequency, 2),
+        maxClusters: queryNumber(req.body.max_clusters, 20),
+        sampleLimit: queryNumber(req.body.sample_limit, 200),
+        persist: req.body.persist !== false,
+        requestId: req.requestId,
+        userId: req.user?.id,
+      });
+      auditFromRequest(req, "knowledge_gap.cluster_drafts.generate", "knowledge_gap", "batch", {
+        cluster_count: result.clusters.length,
+        persisted_count: result.persisted.length,
+        ignored_count: result.ignored_count,
+      });
+      sendSuccess(res, result, req.requestId);
     } catch (err) {
       next(err);
     }

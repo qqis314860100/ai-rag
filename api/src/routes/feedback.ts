@@ -5,6 +5,7 @@ import { sendSuccess, sendPaginated } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { requirePermission } from "../middleware/auth";
 import { auditFromRequest } from "../services/auditService";
+import { recordFailureSignalFromAssistantMessage } from "../services/knowledgeFailureSignalService";
 
 const router = Router();
 
@@ -35,6 +36,13 @@ router.post("/feedback", async (req: Request, res: Response, next: NextFunction)
       reason: reason as string | undefined,
       comment: comment as string | undefined,
     });
+    if (feedback.rating === "down") {
+      recordFailureSignalFromAssistantMessage(message, userId, "negative_feedback", {
+        id: feedback.id,
+        reason: feedback.reason,
+        comment: feedback.comment,
+      });
+    }
 
     auditFromRequest(req, "feedback.create", "feedback", feedback.id, {
       message_id,

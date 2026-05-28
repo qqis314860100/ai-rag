@@ -15,7 +15,15 @@ from ..core.pipeline import (
 )
 from ..core.pipeline.answer_verification import verify_answer_ir
 from ..core.terminology import list_term_entries, terminology_contract
-from ..artifacts import DiagramIR, build_image_artifact_contract, build_llm_diagram_ir, plan_visual_artifacts
+from ..artifacts import (
+    DiagramIR,
+    KnowledgeGapClusterRequest,
+    KnowledgeGapClusterResult,
+    build_image_artifact_contract,
+    build_knowledge_gap_cluster_drafts,
+    build_llm_diagram_ir,
+    plan_visual_artifacts,
+)
 from ..artifacts.knowledge_graph import build_lightweight_knowledge_graph
 from ..llm.usage_guard import LlmBudgetExceeded
 from ..llm.usage_guard import usage_summary
@@ -225,6 +233,15 @@ def knowledge_graph_plan(request: KnowledgeGraphPlanRequest):
         raise
     except Exception as e:
         logger.exception("Knowledge graph planning failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/knowledge-gaps/cluster-drafts", response_model=KnowledgeGapClusterResult)
+def knowledge_gap_cluster_drafts(request: KnowledgeGapClusterRequest):
+    try:
+        return build_knowledge_gap_cluster_drafts(request)
+    except Exception as e:
+        logger.exception("Knowledge gap clustering failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -25,3 +25,10 @@ from .knowledge_assets import (
     recommend_related_topics,
     should_block_knowledge_asset_persistence,
 )
+from .knowledge_gap_drafts import (
+    FailedQuestionSignal,
+    KnowledgeGapClusterDraft,
+    KnowledgeGapClusterRequest,
+    KnowledgeGapClusterResult,
+    build_knowledge_gap_cluster_drafts,
+)

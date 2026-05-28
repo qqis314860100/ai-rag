@@ -120,6 +120,60 @@ export const ragChatResponseSchema = z.object({
   visual_plan: ragVisualPlanSchema.nullable().optional(),
 }).passthrough();
 
+const ragDraftCandidateSchema = z.object({
+  title: z.string(),
+  summary: z.string().optional(),
+  confidence: z.number().optional(),
+  source_failed_question_ids: z.array(z.string()).optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
+export const ragKnowledgeGapClusterResultSchema = z.object({
+  schema_version: z.string().optional(),
+  clusters: z.array(z.object({
+    cluster_id: z.string(),
+    title: z.string(),
+    representative_question: z.string(),
+    normalized_key: z.string(),
+    gap_type: z.string(),
+    severity: z.string(),
+    frequency_count: z.number(),
+    sample_failed_question_ids: z.array(z.string()).optional(),
+    questions: z.array(z.string()).optional(),
+    event_types: z.array(z.string()).optional(),
+    related_terms: z.array(z.string()).optional(),
+    retrieval_evidence: z.array(unknownRecordSchema).optional(),
+    term_candidates: z.array(ragDraftCandidateSchema.extend({
+      canonical_term: z.string(),
+      aliases: z.array(z.string()).optional(),
+      retrieval_terms: z.array(z.string()).optional(),
+    }).passthrough()).optional(),
+    alias_candidates: z.array(ragDraftCandidateSchema.extend({
+      canonical_term: z.string(),
+      alias: z.string(),
+      reason: z.string().optional(),
+    }).passthrough()).optional(),
+    faq_drafts: z.array(ragDraftCandidateSchema.extend({
+      question: z.string(),
+      answer_outline: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+    }).passthrough()).optional(),
+    knowledge_card_drafts: z.array(ragDraftCandidateSchema.extend({
+      topic: z.string(),
+      related_terms: z.array(z.string()).optional(),
+      missing_evidence: z.array(z.string()).optional(),
+    }).passthrough()).optional(),
+    document_supplement_suggestions: z.array(ragDraftCandidateSchema.extend({
+      target_topic: z.string(),
+      suggested_sections: z.array(z.string()).optional(),
+      evidence_gaps: z.array(z.string()).optional(),
+    }).passthrough()).optional(),
+    metadata: unknownRecordSchema.optional(),
+  }).passthrough()),
+  ignored_count: z.number().optional(),
+  metadata: unknownRecordSchema.optional(),
+}).passthrough();
+
 const diagramWarningSchema = z.object({
   code: z.string(),
   message: z.string(),

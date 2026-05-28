@@ -1,4 +1,4 @@
-import { diagramIRSchema, parseRagContract, ragChatResponseSchema } from "./schemas";
+import { diagramIRSchema, parseRagContract, ragChatResponseSchema, ragKnowledgeGapClusterResultSchema } from "./schemas";
 import { getRagServiceUrl, ragFetch } from "./http";
 import type {
   DiagramIR,
@@ -9,6 +9,8 @@ import type {
   RagImageArtifactContract,
   RagIngestRequest,
   RagIngestResponse,
+  RagKnowledgeGapClusterRequest,
+  RagKnowledgeGapClusterResult,
   RagKnowledgeAssetContext,
   RagSearchRequest,
   RagSearchResponse,
@@ -143,6 +145,20 @@ export async function buildImageArtifactContract(
     requestId,
     userId
   );
+}
+
+export async function clusterKnowledgeGapDrafts(
+  request: RagKnowledgeGapClusterRequest,
+  requestId?: string,
+  userId?: string
+): Promise<RagKnowledgeGapClusterResult> {
+  const payload = await ragFetch<unknown>(
+    "/rag/knowledge-gaps/cluster-drafts",
+    request,
+    requestId,
+    userId
+  );
+  return parseRagContract("RAG knowledge gap cluster result", ragKnowledgeGapClusterResultSchema, payload);
 }
 
 export async function reindexDocument(
