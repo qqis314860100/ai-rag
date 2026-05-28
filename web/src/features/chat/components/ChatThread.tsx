@@ -73,6 +73,14 @@ const trustToneClass: Record<AnswerTrustSummary["tone"], { text: string; badge: 
   neutral: { text: "text-text-secondary", badge: "bg-surface-hover text-text-secondary", icon: "text-text-muted" },
 };
 
+function StreamingPlainText({ content }: { content: string }) {
+  return (
+    <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-text">
+      {content}
+    </div>
+  );
+}
+
 function QueryUnderstandingHint({ notice }: { notice: QueryUnderstandingNotice }) {
   const Icon = notice.tone === "confirmed" ? FileCheck : notice.tone === "confirmation" ? AlertCircle : CircleHelp;
 
@@ -357,11 +365,15 @@ export default function ChatThread({ messages, loading, streamingContent, stream
                   {answerQualityNotice && <AnswerQualityHint notice={answerQualityNotice} />}
                   {queryUnderstandingNotice && <QueryUnderstandingHint notice={queryUnderstandingNotice} />}
                   <div className="text-[15px] leading-relaxed text-text">
-                    <MarkdownContent
-                      content={msg.streaming ? streamingContent : msg.content}
-                      sources={msg.sources}
-                      onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }}
-                    />
+                    {msg.streaming ? (
+                      <StreamingPlainText content={streamingContent} />
+                    ) : (
+                      <MarkdownContent
+                        content={msg.content}
+                        sources={msg.sources}
+                        onSourceClick={(idx) => { if (msg.sources?.[idx]) onSourceAnchor?.(msg.sources, idx); }}
+                      />
+                    )}
                     {msg.streaming && (
                       <span className="inline-block w-[3px] h-5 ml-0.5 bg-accent align-middle" style={{ animation: "cursorBlink 0.6s step-end infinite", borderRadius: 1 }} />
                     )}

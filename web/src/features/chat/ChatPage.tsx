@@ -380,9 +380,10 @@ export default function ChatPage() {
       );
       const sessionId = activeSessionIdRef.current;
       if (sessionId) {
+        // 先让最终回答稳定落在当前气泡里，再静默合并后端 ID，避免保存事件触发列表闪跳。
         window.setTimeout(() => {
           void loadMessages(sessionId, { silent: true, merge: true });
-        }, 0);
+        }, 800);
       }
     }
   }, [

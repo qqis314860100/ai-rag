@@ -76,7 +76,15 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       });
-      res.write(`data: ${JSON.stringify({ type: "stage", stage: "accepted", message: "聊天请求已接收。" })}\n\n`);
+      res.flushHeaders?.();
+      const flushSse = (line: string) => {
+        res.write(line);
+        (res as Response & { flush?: () => void }).flush?.();
+      };
+      const writeSse = (payload: Record<string, unknown>) => {
+        flushSse(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+      writeSse({ type: "stage", stage: "accepted", message: "聊天请求已接收。" });
 
       let ragStream: Awaited<ReturnType<typeof chatWithRagStream>>;
       try {
@@ -92,14 +100,14 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "RAG 服务连接失败。";
-        res.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
+        writeSse({ type: "error", message });
         res.end();
         return;
       }
 
       if (!ragStream.ok) {
         const detail = await ragStream.text().catch(() => "");
-        res.write(`data: ${JSON.stringify({ type: "error", message: `RAG 服务返回错误: ${ragStream.status}`, detail })}\n\n`);
+        writeSse({ type: "error", message: `RAG 服务返回错误: ${ragStream.status}`, detail });
         res.end();
         return;
       }
@@ -118,7 +126,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
 
       const reader = ragStream.body?.getReader();
       if (!reader) {
-        res.write(`data: ${JSON.stringify({ type: "error", message: "RAG 流式响应不可读。" })}\n\n`);
+        writeSse({ type: "error", message: "RAG 流式响应不可读。" });
         res.end();
         return;
       }
@@ -166,7 +174,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
               } catch {
                 // ignore parse errors
               }
-              res.write(`${line}\n\n`);
+              flushSse(`${line}\n\n`);
             }
           }
         }
@@ -177,7 +185,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       // Save assistant message after stream completes
       if (streamFailed || !fullAnswer.trim()) {
         if (!streamFailed) {
-          res.write(`data: ${JSON.stringify({ type: "error", message: "回答生成失败，请重试。" })}\n\n`);
+          writeSse({ type: "error", message: "回答生成失败，请重试。" });
         }
         res.end();
         return;
@@ -224,7 +232,7 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
       });
 
       // 流式体验优先：回答保存后立即结束 SSE，图解由用户在回答卡片下方手动触发，避免正文结束后等待自动产物生成。
-      res.write(`data: ${JSON.stringify({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata, artifacts: [] })}\n\n`);
+      writeSse({ type: "saved", message_id: assistantMessage.id, session_id: sessionId, metadata: assistantMetadata, artifacts: [] });
       res.end();
       return;
     }
