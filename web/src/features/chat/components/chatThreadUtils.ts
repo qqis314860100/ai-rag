@@ -81,6 +81,7 @@ export function getDiagramActionLabel(diagramType: DiagramType, hasData: boolean
 }
 
 export function assetStatusLabel(status?: string) {
+  if (status === "queued" || status === "running") return "生成中";
   if (status === "published") return "已发布";
   if (status === "pending_review") return "待审核";
   if (status === "returned") return "已退回";

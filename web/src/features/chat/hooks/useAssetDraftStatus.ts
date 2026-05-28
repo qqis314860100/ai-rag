@@ -4,6 +4,24 @@ import { api } from "../../../services/api";
 import type { ChatMessage, KnowledgeCard, KnowledgeFaq } from "../types";
 
 const TEMP_PERSISTED_MESSAGE_ID_PREFIX = "pending-";
+const JOB_POLL_INTERVAL_MS = 1000;
+const JOB_POLL_LIMIT = 40;
+
+type AsyncJob<T> = {
+  id: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  result?: T;
+  error?: { message?: string };
+};
+
+type AsyncJobResponse<T> = {
+  job: AsyncJob<T>;
+  poll_url: string;
+};
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 function getActionMessageId(message: ChatMessage) {
   return message.persistedId || message.id;
@@ -62,8 +80,32 @@ export function useAssetDraftStatus(messages: ChatMessage[]) {
       ? "/knowledge/cards/draft/from-message"
       : "/knowledge/faqs/draft/from-message";
     try {
-      const res = await api.post<{ data: KnowledgeCard | KnowledgeFaq }>(path, { message_id: messageId });
-      const status = "status" in res.data ? res.data.status : "ai_draft";
+      const res = await api.post<{ data: AsyncJobResponse<KnowledgeCard | KnowledgeFaq> }>(path, { message_id: messageId });
+      setAssetDraftStatusByMessage((current) => ({
+        ...current,
+        [messageId]: {
+          ...(current[messageId] || {}),
+          [type]: "running",
+        },
+      }));
+
+      let job = res.data.job;
+      for (let index = 0; index < JOB_POLL_LIMIT && (job.status === "queued" || job.status === "running"); index += 1) {
+        await wait(JOB_POLL_INTERVAL_MS);
+        const pollRes = await api.get<{ data: AsyncJob<KnowledgeCard | KnowledgeFaq> }>(res.data.poll_url);
+        job = pollRes.data;
+      }
+
+      if (job.status === "failed") {
+        throw new Error(job.error?.message || "知识沉淀失败");
+      }
+
+      if (job.status !== "succeeded" || !job.result) {
+        showToast("success", "知识草稿仍在生成中，可稍后查看");
+        return;
+      }
+
+      const status = "status" in job.result ? job.result.status : "ai_draft";
       setAssetDraftStatusByMessage((current) => ({
         ...current,
         [messageId]: {
