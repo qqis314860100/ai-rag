@@ -49,6 +49,12 @@ import { getMessageById } from "../db/chatMessages";
 import { createKnowledgeCardDraftFromMessage } from "../services/knowledgeCardDraftService";
 import { createKnowledgeFaqDraftFromMessage } from "../services/knowledgeFaqDraftService";
 import { generateKnowledgeGapClusterDrafts } from "../services/knowledgeGapClusterService";
+import {
+  acceptKnowledgeGapAliasCandidates,
+  createFaqFromKnowledgeGap,
+  createSopSnippetFromKnowledgeGap,
+  mergeKnowledgeGapIntoTarget,
+} from "../services/knowledgeGapGovernanceService";
 import { buildKnowledgeGovernanceView } from "../services/knowledgeGovernanceService";
 import { buildKnowledgeGraph } from "../services/knowledgeGraphService";
 import { emitWebhookEvent } from "../services/webhookService";
@@ -601,6 +607,85 @@ router.post(
         cluster_count: result.clusters.length,
         persisted_count: result.persisted.length,
         ignored_count: result.ignored_count,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/gaps/:id/actions/accept-aliases",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = acceptKnowledgeGapAliasCandidates(String(req.params.id), currentUser(req));
+      auditFromRequest(req, "knowledge_gap.aliases.accept", "knowledge_gap", String(req.params.id), {
+        accepted_count: result.accepted_terms.length,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/gaps/:id/actions/merge",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const targetGapId = bodyString(req.body.target_gap_id || req.body.merged_to_gap_id);
+      if (!targetGapId) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "合并知识缺口必须指定 target_gap_id。", 400);
+      }
+      const result = mergeKnowledgeGapIntoTarget(String(req.params.id), targetGapId, currentUser(req));
+      auditFromRequest(req, "knowledge_gap.merge", "knowledge_gap", String(req.params.id), {
+        target_gap_id: result.target_gap.id,
+        attached_failed_question_count: result.attached_failed_question_count,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/gaps/:id/actions/create-faq",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = createFaqFromKnowledgeGap(
+        String(req.params.id),
+        currentUser(req),
+        bodyString(req.body.failed_question_id) || undefined
+      );
+      auditFromRequest(req, "knowledge_gap.faq.create", "knowledge_gap", String(req.params.id), {
+        faq_id: result.faq.id,
+        failed_question_id: bodyString(req.body.failed_question_id) || undefined,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/knowledge/gaps/:id/actions/create-sop-snippet",
+  requirePermission("evaluation.run"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = createSopSnippetFromKnowledgeGap(
+        String(req.params.id),
+        currentUser(req),
+        bodyString(req.body.failed_question_id) || undefined
+      );
+      auditFromRequest(req, "knowledge_gap.sop_snippet.create", "knowledge_gap", String(req.params.id), {
+        card_id: result.card.id,
+        failed_question_id: bodyString(req.body.failed_question_id) || undefined,
       });
       sendSuccess(res, result, req.requestId);
     } catch (err) {

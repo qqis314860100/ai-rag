@@ -261,6 +261,11 @@ function draftSummary(item: DraftSuggestion) {
   return "需要人工核验后才能发布到正式知识资产。";
 }
 
+function draftCount(gap: KnowledgeGap, key: "alias_candidates" | "faq_drafts" | "knowledge_card_drafts") {
+  const suggestions = objectValue(gap.metadata.draft_suggestions);
+  return draftItems(suggestions?.[key]).length;
+}
+
 function groupCount(gaps: KnowledgeGap[], key: SegmentKey) {
   return gaps.filter((gap) => segmentMatches(gap, key)).length;
 }
@@ -287,9 +292,12 @@ export default function KnowledgeGapsPage() {
   const [statusFlow, setStatusFlow] = useState<StatusFlow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState("");
 
-  async function loadGovernanceData(signal?: AbortSignal) {
-    setLoading(true);
+  async function loadGovernanceData(signal?: AbortSignal, options: { silent?: boolean } = {}) {
+    if (!options.silent) setLoading(true);
     setError(null);
 
     const [gapRes, failedRes, statusRes] = await Promise.all([
@@ -354,11 +362,43 @@ export default function KnowledgeGapsPage() {
     return { pending, urgent, unclustered, evidenceBackedRefusals };
   }, [failedQuestions, gaps]);
 
+  const mergeTargets = useMemo(() => {
+    return gaps.filter((gap) => gap.id !== selectedGap?.id && gap.status !== "ignored");
+  }, [gaps, selectedGap?.id]);
+
+  useEffect(() => {
+    if (!selectedGap) return;
+    const currentIsValid = mergeTargets.some((gap) => gap.id === mergeTargetId);
+    if (!currentIsValid) {
+      setMergeTargetId(mergeTargets[0]?.id || "");
+    }
+    setActionMessage(null);
+  }, [mergeTargetId, mergeTargets, selectedGap]);
+
   const statusOptions = statusFlow?.statuses || Object.keys(statusFallbackLabels).map((status) => ({
     status: status as GapStatus,
     label: statusFallbackLabels[status as GapStatus],
     next: [],
   }));
+
+  async function runGapAction(action: string, path: string, body: Record<string, unknown>, success: string) {
+    if (!selectedGap || actionBusy) return;
+    setActionBusy(action);
+    setActionMessage(null);
+    try {
+      await api.post<ApiResponse<unknown>>(path, body);
+      await loadGovernanceData(undefined, { silent: true });
+      setActionMessage(success);
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "治理动作执行失败");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  function selectedFailedQuestionId() {
+    return selectedFailedQuestions[0]?.id;
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-page">
@@ -591,6 +631,92 @@ export default function KnowledgeGapsPage() {
                           样本问题
                         </p>
                         <p className="mt-2 text-sm font-medium text-text">{selectedGap.sample_failed_question_ids.length || selectedFailedQuestions.length} 条</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 rounded-lg border border-border bg-surface-page p-4">
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-text">审核发布动作</p>
+                          <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                            动作只消费后端/RAG 生成的候选和失败问题快照，前端不生成业务知识。
+                          </p>
+                        </div>
+                        {actionMessage && (
+                          <p className={`rounded-md px-3 py-1.5 text-xs font-semibold ${actionMessage.includes("失败") || actionMessage.includes("必须") || actionMessage.includes("需要") ? "bg-danger-soft text-danger" : "bg-success-soft text-success"}`}>
+                            {actionMessage}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="mt-3 grid gap-2 xl:grid-cols-4">
+                        <button
+                          disabled={actionBusy !== null || draftCount(selectedGap, "alias_candidates") === 0}
+                          onClick={() => runGapAction(
+                            "aliases",
+                            `/knowledge/gaps/${encodeURIComponent(selectedGap.id)}/actions/accept-aliases`,
+                            {},
+                            "已接受候选别名并写入术语治理"
+                          )}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          接受别名 {draftCount(selectedGap, "alias_candidates") || ""}
+                        </button>
+                        <button
+                          disabled={actionBusy !== null || (!selectedFailedQuestions.length && draftCount(selectedGap, "faq_drafts") === 0)}
+                          onClick={() => runGapAction(
+                            "faq",
+                            `/knowledge/gaps/${encodeURIComponent(selectedGap.id)}/actions/create-faq`,
+                            { failed_question_id: selectedFailedQuestionId() },
+                            "已生成 FAQ 草稿"
+                          )}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <CircleHelp className="h-4 w-4" />
+                          转 FAQ
+                        </button>
+                        <button
+                          disabled={actionBusy !== null || (!selectedFailedQuestions.length && draftCount(selectedGap, "knowledge_card_drafts") === 0)}
+                          onClick={() => runGapAction(
+                            "sop",
+                            `/knowledge/gaps/${encodeURIComponent(selectedGap.id)}/actions/create-sop-snippet`,
+                            { failed_question_id: selectedFailedQuestionId() },
+                            "已生成 SOP 片段草稿"
+                          )}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          <BookOpenCheck className="h-4 w-4" />
+                          转 SOP 片段
+                        </button>
+                        <div className="flex min-h-10 rounded-lg border border-border bg-white">
+                          <select
+                            value={mergeTargetId}
+                            onChange={(event) => setMergeTargetId(event.target.value)}
+                            disabled={actionBusy !== null || mergeTargets.length === 0}
+                            className="min-w-0 flex-1 rounded-l-lg bg-transparent px-3 text-sm text-text-secondary outline-none disabled:cursor-not-allowed disabled:opacity-45"
+                            title="选择合并目标"
+                          >
+                            {mergeTargets.length > 0 ? mergeTargets.map((gap) => (
+                              <option key={gap.id} value={gap.id}>{gap.title}</option>
+                            )) : (
+                              <option value="">无可合并目标</option>
+                            )}
+                          </select>
+                          <button
+                            disabled={actionBusy !== null || !mergeTargetId}
+                            onClick={() => runGapAction(
+                              "merge",
+                              `/knowledge/gaps/${encodeURIComponent(selectedGap.id)}/actions/merge`,
+                              { target_gap_id: mergeTargetId },
+                              "已合并相似问题"
+                            )}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-r-lg border-l border-border px-3 text-sm font-semibold text-text-secondary hover:bg-surface-hover hover:text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                          >
+                            <Split className="h-4 w-4" />
+                            合并
+                          </button>
+                        </div>
                       </div>
                     </div>
 
