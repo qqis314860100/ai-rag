@@ -313,7 +313,7 @@ function trustWarnings(message: ChatMessage): AnswerTrustWarning[] {
     })
     .filter((warning): warning is AnswerTrustWarning => Boolean(warning))
     .filter((warning) => {
-      const key = `${warning.code}:${warning.message}`;
+      const key = warning.message.replace(/\s+/g, "");
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

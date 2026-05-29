@@ -25,6 +25,15 @@ function coverageText(summary: AnswerTrustSummary) {
   return "暂无引用";
 }
 
+function warningSummary(summary: AnswerTrustSummary) {
+  const errorCount = summary.warnings.filter((warning) => warning.severity === "error").length;
+  const primary = summary.warnings.find((warning) => warning.severity === "error") ?? summary.warnings[0];
+  if (!primary) return "";
+  const prefix = errorCount > 0 ? "高风险提示" : "核验提示";
+  const suffix = summary.warnings.length > 1 ? `，另有 ${summary.warnings.length - 1} 条` : "";
+  return `${prefix}：${primary.message}${suffix}`;
+}
+
 export default function AnswerTrustPanel({
   summary,
   sources,
@@ -36,7 +45,7 @@ export default function AnswerTrustPanel({
   const coverageRatioLabel = summary.claimCoverageRatio !== undefined && summary.claimCount > 0
     ? `${Math.round(summary.claimCoverageRatio * 100)}%`
     : "";
-  const visibleWarnings = summary.warnings.slice(0, 3);
+  const visibleWarning = warningSummary(summary);
   const hasSources = Boolean(sources?.length);
 
   return (
@@ -69,19 +78,15 @@ export default function AnswerTrustPanel({
           </button>
         )}
       </div>
-      {visibleWarnings.length > 0 && (
-        <div className="mt-2 flex flex-col gap-1 text-[12px] leading-relaxed text-text-secondary">
-          {visibleWarnings.map((warning) => (
-            <div key={`${warning.code}:${warning.message}`} className="flex min-w-0 items-start gap-1.5">
-              <AlertCircle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${warning.severity === "error" ? "text-danger" : "text-warning"}`} />
-              <span className="min-w-0 flex-1">{warning.message}</span>
-              {warning.citationIds.length > 0 && (
-                <span className="shrink-0 rounded-md bg-surface-hover px-1.5 py-0.5 text-[11px] text-text-muted">
-                  {warning.citationIds.length} 引用
-                </span>
-              )}
-            </div>
-          ))}
+      {visibleWarning && (
+        <div className="mt-2 flex min-w-0 items-center gap-1.5 rounded-lg bg-surface-page px-2.5 py-1.5 text-[12px] leading-relaxed text-text-secondary">
+          <AlertCircle className={`h-3.5 w-3.5 shrink-0 ${summary.tone === "danger" ? "text-danger" : "text-warning"}`} />
+          <span className="min-w-0 flex-1 truncate" title={visibleWarning}>{visibleWarning}</span>
+          {summary.warnings.some((warning) => warning.citationIds.length > 0) && (
+            <span className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-[11px] text-text-muted">
+              见引用
+            </span>
+          )}
         </div>
       )}
       {hasSources && (
