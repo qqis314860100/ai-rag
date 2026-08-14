@@ -265,6 +265,7 @@ export default function ChatPage() {
   }, [activeSessionId, setActiveSessionId, saveDraft, cancelStream, isSending, navigate]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
+    if (!window.confirm("确认删除该会话？会话内的全部消息将不可恢复。")) return;
     const ok = await deleteSession(id);
     if (ok) {
       if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
@@ -325,13 +326,33 @@ export default function ChatPage() {
     handleSend(lastUserMsg.content);
   }, [messages, handleSend]);
 
-  const handleEditUser = useCallback((messageId: string, newContent: string) => {
+  const handleEditUser = useCallback(async (messageId: string, newContent: string) => {
     if (!newContent.trim() || isSending) return;
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
-    setMessages((prev) => prev.slice(0, idx));
-    handleSend(newContent.trim());
-  }, [messages, handleSend, isSending]);
+    const sid = activeSessionId;
+    if (!sid) return;
+
+    // Persist the edit (PATCH truncates later messages server-side), then
+    // regenerate in place via message_id — no duplicate user message is created.
+    const placeholderId = `stream-${Date.now()}`;
+    placeholderIdRef.current = placeholderId;
+    const placeholderMsg: ChatMessage = {
+      id: placeholderId, session_id: sid, role: "assistant",
+      content: "", streaming: true, created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [
+      ...prev.slice(0, idx).map((m) =>
+        m.id === messageId ? { ...m, content: newContent.trim() } : m
+      ),
+      placeholderMsg,
+    ]);
+    setScrollToBottomSignal((n) => n + 1);
+    setSelectedSources(null);
+    removeDraft(sid);
+
+    await sendStream(sid, newContent.trim(), 5, messageId);
+  }, [activeSessionId, messages, sendStream, isSending, removeDraft, setMessages]);
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     const idx = messages.findIndex((m) => m.id === messageId);

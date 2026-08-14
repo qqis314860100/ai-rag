@@ -5,11 +5,28 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function redirectToLogin() {
+  localStorage.removeItem("kb_token");
+  localStorage.removeItem("kb_user");
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login";
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...authHeaders() },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(options?.headers ?? {}),
+    },
   });
+  if (res.status === 401) {
+    // Token expired/invalid — drop it and send the user to the login page
+    redirectToLogin();
+    throw new Error("登录已过期，请重新登录");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
     throw new Error(err.error?.message ?? "Request failed");
@@ -53,6 +70,9 @@ export function uploadWithProgress(
         const data = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data);
+        } else if (xhr.status === 401) {
+          redirectToLogin();
+          reject(new Error("登录已过期，请重新登录"));
         } else {
           reject(new Error(data?.error?.message || `Upload failed (${xhr.status})`));
         }
@@ -74,6 +94,10 @@ export async function sseStream(path: string, body: unknown, signal?: AbortSigna
     body: JSON.stringify(body),
     signal,
   });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new Error("登录已过期，请重新登录");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
     throw new Error(err.error?.message ?? "Request failed");

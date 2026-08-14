@@ -43,7 +43,7 @@ export function useStreamChat() {
   }, []);
 
   const sendStream = useCallback(
-    async (sessionId: string, message: string, topK: number) => {
+    async (sessionId: string, message: string, topK: number, messageId?: string) => {
       if (sendingRef.current) return;
       sendingRef.current = true;
 
@@ -98,6 +98,7 @@ export function useStreamChat() {
       try {
         const reader = await sseStream("/chat", {
           session_id: sessionId, message, top_k: topK, stream: true,
+          ...(messageId ? { message_id: messageId } : {}),
         }, abortRef.current.signal);
 
         const decoder = new TextDecoder();
