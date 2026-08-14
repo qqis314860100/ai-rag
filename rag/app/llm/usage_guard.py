@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ def _usage_log_path() -> Path:
 
 
 def _today() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def _iter_today_records() -> list[dict[str, Any]]:
@@ -100,7 +100,7 @@ def record_usage(
 ) -> None:
     path = _usage_log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = {
         "ts": now.isoformat(),
         "date": now.date().isoformat(),

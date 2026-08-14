@@ -1,4 +1,5 @@
 import re
+
 from .base import BaseParser, ParsedDocument
 
 
@@ -10,7 +11,6 @@ class MarkdownParser(BaseParser):
         sections = []
         tables = []
         current_section = None
-        current_level = 0
         section_path: list[str] = []
         table_lines: list[str] = []
 
@@ -32,7 +32,6 @@ class MarkdownParser(BaseParser):
                     "title": title,
                     "section_path": " / ".join(section_path),
                 })
-                current_level = level
                 current_section = title
                 continue
 

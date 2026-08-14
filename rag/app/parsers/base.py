@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 
 @dataclass
@@ -21,7 +22,7 @@ class BaseParser(ABC):
 
 
 class ParserRegistry:
-    _parsers: dict[str, BaseParser] = {}
+    _parsers: ClassVar[dict[str, BaseParser]] = {}
 
     @classmethod
     def register(cls, extension: str, parser: BaseParser):

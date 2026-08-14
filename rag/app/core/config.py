@@ -1,7 +1,9 @@
+import logging
 import os
 import sqlite3
-import logging
 from pathlib import Path
+from typing import ClassVar
+
 from dotenv import load_dotenv
 
 # Load .env from project root (enterprise-rag-kb/)
@@ -29,7 +31,7 @@ def _read_db_setting(key: str, default: str = "") -> str:
         if row:
             logger.info(f"Loaded {key}={row[0]} from DB settings")
             return row[0]
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         logger.debug(f"Could not read {key} from DB: {e}")
 
     return default
@@ -77,6 +79,22 @@ class Config:
     llm_max_input_chars_per_request: int = _read_env_int("LLM_MAX_INPUT_CHARS_PER_REQUEST", 25000)
     llm_daily_request_limit: int = _read_env_int("LLM_DAILY_REQUEST_LIMIT", 50)
     llm_daily_input_char_limit: int = _read_env_int("LLM_DAILY_INPUT_CHAR_LIMIT", 300000)
+
+    # Shared secret between the API gateway and this service.
+    # When set, every /rag request must carry it in the X-API-Key header.
+    rag_api_key: str = os.getenv("RAG_API_KEY", "")
+
+    # Directories the ingest/reindex endpoints are allowed to read from.
+    # Prevents arbitrary file reads through the file_path parameter.
+    rag_allowed_dirs: ClassVar[list[str]] = [
+        d
+        for d in (
+            os.getenv("RAG_ALLOWED_DIRS", "").split(":")
+            if os.getenv("RAG_ALLOWED_DIRS", "").strip()
+            else [str(_root / "data" / "uploads"), str(_root / "knowledge")]
+        )
+        if d
+    ]
 
 
 config = Config()

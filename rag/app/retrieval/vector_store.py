@@ -1,9 +1,11 @@
-import os
 import logging
+import os
+
 import chromadb
 from chromadb.config import Settings
-from ..core.config import config
+
 from ..chunking.chunker import Chunk
+from ..core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
     embeddings: list[list[float]] = []
 
     # Build embedding texts and compute embeddings
-    from ..embedding.service import embed_texts, build_embedding_text
+    from ..embedding.service import build_embedding_text, embed_texts
 
     texts_to_embed: list[str] = []
     for c in chunks:

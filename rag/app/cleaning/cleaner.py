@@ -1,5 +1,6 @@
 import re
 import unicodedata
+
 from ..parsers.base import ParsedDocument
 
 # Control chars to strip (keep common whitespace)

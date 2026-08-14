@@ -1,6 +1,7 @@
-import re
 import hashlib
+import re
 from dataclasses import dataclass, field
+
 from ..parsers.base import ParsedDocument
 
 
@@ -40,12 +41,6 @@ def chunk_document(
     current_len = 0
     current_section = ""
     current_section_path = ""
-
-    for section in parsed.sections:
-        section_text = _find_section_text(text, section["title"])
-        if section_text:
-            current_section = section["title"]
-            current_section_path = section.get("section_path", section["title"])
 
     for para in paragraphs:
         para = para.strip()
@@ -176,10 +171,3 @@ def _estimate_tokens(text: str) -> int:
     chinese_chars = len(re.findall(r"[一-鿿]", text))
     other_chars = len(text) - chinese_chars
     return chinese_chars + int(other_chars / 3.5)
-
-
-def _find_section_text(text: str, title: str) -> str:
-    idx = text.find(title)
-    if idx >= 0:
-        return text[idx:idx + 500]
-    return ""

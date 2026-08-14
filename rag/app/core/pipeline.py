@@ -1,21 +1,22 @@
-import time
 import logging
-from .config import config
-from ..parsers.base import ParserRegistry
-from ..parsers.markdown import MarkdownParser
-from ..parsers.text import TxtParser
-from ..parsers.pdf import PdfParser
-from ..parsers.docx import DocxParser
-from ..chunking.chunker import chunk_document, Chunk
+import time
+from pathlib import Path
+
+from ..chunking.chunker import chunk_document
 from ..cleaning.cleaner import clean_parsed_document
 from ..embedding.service import embed_query
-from ..retrieval.vector_store import search, upsert_chunks, delete_by_document
 from ..llm.client import chat as llm_chat
 from ..llm.prompt_builder import (
     build_messages,
     extract_sources,
-    format_chunks_for_debug,
 )
+from ..parsers.base import ParserRegistry
+from ..parsers.docx import DocxParser
+from ..parsers.markdown import MarkdownParser
+from ..parsers.pdf import PdfParser
+from ..parsers.text import TxtParser
+from ..retrieval.vector_store import delete_by_document, search, upsert_chunks
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,24 @@ ParserRegistry.register(".markdown", MarkdownParser())
 ParserRegistry.register(".txt", TxtParser())
 ParserRegistry.register(".pdf", PdfParser())
 ParserRegistry.register(".docx", DocxParser())
+
+
+def _validate_file_path(file_path: str) -> str:
+    """Reject paths outside the configured allowed directories.
+
+    The ingest endpoints receive file paths from the API gateway; without a
+    containment check an attacker who can reach the RAG service directly could
+    read arbitrary files from the host and vectorize them.
+    """
+    resolved = Path(file_path).expanduser().resolve()
+    allowed_roots = [Path(d).expanduser().resolve() for d in config.rag_allowed_dirs if d]
+    if not allowed_roots:
+        raise ValueError("No allowed ingest directories configured")
+    if not resolved.is_file():
+        raise ValueError(f"File not found or not a regular file: {file_path}")
+    if not any(resolved == root or resolved.is_relative_to(root) for root in allowed_roots):
+        raise ValueError(f"Path outside allowed directories: {file_path}")
+    return str(resolved)
 
 
 class RagPipeline:
@@ -37,9 +56,10 @@ class RagPipeline:
         start = time.time()
         meta = metadata or {}
 
-        # 1. Parse document
-        parser = ParserRegistry.get(file_path)
-        parsed = parser.parse(file_path, document_id, meta)
+        # 1. Parse document (path containment check first)
+        safe_path = _validate_file_path(file_path)
+        parser = ParserRegistry.get(safe_path)
+        parsed = parser.parse(safe_path, document_id, meta)
 
         # 2. Clean
         parsed = clean_parsed_document(parsed)
@@ -77,17 +97,23 @@ class RagPipeline:
     ) -> dict:
         return self.ingest_document(document_id, file_path, metadata)
 
-    def search(
+    def retrieve(
         self, query: str, top_k: int,
         allowed_security_levels: list[str],
         filters: dict | None = None,
     ) -> dict:
+        """Shared retrieval for chat/search: rewrite → embed → search → rerank.
+
+        Both the streaming and non-streaming chat paths must go through here so
+        they produce consistent results.
+        """
         start = time.time()
 
-        # 1. Embed query
-        q_embedding = embed_query(query)
+        # 0. Query rewrite for chapter/number patterns
+        rewritten_query = _rewrite_query(query)
 
-        # 2. Search ChromaDB
+        # 1. Embed + search
+        q_embedding = embed_query(rewritten_query)
         hits = search(
             query_embedding=q_embedding,
             allowed_security_levels=allowed_security_levels,
@@ -95,12 +121,27 @@ class RagPipeline:
             filters=filters,
         )
 
-        latency_ms = int((time.time() - start) * 1000)
+        # 2. Keyword-aware rerank: boost chunks matching query keywords
+        hits = _keyword_rerank(query, hits)
 
+        latency_ms = int((time.time() - start) * 1000)
+        return {"results": hits, "latency_ms": latency_ms}
+
+    def search(
+        self, query: str, top_k: int,
+        allowed_security_levels: list[str],
+        filters: dict | None = None,
+    ) -> dict:
+        result = self.retrieve(
+            query=query,
+            top_k=top_k,
+            allowed_security_levels=allowed_security_levels,
+            filters=filters,
+        )
         return {
             "query": query,
-            "results": hits,
-            "latency_ms": latency_ms,
+            "results": result["results"],
+            "latency_ms": result["latency_ms"],
         }
 
     def debug_search(
@@ -110,7 +151,7 @@ class RagPipeline:
         include_prompt: bool = False,
     ) -> dict:
         # Run search
-        search_result = self.search(
+        search_result = self.retrieve(
             query=query,
             top_k=top_k,
             allowed_security_levels=allowed_security_levels,
@@ -156,29 +197,20 @@ class RagPipeline:
     ) -> dict:
         total_start = time.time()
 
-        # 0. Query rewrite for chapter/number patterns
-        rewritten_query = _rewrite_query(query)
-
-        # 1. Search for relevant context (use rewritten query)
-        search_start = time.time()
-        search_result = self.search(
-            query=rewritten_query,
+        # 1. Retrieve context (rewrite + rerank applied inside)
+        search_result = self.retrieve(
+            query=query,
             top_k=top_k,
             allowed_security_levels=allowed_security_levels,
             filters=filters,
         )
-        retrieval_ms = int((time.time() - search_start) * 1000)
-
+        retrieval_ms = search_result["latency_ms"]
         hits = search_result["results"]
-
-        # 1.5 Keyword-aware rerank: boost chunks matching query keywords
-        hits = _keyword_rerank(query, hits)
 
         # 2. Build prompt
         messages = build_messages(query, hits, history, self.config.rag_max_context_chars)
 
         # 3. Call LLM
-        llm_start = time.time()
         llm_result = llm_chat(messages, temperature=self.config.rag_temperature)
         llm_ms = llm_result["latency_ms"]
 

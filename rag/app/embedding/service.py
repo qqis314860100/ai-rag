@@ -1,6 +1,7 @@
-import time
 import hashlib
 import logging
+import time
+
 from ..core.config import config
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ def _get_model():
             logger.info(f"Loading embedding model: {config.embedding_model}")
             _embedding_model = SentenceTransformer(config.embedding_model)
             logger.info("Embedding model loaded successfully")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - any model failure must fall back
             logger.warning(f"Failed to load model: {e}. Using fallback embeddings.")
             _use_fallback = True
     return _embedding_model
@@ -62,7 +63,7 @@ def embed_texts(texts: list[str], batch_size: int | None = None) -> list[list[fl
             for vec in result:
                 embeddings.append(vec.tolist())
         return embeddings
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - any embed failure must fall back
         logger.warning(f"Embed failed: {e}, switching to fallback")
         _use_fallback = True
         return [_fallback_embed(t) for t in texts]
@@ -78,7 +79,7 @@ def embed_query(query: str) -> list[float]:
             _use_fallback = True
             return _fallback_embed(query)
         return model.encode([query], normalize_embeddings=True)[0].tolist()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - any embed failure must fall back
         logger.warning(f"Query embed failed: {e}, using fallback")
         _use_fallback = True
         return _fallback_embed(query)

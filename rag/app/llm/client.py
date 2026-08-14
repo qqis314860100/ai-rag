@@ -1,6 +1,8 @@
-import time
 import logging
+import time
+
 from openai import OpenAI
+
 from ..core.config import config
 from .usage_guard import LlmBudgetExceeded, check_budget, estimate_input_chars, record_usage
 
@@ -15,12 +17,19 @@ def _get_client() -> OpenAI:
         _client = OpenAI(
             api_key=config.deepseek_api_key or "mock-key",
             base_url=config.deepseek_base_url,
+            # Retry transient upstream failures (429/5xx) with backoff
+            max_retries=2,
+            timeout=60.0,
         )
     return _client
 
 
 def _has_api_key() -> bool:
     return bool(config.deepseek_api_key)
+
+
+class LlmProviderError(Exception):
+    """Raised when the upstream LLM call fails (after retries)."""
 
 
 def chat(
@@ -90,8 +99,9 @@ def chat(
             status="error",
             error=str(e),
         )
-        # Fallback to mock on error
-        return _mock_chat(messages, error=str(e))
+        # Never fabricate answers on upstream failure: surface the error so the
+        # caller can degrade explicitly (e.g. show a clear failure message).
+        raise LlmProviderError(f"LLM provider error: {e}") from e
 
 def chat_stream(messages: list[dict[str, str]], temperature: float | None = None):
     """Generator that yields SSE token strings from DeepSeek streaming response."""
@@ -144,7 +154,7 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
             error=str(e),
         )
         yield f"data: {_sse_json({'type': 'error', 'message': f'本次请求已被本地预算保护拦截：{e}'})}\n\n"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - stream generators must surface errors as SSE events
         logger.error(f"DeepSeek streaming error: {e}")
         record_usage(
             mode="stream",
@@ -162,12 +172,6 @@ def _sse_json(obj: dict) -> str:
 
 
 def _mock_chat(messages: list[dict[str, str]], error: str = "") -> dict:
-    user_query = ""
-    for m in reversed(messages):
-        if m["role"] == "user":
-            user_query = m.get("content", "")
-            break
-
     context_texts: list[str] = []
     for m in messages:
         if m["role"] == "system":
@@ -185,7 +189,7 @@ def _mock_chat(messages: list[dict[str, str]], error: str = "") -> dict:
         for i, ctx in enumerate(context_texts[:3], 1):
             answer += f"{i}. {ctx[:200]}...\n\n"
     else:
-        answer = f"[Mock LLM - No API Key]\n\n基于知识库检索结果，我提供以下参考：\n\n"
+        answer = "[Mock LLM - No API Key]\n\n基于知识库检索结果，我提供以下参考：\n\n"
         for i, ctx in enumerate(context_texts[:3], 1):
             answer += f"{i}. {ctx[:300]}...\n\n"
 
