@@ -3,12 +3,13 @@ import { addFavorite, getFavoriteMessageIds, listFavorites, removeFavorite } fro
 import { getMessageById } from "../db/chatMessages";
 import { auditFromRequest } from "../services/auditService";
 import { AppError, ErrorCodes } from "../utils/errors";
+import { requireAuth } from "../middleware/jwtAuth";
 import { sendSuccess } from "../utils/response";
 
 const router = Router();
 
 // GET /api/favorites - list current user's saved answers
-router.get("/favorites", (req: Request, res: Response, next: NextFunction) => {
+router.get("/favorites", requireAuth, (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id || "anonymous";
     sendSuccess(res, { items: listFavorites(userId) }, req.requestId);
@@ -18,7 +19,7 @@ router.get("/favorites", (req: Request, res: Response, next: NextFunction) => {
 });
 
 // GET /api/favorites/status?message_ids=id1,id2 - check saved answers in a thread
-router.get("/favorites/status", (req: Request, res: Response, next: NextFunction) => {
+router.get("/favorites/status", requireAuth, (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id || "anonymous";
     const messageIds = ((req.query.message_ids as string) || "").split(",").filter(Boolean);
@@ -32,7 +33,7 @@ router.get("/favorites/status", (req: Request, res: Response, next: NextFunction
 });
 
 // POST /api/favorites - save an assistant answer
-router.post("/favorites", (req: Request, res: Response, next: NextFunction) => {
+router.post("/favorites", requireAuth, (req: Request, res: Response, next: NextFunction) => {
   try {
     const { message_id } = req.body;
     if (!message_id || typeof message_id !== "string") {
@@ -58,7 +59,7 @@ router.post("/favorites", (req: Request, res: Response, next: NextFunction) => {
 });
 
 // DELETE /api/favorites/:messageId - remove a saved answer
-router.delete("/favorites/:messageId", (req: Request, res: Response, next: NextFunction) => {
+router.delete("/favorites/:messageId", requireAuth, (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.id || "anonymous";
     const messageId = req.params.messageId as string;

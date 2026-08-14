@@ -12,6 +12,7 @@ QUERY="Busbar焊接熔深标准"
 echo "Query: ${QUERY}"
 
 RESPONSE=$(curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer ${API_TOKEN:-}" \
   -X POST "${BASE_URL}/api/search/debug" \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"${QUERY}\", \"top_k\": 5, \"mode\": \"vector\", \"include_prompt\": true}")

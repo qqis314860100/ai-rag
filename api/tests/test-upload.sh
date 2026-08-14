@@ -38,6 +38,7 @@ echo "Test file created: ${TEST_FILE}"
 
 # 发送上传请求
 RESPONSE=$(curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer ${API_TOKEN:-}" \
   -X POST "${BASE_URL}/api/documents/upload" \
   -F "file=@${TEST_FILE}" \
   -F "title=测试文档-$(date +%s)" \
@@ -95,6 +96,8 @@ echo "PASS: document_id=${DOC_ID}, title=${TITLE}, index_status=${INDEX_STATUS}"
 echo ""
 echo "--- Verify document in list ---"
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer ${API_TOKEN:-}" \
+  -H "Authorization: Bearer ${API_TOKEN:-}" \
   "${BASE_URL}/api/documents?keyword=测试文档")
 
 LIST_CODE=$(echo "$LIST_RESPONSE" | tail -1)

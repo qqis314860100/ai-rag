@@ -28,6 +28,7 @@ for QUERY in "${QUERIES[@]}"; do
   RESPONSE=$(curl -s -w "\n%{http_code}" \
     -X POST "${BASE_URL}/api/search" \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${API_TOKEN:-}" \
     -d "{\"query\": \"${QUERY}\", \"top_k\": 3}")
 
   HTTP_CODE=$(echo "$RESPONSE" | tail -1)

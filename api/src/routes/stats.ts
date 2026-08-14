@@ -2,11 +2,13 @@ import { Router, Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "../db/index";
 import { sendSuccess } from "../utils/response";
+import { requireAuth } from "../middleware/jwtAuth";
 
 const router = Router();
 
-// GET /api/stats/dashboard — aggregated dashboard stats
-router.get("/stats/dashboard", (_req: Request, res: Response, next: NextFunction) => {
+// GET /api/stats/dashboard — aggregated dashboard stats (authenticated users only;
+// the data contains other users' sessions and queries)
+router.get("/stats/dashboard", requireAuth, (_req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
 
@@ -45,7 +47,7 @@ router.get("/stats/dashboard", (_req: Request, res: Response, next: NextFunction
 });
 
 // GET /api/stats/feedback-counts?message_ids=id1,id2
-router.get("/stats/feedback-counts", (req: Request, res: Response, next: NextFunction) => {
+router.get("/stats/feedback-counts", requireAuth, (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
     const ids = ((req.query.message_ids as string) || "").split(",").filter(Boolean);

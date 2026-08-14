@@ -1,13 +1,19 @@
 import { Request, Response, NextFunction } from "express";
 import pino from "pino";
 
-const logger = pino({
-  transport: {
-    target: "pino-pretty",
-    options: { colorize: true },
-  },
-  level: process.env.NODE_ENV === "production" ? "info" : "debug",
-});
+// Structured JSON logs in production (no worker threads — bundle-friendly);
+// pretty console output in development.
+const logger = pino(
+  process.env.NODE_ENV === "production"
+    ? { level: "info" }
+    : {
+        transport: {
+          target: "pino-pretty",
+          options: { colorize: true },
+        },
+        level: "debug",
+      }
+);
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   const start = Date.now();

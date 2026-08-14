@@ -4,12 +4,13 @@ import { getMessageById } from "../db/chatMessages";
 import { sendSuccess, sendPaginated } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { requirePermission } from "../middleware/auth";
+import { requireAuth } from "../middleware/jwtAuth";
 import { auditFromRequest } from "../services/auditService";
 
 const router = Router();
 
 // POST /api/feedback - submit feedback
-router.post("/feedback", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/feedback", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { message_id, rating, reason, comment } = req.body;
 

@@ -23,6 +23,7 @@ for QUESTION in "${QUESTIONS[@]}"; do
   echo "--- Question: ${QUESTION} ---"
 
   RESPONSE=$(curl -s -w "\n%{http_code}" \
+    -H "Authorization: Bearer ${API_TOKEN:-}" \
     -X POST "${BASE_URL}/api/chat" \
     -H "Content-Type: application/json" \
     -d "{\"message\": \"${QUESTION}\", \"top_k\": 5}")

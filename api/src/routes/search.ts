@@ -3,12 +3,13 @@ import { searchDocuments, searchDebug } from "../services/ragClient";
 import { sendSuccess } from "../utils/response";
 import { AppError, ErrorCodes } from "../utils/errors";
 import { getSecurityLevelsForRequest, requirePermission } from "../middleware/auth";
+import { requireAuth } from "../middleware/jwtAuth";
 import { auditFromRequest } from "../services/auditService";
 
 const router = Router();
 
 // POST /api/search - semantic search
-router.post("/search", async (req: Request, res: Response, next: NextFunction) => {
+router.post("/search", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { query, top_k, mode, filters } = req.body;
 

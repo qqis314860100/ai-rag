@@ -14,7 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-API_DIR="${SCRIPT_DIR}/api"
+API_DIR="${SCRIPT_DIR}"
 BASE_URL="${API_BASE_URL:-http://localhost:3001}"
 export API_BASE_URL="${BASE_URL}"
 
@@ -27,6 +27,23 @@ echo "============================================"
 echo ""
 
 # 检查 API 是否可达
+# 登录获取测试 Token（新鉴权要求：受保护接口需要 Bearer Token）
+echo "  Logging in as admin for authenticated tests..."
+API_TOKEN=""
+for attempt in 1 2 3 4 5; do
+  LOGIN_RESP=$(curl -s -X POST "${BASE_URL}/api/auth/login" -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}')
+  API_TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null || echo "")
+  [ -n "$API_TOKEN" ] && break
+  sleep 12
+done
+if [ -z "$API_TOKEN" ]; then
+  echo "ERROR: could not obtain test token (login rate-limited or credentials changed)."
+  exit 1
+fi
+export API_TOKEN
+echo "  Token acquired (${#API_TOKEN} chars)."
+echo ""
+
 echo "[0/6] Checking API availability..."
 if ! curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${BASE_URL}/api/admin/health" > /dev/null 2>&1; then
   echo ""

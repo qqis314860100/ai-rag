@@ -33,6 +33,8 @@ export interface DocumentFilters {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  /** Restrict results to documents whose security_level is in this list. */
+  allowedSecurityLevels?: string[];
 }
 
 export interface CreateDocumentInput {
@@ -73,6 +75,10 @@ export function listDocuments(filters: DocumentFilters = {}) {
     conditions.push("d.security_level = ?");
     params.push(filters.securityLevel);
   }
+  if (filters.allowedSecurityLevels && filters.allowedSecurityLevels.length > 0) {
+    conditions.push(`d.security_level IN (${filters.allowedSecurityLevels.map(() => "?").join(", ")})`);
+    params.push(...filters.allowedSecurityLevels);
+  }
   if (filters.keyword) {
     conditions.push("d.title LIKE ?");
     params.push(`%${filters.keyword}%`);
@@ -80,8 +86,8 @@ export function listDocuments(filters: DocumentFilters = {}) {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 20;
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, filters.pageSize ?? 20));
   const offset = (page - 1) * pageSize;
 
   const countRow = db
@@ -95,7 +101,7 @@ export function listDocuments(filters: DocumentFilters = {}) {
     .all(...params, pageSize, offset) as DocumentRow[];
 
   return {
-    items: rows.map(formatDocument),
+    items: rows.map((r) => formatDocument(r)),
     total: countRow.total,
     page,
     pageSize,
@@ -108,9 +114,9 @@ export function getDocumentById(id: string): DocumentRow | null {
   return row ?? null;
 }
 
-export function createDocument(input: CreateDocumentInput): DocumentRow {
+export function createDocument(input: CreateDocumentInput, idOverride?: string): DocumentRow {
   const db = getDb();
-  const id = uuidv4();
+  const id = idOverride ?? uuidv4();
   const now = new Date().toISOString();
 
   db.prepare(
@@ -189,7 +195,8 @@ export function updateDocumentIndexStatus(
   return updateDocument(id, { indexStatus, chunkCount, indexError });
 }
 
-export function formatDocument(row: DocumentRow) {
+export function formatDocument(row: DocumentRow, opts: { includePath?: boolean } = {}) {
+  const { includePath = false } = opts;
   return {
     id: row.id,
     title: row.title,
@@ -201,7 +208,9 @@ export function formatDocument(row: DocumentRow) {
     status: row.status,
     security_level: row.security_level,
     tags: JSON.parse(row.tags_json || "[]") as string[],
-    file_path: row.file_path,
+    // Server-side absolute paths are never exposed to clients; internal
+    // consumers (sync-from-rag, reindex) use the raw row instead.
+    ...(includePath ? { file_path: row.file_path } : {}),
     file_name: row.file_name,
     file_type: row.file_type,
     file_size: row.file_size,

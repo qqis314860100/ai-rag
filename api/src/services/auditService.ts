@@ -1,6 +1,7 @@
 import { Request } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "../db";
+import { logger } from "../middleware/requestLogger";
 
 export interface AuditEntry {
   operatorId?: string;
@@ -36,8 +37,17 @@ export function writeAuditLog(entry: AuditEntry): void {
       entry.requestId ?? null,
       now
     );
-  } catch {
-    // Audit logging should not break the main flow
+  } catch (err) {
+    // Audit logging must never break the main flow, but silently losing audit
+    // records hides security-relevant events — surface the failure loudly.
+    logger.error(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        action: entry.action,
+        request_id: entry.requestId,
+      },
+      "audit log write failed"
+    );
   }
 }
 

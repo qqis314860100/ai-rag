@@ -32,6 +32,20 @@ export function errorHandler(
     return;
   }
 
+  // Handle body-parser errors (malformed JSON, oversized payload) as client errors
+  const bodyErr = err as unknown as { type?: string; status?: number };
+  if (bodyErr.type === "entity.parse.failed" || bodyErr.type === "entity.too.large") {
+    sendError(
+      res,
+      "VALIDATION_ERROR",
+      bodyErr.type === "entity.too.large" ? "请求体过大。" : "请求体不是合法的 JSON。",
+      bodyErr.status && bodyErr.status >= 400 && bodyErr.status < 500 ? bodyErr.status : 400,
+      undefined,
+      req.requestId
+    );
+    return;
+  }
+
   // Handle multer errors
   if (err.name === "MulterError") {
     const multerErr = err as unknown as { code: string; field?: string };

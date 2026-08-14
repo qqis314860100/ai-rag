@@ -101,6 +101,16 @@ interface RagChatResponse {
   };
 }
 
+function ragHeaders(requestId?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (requestId) headers["X-Request-Id"] = requestId;
+  // Shared secret between the API gateway and the RAG service (if configured)
+  if (getConfig().ragApiKey) headers["X-API-Key"] = getConfig().ragApiKey;
+  return headers;
+}
+
 async function ragFetch<T>(
   path: string,
   body: unknown,
@@ -119,10 +129,7 @@ async function ragFetch<T>(
 
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(requestId ? { "X-Request-Id": requestId } : {}),
-        },
+        headers: ragHeaders(requestId),
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -279,17 +286,15 @@ export function chatWithRagStream(
   topK?: number,
   filters?: RagChatRequest["filters"],
   history?: Array<{ role: string; content: string }>,
-  requestId?: string
+  requestId?: string,
+  signal?: AbortSignal
 ): Promise<Response> {
   const cfg = getConfig();
   const url = `${cfg.ragServiceUrl}/rag/chat/stream`;
 
   return fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(requestId ? { "X-Request-Id": requestId } : {}),
-    },
+    headers: ragHeaders(requestId),
     body: JSON.stringify({
       query,
       top_k: topK ?? 5,
@@ -297,6 +302,7 @@ export function chatWithRagStream(
       filters: filters ?? {},
       history: history ?? [],
     }),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -308,7 +314,7 @@ export async function checkRagHealth(): Promise<{ status: string }> {
   const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { headers: ragHeaders(), signal: controller.signal });
     clearTimeout(timeoutId);
     if (!response.ok) {
       return { status: "error" };

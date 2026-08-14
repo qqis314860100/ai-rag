@@ -41,6 +41,26 @@ router.put(
         }
       }
 
+      // Validate values before persisting
+      if (stringUpdates.rag_top_k !== undefined) {
+        const v = Number(stringUpdates.rag_top_k);
+        if (!Number.isInteger(v) || v < 1 || v > 50) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "rag_top_k 必须是 1-50 的整数。", 400);
+        }
+      }
+      if (stringUpdates.rag_temperature !== undefined) {
+        const v = Number(stringUpdates.rag_temperature);
+        if (!Number.isFinite(v) || v < 0 || v > 1) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "rag_temperature 必须在 0-1 之间。", 400);
+        }
+      }
+      if (stringUpdates.rag_max_context_chars !== undefined) {
+        const v = Number(stringUpdates.rag_max_context_chars);
+        if (!Number.isInteger(v) || v < 1000 || v > 100000) {
+          throw new AppError(ErrorCodes.VALIDATION_ERROR, "rag_max_context_chars 必须是 1000-100000 的整数。", 400);
+        }
+      }
+
       setMultipleSettings(stringUpdates, req.user?.id);
 
       auditFromRequest(req, "settings.update", "settings", undefined, {
