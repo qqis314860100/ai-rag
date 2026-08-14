@@ -1,5 +1,11 @@
 # Repo Rules
 
+Start here:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- [scripts/check-harness.sh](scripts/check-harness.sh)
+
 Before changing code, read:
 - [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
