@@ -6,7 +6,7 @@
   "scripts": {
     "dev:web": "pnpm --filter web dev",
     "dev:api": "pnpm --filter api dev",
-    "dev:rag": "cd rag && python -m uvicorn app.main:app --reload --port 8000",
+    "dev:rag": "cd rag && python -m uvicorn app.main:app --reload --port 8001",
     "dev": "pnpm run --parallel dev:web dev:api",
     "build:web": "pnpm --filter web build",
     "build:api": "pnpm --filter api build",
