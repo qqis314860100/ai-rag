@@ -10,7 +10,11 @@
     "dev": "pnpm run --parallel dev:web dev:api",
     "build:web": "pnpm --filter web build",
     "build:api": "pnpm --filter api build",
-    "build": "pnpm run build:web && pnpm run build:api"
+    "build": "pnpm run build:web && pnpm run build:api",
+    "typecheck": "pnpm --filter web build && pnpm --filter api build",
+    "lint": "bash scripts/lint.sh",
+    "test": "bash api/tests/run-tests.sh",
+    "check": "bash scripts/check-harness.sh"
   },
   "engines": {
     "node": ">=20.0.0"

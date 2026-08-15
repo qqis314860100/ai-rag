@@ -1,0 +1,57 @@
+version: 1
+method: risk-adaptive-r2c-harness
+
+risk:
+  dimensions:
+    - ambiguity
+    - blast-radius
+    - data
+    - auth-security
+    - public-contract
+    - production-operations
+    - reversibility
+  paths:
+    fast: 0-2
+    standard: 3-7
+    strict: 8-14
+  hard-strict:
+    - destructive-data
+    - auth-or-security-boundary
+    - breaking-public-contract
+    - production-operation
+    - irreversible-change
+    - compliance-or-safety
+
+stages:
+  - intake
+  - clarify
+  - specify
+  - plan
+  - apply
+  - verify
+  - archive
+
+records:
+  standard-and-strict: .ai/changes/<change-id>/change.md
+  template: .ai/templates/change.md
+
+evidence:
+  deterministic: required
+  behavior: required-for-user-facing-change
+  human-gate: required-for-subjective-or-irreversible-change
+
+checks:
+  fast: []
+  standard: []
+  strict: []
+
+guardrails:
+  production: explicit-authority-required
+  data: preserve-source-and-legacy-identity
+  credentials: never-record-or-package
+  irreversible: human-gate-required
+
+governance:
+  archive: commit-or-review-summary
+  durable-decisions: adr
+  repeated-failure: guide-then-sensor
