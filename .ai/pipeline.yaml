@@ -41,9 +41,9 @@ evidence:
   human-gate: required-for-subjective-or-irreversible-change
 
 checks:
-  fast: ["pnpm --filter web build", "pnpm --filter api build"]
-  standard: ["bash scripts/check-harness.sh", "bash api/tests/run-tests.sh"]
-  strict: ["bash scripts/check-harness.sh", "bash api/tests/run-tests.sh", "bash api/tests/security/security-tests.sh"]
+  fast: ["pnpm run build"]
+  standard: ["pnpm run verify", "pnpm run test:api"]
+  strict: ["pnpm run verify", "pnpm run test:api", "pnpm run audit:diff -- --strict", "bash scripts/lint.sh"]
 
 guardrails:
   production: explicit-authority-required
