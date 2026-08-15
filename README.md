@@ -14,12 +14,16 @@
 ## 项目结构
 
 ```
-├── web/           ← React 前端 (localhost:5174)
-├── api/           ← Express API (localhost:3001)
-├── rag/           ← Python RAG 服务 (localhost:8001)
-├── knowledge/     ← 知识库源文档 (14 篇)
-├── docs/          ← 项目文档 (含 CONTRIBUTING.md)
-├── package.json   ← pnpm workspace 编排
+├── web/                       ← React 前端 (localhost:5174)
+├── api/                       ← Express API (localhost:3001)
+├── rag/                       ← Python RAG 服务 (localhost:8001)
+├── knowledge/                 ← 知识库源文档 (14 篇)
+├── docs/                      ← 项目文档（docs/README.md 索引）
+├── skills/                    ← coding-implementation 技能
+├── .ai/                       ← 变更工作流（pipeline.yaml + 变更记录）
+├── .prompt/                   ← 分层工程模板
+├── scripts/                   ← check-harness.sh / lint.sh
+├── package.json               ← pnpm workspace 编排
 └── README.md
 ```
 

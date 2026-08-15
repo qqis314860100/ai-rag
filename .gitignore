@@ -28,3 +28,6 @@ output/
 .codex/
 web/src/**/*.js
 web/src/**/*.js.map
+
+# Lint caches
+.ruff_cache/

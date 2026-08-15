@@ -4,6 +4,7 @@ Start here:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/EXECUTION_RULES.md](docs/EXECUTION_RULES.md)
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+- [docs/README.md](docs/README.md) — docs 分类索引
 - [docs/PRD.md](docs/PRD.md) — 产品需求（事实源）
 - [docs/glossary.md](docs/glossary.md) — 领域术语
 - [docs/decisions/](docs/decisions/) — 决策记录
