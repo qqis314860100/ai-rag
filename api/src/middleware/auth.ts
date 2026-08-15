@@ -98,7 +98,9 @@ function verifyJwtUser(token: string): { id: string; name: string } & ReturnType
 }
 
 export function extractUser(req: Request, _res: Response, next: NextFunction): void {
-  // 1. JWT takes precedence — the only accepted credential in production.
+  const isProduction = config.isProduction;
+
+  // JWT 优先；生产环境下无效 token 不能继续降级到开发头或默认用户。
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const user = verifyJwtUser(authHeader.slice(7));
@@ -114,23 +116,25 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
     }
   }
 
-  // 2. Dev-only conveniences — NEVER enabled in production:
-  //    - header impersonation (x-user-id / x-user-role)
-  //    - default to the DB "system"/"admin" user when unauthenticated
-  if (!config.isProduction) {
-    const userId = req.headers["x-user-id"] as string | undefined;
-    const userRole = req.headers["x-user-role"] as string | undefined;
+  if (isProduction) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, "生产环境必须提供有效登录凭证。", 401);
+  }
 
-    if (userId && userRole) {
-      req.user = {
-        id: userId,
-        name: (req.headers["x-user-name"] as string) || userId,
-        ...roleToUser(userRole),
-      };
-      return next();
-    }
+  // 开发模式允许通过请求头模拟用户，便于本地联调。
+  const userId = req.headers["x-user-id"] as string | undefined;
+  const userRole = req.headers["x-user-role"] as string | undefined;
 
-    try {
+  if (userId && userRole) {
+    req.user = {
+      id: userId,
+      name: (req.headers["x-user-name"] as string) || userId,
+      ...roleToUser(userRole),
+    };
+    return next();
+  }
+
+  // 仅开发模式允许回退到系统用户，生产环境已在上方强制 401。
+  try {
       const db = getDb();
       const sys = db.prepare("SELECT id, name, role FROM users WHERE name='system' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
       const user = sys || db.prepare("SELECT id, name, role FROM users WHERE name='admin' LIMIT 1").get() as { id: string; name: string; role: string } | undefined;
@@ -138,10 +142,9 @@ export function extractUser(req: Request, _res: Response, next: NextFunction): v
         req.user = { id: user.id, name: user.name, ...roleToUser(user.role) };
         return next();
       }
-    } catch {
-      // DB not ready yet — fall through to anonymous
+    } catch (error) {
+      console.warn("Failed to resolve default user from database", error);
     }
-  }
 
   // 3. Anonymous fallback: lowest privilege, no permissions.
   req.user = { id: "anonymous", name: "访客", role: "viewer", permissions: ROLE_PERMISSIONS["viewer"], allowedSecurityLevels: ["public"] };

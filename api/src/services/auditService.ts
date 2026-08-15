@@ -20,13 +20,16 @@ export function writeAuditLog(entry: AuditEntry): void {
     const db = getDb();
     const id = uuidv4();
     const now = new Date().toISOString();
+    const operator = entry.operatorId
+      ? db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").get(entry.operatorId) as { id: string } | undefined
+      : undefined;
 
     db.prepare(
       `INSERT INTO audit_logs (id, operator_id, operator_name, action, resource_type, resource_id, detail_json, ip, user_agent, request_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
-      entry.operatorId ?? null,
+      operator?.id ?? null,
       entry.operatorName ?? null,
       entry.action,
       entry.resourceType ?? null,

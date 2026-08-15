@@ -9,6 +9,7 @@ from .usage_guard import LlmBudgetExceeded, check_budget, estimate_input_chars, 
 logger = logging.getLogger(__name__)
 
 _client = None
+_OFFLINE_PROVIDERS = {"mock", "offline", "none", "disabled"}
 
 
 def _get_client() -> OpenAI:
@@ -32,19 +33,32 @@ class LlmProviderError(Exception):
     """Raised when the upstream LLM call fails (after retries)."""
 
 
+def _mock_reason() -> str:
+    provider = (config.llm_provider or "deepseek").strip().lower()
+    if provider in _OFFLINE_PROVIDERS:
+        return f"LLM_PROVIDER={provider}"
+    if provider != "deepseek":
+        return f"unsupported LLM_PROVIDER={provider}"
+    if not _has_api_key():
+        return "DEEPSEEK_API_KEY is empty"
+    return ""
+
+
 def chat(
     messages: list[dict[str, str]],
     temperature: float | None = None,
     stream: bool = False,
+    response_format: dict | None = None,
 ) -> dict:
     """
     Returns: { "content": str, "model": str, "latency_ms": int }
     """
     temp = temperature if temperature is not None else config.rag_temperature
+    mock_reason = _mock_reason()
 
-    if not _has_api_key():
-        logger.info("No DEEPSEEK_API_KEY set, using mock LLM response")
-        return _mock_chat(messages)
+    if mock_reason:
+        logger.info("LLM external call disabled, using mock response: %s", mock_reason)
+        return _mock_chat(messages, reason=mock_reason)
 
     client = _get_client()
     start = time.time()
@@ -52,13 +66,16 @@ def chat(
 
     try:
         check_budget(input_chars)
-        response = client.chat.completions.create(
-            model=config.deepseek_model,
-            messages=messages,
-            temperature=temp,
-            stream=stream,
-            timeout=60,
-        )
+        request_kwargs = {
+            "model": config.deepseek_model,
+            "messages": messages,
+            "temperature": temp,
+            "stream": stream,
+            "timeout": 60,
+        }
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
+        response = client.chat.completions.create(**request_kwargs)
         if stream:
             return {"stream": response, "model": config.deepseek_model, "latency_ms": 0}
         elapsed_ms = int((time.time() - start) * 1000)
@@ -85,11 +102,7 @@ def chat(
             status="blocked",
             error=str(e),
         )
-        return {
-            "content": f"本次请求已被本地预算保护拦截：{e}",
-            "model": config.deepseek_model + " (blocked)",
-            "latency_ms": 0,
-        }
+        raise
     except Exception as e:
         logger.error(f"DeepSeek API error: {e}")
         record_usage(
@@ -106,17 +119,18 @@ def chat(
 def chat_stream(messages: list[dict[str, str]], temperature: float | None = None):
     """Generator that yields SSE token strings from DeepSeek streaming response."""
     temp = temperature if temperature is not None else config.rag_temperature
-    client = _get_client()
+    mock_reason = _mock_reason()
 
-    if not _has_api_key():
-        # Mock streaming
-        mock = _mock_chat(messages)
+    if mock_reason:
+        # 离线或未配置密钥时仍保持 SSE 形态，避免前端链路分叉。
+        mock = _mock_chat(messages, reason=mock_reason)
         content = mock["content"]
         for i in range(0, len(content), 3):
             yield f"data: {_sse_json({'type': 'token', 'content': content[i:i+3]})}\n\n"
         yield f"data: {_sse_json({'type': 'done', 'model': mock['model'], 'latency_ms': mock['latency_ms']})}\n\n"
         return
 
+    client = _get_client()
     start = time.time()
     input_chars = estimate_input_chars(messages)
     output_chars = 0
@@ -153,7 +167,7 @@ def chat_stream(messages: list[dict[str, str]], temperature: float | None = None
             status="blocked",
             error=str(e),
         )
-        yield f"data: {_sse_json({'type': 'error', 'message': f'本次请求已被本地预算保护拦截：{e}'})}\n\n"
+        yield f"data: {_sse_json({'type': 'error', **e.as_detail()})}\n\n"
     except Exception as e:  # noqa: BLE001 - stream generators must surface errors as SSE events
         logger.error(f"DeepSeek streaming error: {e}")
         record_usage(
@@ -171,7 +185,7 @@ def _sse_json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
-def _mock_chat(messages: list[dict[str, str]], error: str = "") -> dict:
+def _mock_chat(messages: list[dict[str, str]], error: str = "", reason: str = "") -> dict:
     context_texts: list[str] = []
     for m in messages:
         if m["role"] == "system":
@@ -189,7 +203,8 @@ def _mock_chat(messages: list[dict[str, str]], error: str = "") -> dict:
         for i, ctx in enumerate(context_texts[:3], 1):
             answer += f"{i}. {ctx[:200]}...\n\n"
     else:
-        answer = "[Mock LLM - No API Key]\n\n基于知识库检索结果，我提供以下参考：\n\n"
+        label = reason or "DEEPSEEK_API_KEY is empty"
+        answer = f"[Mock LLM - {label}]\n\n基于知识库检索结果，我提供以下参考：\n\n"
         for i, ctx in enumerate(context_texts[:3], 1):
             answer += f"{i}. {ctx[:300]}...\n\n"
 

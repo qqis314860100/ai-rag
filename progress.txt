@@ -1,0 +1,550 @@
+# Ralph 进度记录
+
+## 当前状态
+
+- Ralph 已固定为 Codex runner，不再依赖本地 Claude Code。
+- 当前 PRD 已按页面真实能力重新校准：需要与 API / RAG 同步的前端任务已重开，API 与 RAG 侧此前标记完成的任务也全部重开，只有真实联调验收后才可再次勾选。
+- 最新范围变化：新增“流程图语义与企业图解质量升级”阶段，目标是把流程图从关键词/按钮生成升级为角色、动作、判断、分支、循环、证据驱动的 DiagramIR 链路。
+- 新增架构文档：`docs/流程图语义生成架构方案.md`，作为后续 RAG structured output、API 质量门槛和 Web 纯渲染的共同设计依据。
+- 最新范围变化：项目内安装 Impeccable UI skill，并新增 `PRODUCT.md`、`DESIGN.md`、`docs/企业级 UI 协作工作流.md`；后续高影响 UI 任务需走设计审查、打磨、适配和截图验收。
+- 下一轮建议：执行 PRD 未完成队列中的 `rag`: 扩展 `DiagramIR` 流程图节点和边语义，先打通 start/end/input/output/decision/subflow 与 loop/fallback 的兼容 schema。
+- 最新完成 `web` / `rag`: AI 整理入口已接入真实 Diagram IR 链路，前端按钮会调用 API，再由 RAG 生成 mindmap / flowchart 中间表示并回显节点。
+- 最新完成 `api`: 消息编辑/删除的分支截断语义已加固，branch guards 测试已扩成两轮分支，能验证后续分支会一起被清掉。
+- 最新完成 `web`: 将右侧栏改造成当前会话导航壳，包含线程目录、近期证据、笔记占位和结构化输出入口。
+- 最新完成 `web`: 建立统一文档预览壳，支持文本 / Markdown / 原文切换，并为 PDF / HTML / 代码块保留禁用状态。
+- 最新完成 `web`: 增加 AI 整理入口真实接入，思维导图 / 流程图会调用后端 Diagram IR 接口并渲染返回结果。
+- 最新完成 `web`: 聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试。
+- 最新完成 `web`: 进一步隔离流式轮次状态，发送/重试不会被旧定时器污染，标题、输入框、消息列表保持稳定。
+- 最新完成 `web`: 右侧栏已接入真实当前线程目录、近期证据、会话笔记 CRUD 和结构化输出数据；流式 RAG meta 会经 API 持久化到回答 metadata trace。
+- 最新完成 `api`: 新增 `chat_artifacts` 表和产物接口，回答消息返回会携带已保存 artifacts，图解生成/重生成/软删除可通过 API 恢复和管理。
+- 最新校准：基于《企业知识库 RAG 精准问答与多轮会话记忆落地方案评审》，下一阶段优先转向 `AnswerIR`、多轮问题重写、LLM structured DiagramIR、schema 校验和质量评估集，暂不优先做自动强制出图或长期偏好记忆。
+- 本轮 `web` 回归已最终提交（`02e4ed6`），修复中断后立即重试时的 stale abort 竞态。
+- 根 `pnpm dev` 和 `pnpm dev:rag` 启动脚本已修复；`pnpm dev:rag` 依赖 `rag/.venv` 已存在。
+- 本轮 `web` 回归已完成；记录已同步到进度文件，等待提交。
+- 注意：此前记录的 `api` / `rag` 完成项仅代表阶段性尝试或局部契约，不能再作为产品完成依据；后续必须按 PRD 未完成队列重新执行和验收。
+- 下一轮建议：执行 PRD 未完成队列中的 `rag`: 定义 `AnswerIR` Pydantic schema，先把精准问答结构化基础打牢。
+
+## 已完成
+
+### 2026-05-27 - 跨服务统一 artifact/type 命名
+
+- Service: repo / api / rag / web
+- Task: `repo`: 跨服务统一 artifact 命名：DB 字段、API 响应、前端类型、RAG 输出统一用 `artifact` + `type`（diagram/flowchart/mindmap/chart/table/image），消除"artifact / diagram / chart"混用。
+- Changed:
+  - RAG 的 visual plan、DiagramIR、diagram 生成入参改为 `type`，并补了 `diagram` / `chart` 规划类型。
+  - API 生成/重生成/自动产物链路改读写 `type`，metadata 也统一落 `type`。
+  - web 的图解对象、artifact 卡片和弹窗改读新字段，兼容旧数据里的 `diagram_type`。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run build:web`
+  - `cd rag && ./.venv/bin/python -m pytest tests/test_diagram_ir.py tests/test_quality_eval_suite.py`
+  - `git diff --check`
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `api`: 在 `services/ragClient.ts` 上加 zod 校验，让 RAG 返回的 `AnswerIR` / `DiagramIR` 在边界爆出契约破坏，而不是渗到前端。
+
+### 2026-05-26 - 新增回答产物持久化契约
+
+- Service: api
+- Task: `api`: 新增 `chat_artifacts` 数据表和基础接口，支持按 message 保存、读取、重新生成和软删除 artifact；消息返回时携带 artifacts。
+- Changed:
+  - 新增 `chat_artifacts` 表和 DB helper，支持 create / list / update / soft delete / format。
+  - `formatMessage` 返回回答 artifacts，刷新会话可恢复已生成产物。
+  - 新增 artifact 列表、生成、重新生成、软删除接口；现有 diagram 端点保持兼容并同步落库 artifact。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - Node fetch smoke：非流式聊天后生成、列表、会话嵌入、重新生成、软删除 artifact 均通过。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `web`: 新增通用 `ArtifactCard` / `ArtifactModal` 渲染层，将回答中的 artifacts 直接显示在对应回答下方，而不是放在右侧栏或只通过按钮触发。
+
+### 2026-05-26 - 右侧栏瘦身为知识工作台
+
+- Service: web
+- Task: `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。路线图展示当前会话关键问答节点、总结精髓、证据/artifact 状态，并支持点击定位到对应回答；知识笔记展示现有 session/message/source 笔记。
+- Changed:
+  - `ConversationNavigator` 从原来的线程/证据/近期证据/会话笔记/结构化输出混合面板，收敛为 `路线图` 和 `知识笔记` 两个 tab。
+  - 路线图基于当前 messages 推导问答节点、回答精髓、证据数量和 artifact 数量，并支持点击定位到对应回答。
+  - 知识笔记沿用现有 notes CRUD，并在选中引用时显示轻量引用资料上下文，不再新增独立证据 tab。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有既有 warning。
+  - 浏览器 smoke：右侧栏显示 `知识工作台`，只保留 `路线图 / 知识笔记`；旧 `线程 / 证据 / 结构化输出` 不再出现；路线图节点点击可滚动定位聊天消息。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `api`: 新增 `chat_artifacts` 数据表和基础接口，支持按 message 保存、读取、重新生成和软删除 artifact；消息返回时携带 artifacts。
+
+### 2026-05-25 - 沉淀企业级知识工作台升级方案
+
+- Service: docs
+- Task: 输出完整方案文档，并将方向从学习型产品纠偏为企业级文档知识库智能工作台。
+- Changed:
+  - 新增 `docs/企业级文档知识库智能工作台升级方案.md`，明确产品定位、目标信息架构、数据模型、artifact 渲染器、Visual Planner、API/RAG/Web 职责和渐进式路线。
+  - `PRD.md` 追加下一阶段“企业级知识工作台”任务队列，第一轮从右侧栏瘦身为 `路线图 / 知识笔记` 开始。
+- Verification:
+  - `git diff --check`
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: `web`: 将右侧栏瘦身为 `路线图 / 知识笔记` 两个 tab。
+
+### 2026-05-24 - 初始化 Ralph loop
+
+- Service: chore
+- Task: 初始化 Ralph 控制文件和一次一任务的执行规则。
+- Changed: 添加 `PRD.md`、`progress.txt`、`ralph-once.sh`、`afk-ralph.sh`。
+- Verification:
+  - 脚本可读，任务规则与仓库执行规则一致。
+- Commit: `cef298d`
+- Blockers: 无。
+- Next: 执行第一个 web 任务。
+
+### 2026-05-24 - 改造回答引用详情
+
+- Service: web
+- Task: `web`: 改造引用查看方式，将回答内引用点击打开回答作用域的证据详情，而不是把右侧作为全量引用仓库。
+- Changed: 将聊天引用面板从全量来源列表调整为回答作用域证据详情；引用点击打开证据详情，可复制、追问、打开原文预览。
+- Verification:
+  - `pnpm run lint:web` 通过，但存在既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - 浏览器烟雾验证登录和聊天页渲染。
+- Commit: `49d1a39`
+- Blockers: 当前种子/活跃会话没有真实 sources，未能在浏览器中完整打开真实证据详情。
+- Next: 做滚动体验修复。
+
+### 2026-05-24 - 记录引用详情迭代
+
+- Service: chore
+- Task: 记录 Ralph 迭代结果。
+- Changed: 更新 Ralph 进度记录。
+- Verification:
+  - `git show --stat 49d1a39`
+- Commit: `ba87c41`
+- Blockers: 无。
+- Next: 修复 Ralph runner。
+
+### 2026-05-24 - 修复流式聊天 stale abort 竞态
+
+- Service: web
+- Task: `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
+- Changed: 在 `useStreamChat` 中给每次流式请求引入独立 run id 和本地 AbortController，忽略已过期请求的 catch / done 回写，避免中断后立刻重新发送时旧流把新流状态误判为失败。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 Fast Refresh warning。
+  - `pnpm run build:web` 通过。
+  - Playwright smoke: 登录、发送、中断、重新发送、复制、收藏、点赞、点踩、重试、引用详情、原文预览、会话切换后的滚动恢复、删除确认均通过；截图已落在 `/tmp/ai-rag-chat-complete-2026-05-24T05-14-11-825Z.png` 和 `/tmp/ai-rag-source-detail-2026-05-24T05-14-11-825Z.png`。
+- Commit: `02e4ed6`
+- Blockers: 无。
+- Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+
+### 2026-05-24 - 固定 Codex Ralph runner
+
+- Service: chore
+- Task: 将 Ralph runner 固定为 Codex，避免本地 Claude Code `/v1/messages` 403 阻塞任务。
+- Changed: `ralph-once.sh` 和 `afk-ralph.sh` 改为只调用 `codex exec`；本地 `ralph-loop` 插件只保留 Codex marketplace 和 `.codex-plugin`，删除 Claude 插件入口。
+- Verification:
+  - `bash -n ralph-once.sh afk-ralph.sh`
+  - `python3 -m py_compile /Users/tomtong/.codex/plugins/marketplaces/ralph-loop/plugins/ralph-loop/scripts/init_ralph_loop.py`
+  - `validate_plugin.py /Users/tomtong/.codex/plugins/cache/ralph-loop/ralph-loop/0.1.0`
+  - `codex plugin list --marketplace ralph-loop`
+- Commit: `e380352`
+- Blockers: 无。
+- Next: 重整 PRD，使后续 Codex Ralph 可以稳定选择任务。
+
+### 2026-05-24 - 验证问答卡片动作语义
+
+- Service: web
+- Task: `web`: 验证问答卡片动作语义。用户问题 hover 显示复制、编辑、删除；删除必须二次确认，并连带删除对应回答或后续分支。回答不提供删除，提供复制、点赞、点踩、收藏、重试这些功能是否完善。
+- Changed: 回答重试改为按当前回答定位上一条用户问题并从该分支重新生成；用户编辑改为先通过现有删除/截断接口移除旧分支再重新提问；流式或未持久化用户消息禁用编辑/删除；流式完成后重新拉取会话消息，确保后续动作使用后端持久化消息 ID。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - Chrome `http://localhost:5174/chat` 烟雾验证：聊天页渲染，回答动作包含复制/收藏/点赞/点踩/重新生成此回答/查看证据且不含删除；用户问题动作包含复制/编辑/删除；编辑模式可打开并取消；删除二次确认文案正确并已取消，未删除数据。
+- Commit: `ff85043`
+- Blockers: 无。注意：根脚本 `pnpm dev` 当前会因 workspace 脚本解析失败退出，本轮改用 `pnpm run dev:web`；API 端口 3001 已有进程占用，浏览器烟雾复用现有 API。
+- Next: `web`: 输入框发送按钮在生成中切换为中断按钮，需验证中断后不会生成可收藏/可反馈的临时消息。
+
+### 2026-05-24 - 验证中断态消息动作
+
+- Service: web
+- Task: `web`: 输入框发送按钮在生成中切换为中断按钮，需验证中断后不会生成可收藏/可反馈的临时消息。
+- Changed: 未改业务代码；确认现有实现已满足要求，中断时会保留可见的临时回答但不暴露收藏、点赞、点踩或证据查看动作。
+- Verification:
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - 浏览器验证：发送问题后按钮切换为“中断生成”；在生成中点击中断后，半截临时回答仅保留复制/重新生成，不出现收藏/点赞/点踩/查看证据。
+- Commit: `af4b255`
+- Blockers: 无。
+- Next: `web`: 将右侧栏改造成当前会话导航壳，包括当前线程目录、近期证据、笔记占位、结构化输出入口，不依赖新增后端 API。
+
+### 2026-05-24 - 修复 workspace 启动配置
+
+- Service: chore
+- Task: 修复根 `pnpm dev` workspace 编排，避免 `dev:web` 被当作子包脚本解析。
+- Changed: 根 `dev` 脚本改为 `pnpm --parallel --filter web --filter api dev`；删除 `.npmrc` 中 npm 不识别的 `onlyBuiltDependencies` 重复配置；记录 `.ralph-loop.last.md`。
+- Verification:
+  - `npm run dev` 不再报 `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`。
+  - npm 不再输出 `Unknown project config "onlyBuiltDependencies"` 警告。
+- Commit: `a59e8ca`
+- Blockers: 该提交为根级配置提交，不属于单一 `web/api/rag` 服务 commit；后续如需严格回滚，应按 root chore 单独处理。
+- Next: 修复聊天发送/重试引发的可见闪跳。
+
+### 2026-05-24 - 修复聊天发送和重试闪跳
+
+- Service: web
+- Task: `web`: 修复发送消息和点击重试时聊天标题、输入框、消息列表闪跳或布局跳动；新增消息应无感插入，流式结束只静默合并后端 ID。
+- Changed:
+  - 流式完成后从整组消息替换改为静默合并后端持久化 ID，保留本地 DOM key。
+  - 新会话第一次发送时跳过自动空消息加载，避免乐观消息被覆盖。
+  - 头部 `生成中...` 改为常驻占位并只切透明度，避免标题被挤动。
+  - 发送后 textarea 保持发送前高度，生成中使用 `readOnly` 而不是 `disabled`。
+  - 去掉消息逐条 `fadeInUp` 位移动画，滚动到底部改为更轻的按帧跟随，并关闭 `.chat-scroll-area` 的 `overflow-anchor`。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - 浏览器几何探针：发送前、发送中、完成后，输入区 `top/height`、滚动区高度、标题位置保持一致。
+- Commit: `10c906f`
+- Blockers: 浏览器验证中的 `/api/chat` 流式响应使用 Playwright route mock；真实 RAG 端到端流式回归仍需在后续专门执行。
+- Next: `web`: 将右侧栏改造成当前会话导航壳；随后做聊天端到端回归。
+
+### 2026-05-24 - 修复 RAG 本地启动命令
+
+- Service: chore
+- Task: 修复 `pnpm dev:rag` 本地启动命令。
+- Changed: 根 `dev:rag` 脚本改为使用 `rag/.venv/bin/python -m uvicorn`，避免当前 macOS shell 中 `python` 不存在或未安装 uvicorn 的问题。
+- Verification:
+  - 手动用 `cd rag && .venv/bin/python -m uvicorn app.main:app --reload --port 8000` 启动通过，健康检查请求成功。
+- Commit: `eb7b14f`
+- Blockers: commit message 未使用推荐 scope；后续提交应恢复 Conventional Commits 规范。
+- Next: 更新 PRD/progress，使下一轮任务从真实状态继续。
+
+### 2026-05-24 - 改造右侧会话导航壳
+
+- Service: web
+- Task: `web`: 将右侧栏改造成当前会话导航壳，包括当前线程目录、近期证据、笔记占位、结构化输出入口，不依赖新增后端 API。
+- Changed: 新增 `ConversationNavigator`，将右侧栏从仅在引用存在时出现的来源面板改为可独立开关的会话导航壳；保留回答作用域证据详情并嵌入“证据”视图；为消息节点补充稳定 DOM 锚点，支持从线程目录跳转；移动端以右侧抽屉方式打开，不挤压主聊天区。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有无关 warning。
+  - `pnpm run build:web` 通过。
+  - Playwright Chromium `http://localhost:5173/chat` 桌面烟雾验证：会话导航、当前线程目录、近期证据、会话笔记、结构化输出均可见；右侧栏可关闭再打开；头部和输入框 `x/y/height` 无变化。
+  - Playwright Chromium `390x844` 移动端烟雾验证：右侧导航可作为 336px 抽屉打开，遮罩关闭有效。
+- Commit: `40ccd00`
+- Blockers: Ralph 自动执行时浏览器 MCP 被已有实例占用，已中断并改用独立 Playwright Chromium 完成验证。
+- Next: `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
+
+### 2026-05-24 - 建立统一文档预览壳
+
+- Service: web
+- Task: `web`: 建立统一文档预览壳，先支持现有文本/Markdown/原始字段展示，并为 PDF、HTML、代码块预览留清晰禁用状态。
+- Changed: 重做 `DocPreview`，加入统一预览模式切换；支持文本 / Markdown / 原文三种可用视图；为 PDF / HTML / 代码块提供明确禁用态；并在切换源时重置预览状态，避免旧内容残留。
+- Verification:
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - Chrome `http://localhost:5173/chat` 烟雾验证：从右侧证据导航打开预览后，可切换文本 / Markdown / 原文，PDF / HTML / 代码块按钮保持禁用，空原文显示空态。
+- Commit: `c3022bd`
+- Blockers: 选中的样例证据 `raw` 接口返回空时会显示空态，属于当前后端数据现状。
+- Next: `web`: 增加 AI 整理入口占位，提供“思维导图 / 流程图待接入”的本地提示，不调用不存在的后端 API。
+
+### 2026-05-24 - 接入 AI 整理图谱链路
+
+- Service: repo
+- Task: `web`: 将 AI 整理入口接入真实思维导图/流程图生成结果；现有入口只是本地占位，还需要和 RAG 的结构化中间表示与后端契约同步。
+- Changed:
+  - `web` 的会话导航新增真实 AI 整理卡片，点击思维导图 / 流程图会调用 API。
+  - `api` 新增回答图谱代理端点，做会话权限校验后转发给 RAG。
+  - `rag` 新增 `DiagramIR` 与 `/rag/diagram/generate`，按回答内容生成 mindmap / flowchart 中间表示。
+  - `PRD.md` 和 `progress.txt` 同步勾选对应任务。
+- Verification:
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - `pnpm run lint:api`
+  - `pnpm run build:api`
+  - `python3 -m compileall rag/app`
+  - `curl -sS -X POST http://127.0.0.1:8000/rag/diagram/generate -H 'Content-Type: application/json' -d '{"title":"端点烟雾","content":"1. 检查温度窗口。2. 确认压力曲线。3. 记录恢复结果。","diagram_type":"flowchart","source_ids":["chunk-a"],"max_steps":4}'`
+  - Playwright 页面烟雾：`/chat` 中点击“思维导图”后，接口返回 200，页面显示节点计数。
+- Commit: `340684e` / `301931e`
+- Blockers: `rag/.venv` 未安装 pytest，改用 `compileall` + 端点烟雾验证。
+- Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+
+### 2026-05-24 - 聊天端到端回归
+
+- Service: web
+- Task: `web`: 做一次聊天端到端回归，覆盖登录、发送、中断、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、重试，确认 UX/UI 不闪跳。
+- Changed: 未改业务代码；完成真实本地服务回归并将该 web 任务标记完成。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有 Fast Refresh warning。
+  - `pnpm run build:web` 通过。
+  - `curl http://localhost:3001/api/admin/health` 返回 API/RAG/数据库均为 `ok`。
+  - `curl http://localhost:8000/rag/health` 返回 RAG 服务、Chroma 和 LLM provider 均为 `ok`。
+  - Playwright `http://localhost:5173/chat` 回归：登录、发送、真实 RAG 流式生成、中断、重试、切换会话、滚动恢复、引用详情、复制、删除确认、点赞/点踩、收藏、最终重新生成均通过。
+  - Playwright 文档预览回归：文本 / Markdown / 原文切换可用，PDF / HTML / 代码块保持禁用占位；缺失 raw 内容时显示既有空态。
+- Commit: 随本轮记录提交；最终 hash 见本轮执行结果。
+- Blockers: 无。备注：浏览器 console 仅出现 favicon 404 和缺失 raw 文档内容 404，后者已由预览空态处理。
+- Next: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+
+### 2026-05-24 - 隔离流式轮次状态
+
+- Service: web
+- Task: `web`: 修复发送消息和点击重试时聊天标题、输入框、消息列表闪跳或布局跳动；新增消息应无感插入，流式结束只静默合并后端 ID。
+- Changed: 在 `useStreamChat` 中为每次流式请求加入 `runId` 保护，取消/切换/重试时旧定时器和旧流事件不再回写当前轮次，避免发送和重试时串线引发的闪跳。
+- Verification:
+  - `pnpm run lint:web`
+  - `pnpm run build:web`
+  - Playwright 几何回归：发送前、发送中、完成后，标题、输入框、消息滚动区的 `x/y/width/height` 保持一致；重试前、重试中、重试后同样保持一致。
+- Commit: `02e4ed6`
+- Blockers: 无。
+
+### 2026-05-25 - 接入右侧栏真实数据
+
+- Service: web/api
+- Task: `web`: 将右侧栏接入真实当前线程目录、近期证据、笔记和结构化输出数据；现有导航壳已完成，但还需要和 API / RAG 同步成真实可用能力。
+- Changed:
+  - 右侧栏线程目录和近期证据继续读取当前会话真实消息与 sources。
+  - 会话笔记接入 `GET/POST/PATCH/DELETE /api/chat/notes`，支持新增、编辑、删除和会话切换加载。
+  - 结构化输出读取回答 sources、confidence、followups、latency 和 metadata trace。
+  - API 流式聊天保存 RAG `meta` 事件里的检索耗时和命中数到回答 metadata trace。
+- Verification:
+  - `pnpm run lint:web` 通过，仍有既有 Fast Refresh warning。
+  - `pnpm run lint:api`
+  - `pnpm run build:web`
+  - `pnpm run build:api`
+  - `bash api/tests/test-chat-notes-contract.sh`
+  - Browser smoke：右侧栏真实线程/证据/结构化输出可见；笔记创建后删除成功。
+- Commit: `4340794`
+- Blockers: 无。
+- Next: `web`: 将统一文档预览接入真实 PDF、HTML、代码块预览；现有预览壳已完成，但还需要和 API / RAG 的来源格式、文件流、清洗规则同步。
+
+### 2026-05-25 - 加固消息分支截断语义
+
+- Service: api
+- Task: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- Changed: 抽出分支截断 ID 计算助手，统一消息编辑/删除的截断语义；将消息修改权限收敛成统一助手；补强 `test-chat-branch-guards.sh`，把编辑/删除的验证扩成两轮分支，确认后续分支会一起清空。
+- Verification:
+  - `pnpm run lint:api`
+  - `pnpm run build:api`
+  - `bash api/tests/test-chat-branch-guards.sh`
+- Commit: 待提交
+- Blockers: 无。
+- Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+
+> 以下 API / RAG 历史记录只保留执行痕迹，不再代表当前产品完成状态；当前状态以 PRD 未完成队列为准。
+
+### 2026-05-24 - 加固消息分支截断语义
+
+- Service: api
+- Task: `api`: Review 并加固消息编辑/删除的分支截断语义，确认删除用户问题会删除对应回答和后续分支，并保持权限校验。
+- Changed:
+  - `chat_messages` 读取顺序与截断顺序统一为 `created_at ASC, rowid ASC`，避免同时间戳消息在读取和截断时顺序不一致。
+  - 消息编辑/删除分支截断改为 SQLite transaction，避免只更新消息但未完整删除后续分支的中间状态。
+  - `PATCH /api/chat/messages/:id` 和 `DELETE /api/chat/messages/:id` 只允许处理 `user` 消息，直接拒绝 assistant 消息编辑/删除，保留回答不可随意删除的语义。
+  - 修复 `documents` 上传文件过滤回调的 TypeScript 签名，以解除 API build 阻塞。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - 临时 API 服务 `API_PORT=3101 DATABASE_URL=file:/tmp/ai-rag-api-smoke.db pnpm --dir api exec tsx src/server.ts`
+  - 临时数据库 API 烟雾：用户消息编辑后仅保留编辑后的用户消息；删除用户消息后分支消息清空；assistant 消息 PATCH/DELETE 均返回 400 且消息仍保留。
+- Commit: `6821b26`
+- Blockers: `node api/dist/server.js` 仍存在既有 ESM 目录导入运行问题，构建产物无法直接作为烟雾服务启动；本轮运行时烟雾改用 API dev runner。
+- Next: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+
+### 2026-05-24 - 补充分支守卫测试
+
+- Service: api
+- Task: `api`: 为消息删除/编辑补充接口烟雾或集成测试，覆盖非本人会话、缺失消息、正常删除、正常编辑。
+- Changed: 新增 `api/tests/test-chat-branch-guards.sh`，并接入 `api/tests/run-tests.sh`，定点验证 assistant 消息拒绝、缺失消息、非本人会话、正常编辑截断、正常删除截断。
+- Verification:
+  - `pnpm run build:api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-chat-branch-guards.sh`
+- Commit: pending
+- Blockers: 无。
+- Next: `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API。
+
+### 2026-05-24 - 定义回答引用详情接口
+
+- Service: api
+- Task: `api`: 梳理现有 `message_sources` 和文档接口是否足够支撑 source detail API；如果足够，定义只读详情接口；如果不足，在 `progress.txt` 记录缺失字段。
+- Changed:
+  - 新增 `GET /api/chat/messages/:id/sources` 和 `GET /api/chat/messages/:id/sources/:sourceId`，只读返回回答消息的引用详情。
+  - 合并 `message_sources`、`chat_messages.sources_json` 与 `documents` 元数据，返回 chunk、文档、预览端点、metadata、missing_fields 等合同字段；兼容没有 `message_sources` 行的历史 `sources_json` 数据。
+  - 引用详情读取增加会话 owner / knowledge_admin / system_admin 权限校验，拒绝非本人读取和用户消息读取。
+  - 新增 `api/tests/test-source-detail.sh` 并接入 `api/tests/run-tests.sh`，同时修复 runner 脚本路径与测试计数。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - `bash -n api/tests/run-tests.sh api/tests/test-source-detail.sh`
+  - `git diff --check -- api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-source-detail.sh`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/run-tests.sh`（8/8 通过）
+- Commit: `7b6155e`
+- Blockers: 无。说明：当前 API 会在 `missing_fields` 中显式暴露缺失的 `page_number` / `offset` 等字段，后续仍需 RAG metadata 扩展来补齐更精确定位。
+- Next: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源。
+
+### 2026-05-24 - 明确文档预览类型契约
+
+- Service: api
+- Task: `api`: 为文档预览能力明确 MIME/文件类型返回契约，优先覆盖 Markdown、纯文本、PDF、HTML、代码块来源，不改变 RAG 检索逻辑。
+- Changed:
+  - 新增统一预览契约工具，按文件名、file_type、MIME 和 source metadata 推导 `content_kind`、`preferred_view`、`supported_views`、`capabilities`、`endpoints` 和禁用原因。
+  - `GET /api/documents/preview-contract` 返回 Markdown、纯文本、PDF、HTML、代码块来源的格式注册表。
+  - 文档列表 / 详情返回 `preview` 字段；文本类文档继续返回内容，PDF 等二进制来源的 `/raw` 明确返回 415 并附带预览契约。
+  - source detail 的 `preview` 字段合并相同契约，同时保留既有 `chunk_endpoint`、`raw_endpoint`、`file_endpoint`、`comments_endpoint` 兼容字段。
+  - 新增 `api/tests/test-document-preview-contract.sh` 并接入 API 集成测试 runner。
+- Verification:
+  - `pnpm run build:api`
+  - `API_BASE_URL=http://localhost:3001 bash api/tests/test-document-preview-contract.sh`
+- Commit: `6c4d9d8`
+- Blockers: 无。说明：HTML 预览仍显式标记 `html_sanitizer_not_available`，API 只明确契约，不在本轮实现 HTML 清洗渲染。
+- Next: `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；或转入 `rag` metadata 扩展。
+
+### 2026-05-24 - 明确聊天笔记归属契约
+
+- Service: api
+- Task: `api`: 评估笔记能力的数据归属，确定会话笔记、回答笔记、引用笔记是否需要独立表；本轮只产出 API 契约或最小后端切片。
+- Changed:
+  - 新增 `chat_notes` 单表多 scope 模型，明确会话笔记、回答笔记、引用笔记不需要各自独立表。
+  - 新增 `GET /api/chat/notes/contract`，声明笔记由 API 服务拥有，`session` / `message` / `source` 三类 scope 的必填字段、生命周期和权限边界。
+  - 新增 `GET /api/chat/notes`、`POST /api/chat/notes`、`PATCH /api/chat/notes/:id`、`DELETE /api/chat/notes/:id`，先覆盖当前用户个人笔记的最小读写路径。
+  - 新增 `api/tests/test-chat-notes-contract.sh` 并接入 API 集成测试 runner。
+- Verification:
+  - `pnpm run build:api`
+  - `pnpm run lint:api`
+  - `bash -n api/tests/test-chat-notes-contract.sh api/tests/run-tests.sh`
+  - `git diff --check -- api`
+  - `API_PORT=3102 DATABASE_URL=file:/tmp/ai-rag-notes-smoke.db pnpm --dir api exec tsx src/server.ts`
+  - `API_BASE_URL=http://localhost:3102 bash api/tests/test-chat-notes-contract.sh`
+- Commit: `2f061a9`
+- Blockers: 无。
+- Next: `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
+
+### 2026-05-24 - 补全来源元数据契约
+
+- Service: rag
+- Task: `rag`: 扩展 source metadata 设计，明确 document、section、chunk、page、offset、format、snippet 的可用性和兼容策略。
+- Changed:
+  - 新增 RAG 来源元数据归一化工具，按 document、section、chunk、page、offset、format、snippet 输出统一契约，同时保留旧版扁平字段。
+  - chunking 阶段补充 section level、粗略字符 offset、PDF page marker 解析、snippet 和 table chunk 元数据。
+  - 检索、debug、chat 和 stream 输出同步携带 `source_metadata`，stream done 事件不再二次裁剪来源字段。
+  - 新增 `rag/tests/test_source_metadata.py` 锁定旧字段兼容、可用性标记和格式推导行为。
+- Verification:
+  - `rag/.venv/bin/python -m compileall rag/app`
+  - `rag/.venv/bin/python - <<'PY' ...` 手动执行 `rag/tests/test_source_metadata.py` 中 3 个断言函数，返回 `source metadata contract ok`。
+  - `./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8011`
+  - `curl -sS http://127.0.0.1:8011/rag/health`
+- Commit: `aa5c1c5`
+- Blockers: `pytest` 未安装在 `rag/.venv`，本轮改用直接 Python 断言执行新增测试函数。
+- Next: `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+
+### 2026-05-24 - 增加图谱中间表示
+
+- Service: rag
+- Task: `rag`: 评估思维导图/流程图生成方案，优先输出结构化中间表示，不直接绑定某个前端图库。
+- Changed:
+  - 新增 `DiagramNode`、`DiagramEdge` 和 `DiagramIR`，定义与具体前端图库无关的图谱中间表示。
+  - 提供 `build_placeholder_diagram_ir()`，按步骤顺序生成节点与边，便于后续从检索/推理结果拼出思维导图或流程图。
+  - 补充 `rag/tests/test_diagram_ir.py` 锁定节点、边和元信息结构。
+- Verification:
+  - `python3 -m compileall rag/app`
+  - `cd rag && .venv/bin/python - <<'PY' ...` 手动构造并断言 `DiagramIR`。
+- Commit: `96a04ec`
+- Blockers: 无。
+- Next: 无剩余任务。
+
+## 当前待提交
+
+- 无。
+
+## 下一轮建议
+
+- 无剩余任务。
+
+### 2026-05-25 - 渲染 AI 整理图谱可视化
+
+- Service: web
+- Task: `web`: 将 AI 整理入口从文本/pill 占位升级为真实思维导图/流程图可视化，消费 RAG 关键词/步骤 Diagram IR 渲染节点和连线。
+- Changed:
+  - 将 AI 整理预览从 pill/list 占位改为 SVG 图谱渲染。
+  - 思维导图按 root、category、keyword/topic 节点绘制中心节点、分类节点、关键词节点和连线。
+  - 流程图按 step、decision 节点绘制纵向步骤、判断菱形和箭头连线。
+  - 空节点返回明确空态，避免无数据时渲染假图。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+  - 浏览器 smoke：`http://localhost:5173/chat`，思维导图生成 13 节点 SVG，流程图生成 8 节点 SVG。
+  - `pnpm run audit:diff -- --strict --topic "web AI 整理图谱可视化渲染" --validation "pnpm run build:web; pnpm run lint:web（仅既有 warning）；浏览器 smoke http://localhost:5173/chat，思维导图生成 13 节点 SVG，流程图生成 8 节点 SVG"`
+- Commit: `9be21a6`
+- Blockers: 无。
+- Next: 无剩余任务。
+
+### 2026-05-25 - AFK 任务队列完成
+
+- Service: repo
+- Task: 按 PRD 任务队列自动执行到完成。
+- Changed:
+  - `PRD.md` 中所有任务均已勾选完成。
+  - `progress.txt` 记录最终 web 图谱可视化任务和队列完成状态。
+- Verification:
+  - `rg -n "\[ \]" PRD.md` 返回无未完成任务。
+- Commit: 本状态提交。
+- Blockers: 无。
+- Next: push 到 GitHub。
+
+### 2026-05-25 - 补强 AI 整理图谱完成标准
+
+- Service: repo
+- Task: 重新打开 AI 整理图谱任务，按关键词提取、图结构生成、前端可视化渲染补强。
+- Changed:
+  - PRD 将 AI 整理完成标准细化为 RAG 关键词提取、思维导图 IR、流程图 IR、API 证据传递、前端 SVG 可视化。
+  - API 生成图谱时把回答正文、引用文档标题、章节标题、引用片段一起传给 RAG。
+  - RAG 生成 root/category/keyword/evidence 和 step/decision/action 节点，以及 contains/supported_by/sequence/condition 边。
+  - 前端思维导图改为中心放射/左右树 SVG，流程图保持自上而下 SVG，并真实消费节点和边。
+- Verification:
+  - `cd rag && ./.venv/bin/python -m compileall app tests`
+  - `diagram tests ok`
+  - `pnpm run build:api`
+  - `pnpm run build:web`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+  - 浏览器 smoke：思维导图和流程图均生成非空 SVG 节点和连线。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: 无。
+
+### 2026-05-25 - 调整图谱入口和弹窗渲染
+
+- Service: repo
+- Task: 将 AI 整理入口从右侧栏移到每条回答卡片下方，图谱用弹窗展示，并避免前端写死图结构规则。
+- Changed:
+  - RAG Diagram IR 为节点补充 `metadata.layout` 和 `metadata.render`，并为边补充渲染元数据，使前端按服务端布局和样式渲染。
+  - 前端新增通用 `DiagramModal`，只读取节点、边、viewport、layout 和 render 元数据绘制 SVG。
+  - `ChatThread` 在每条已保存回答下方提供思维导图 / 流程图生成按钮，生成后打开弹窗。
+  - `ConversationNavigator` 移除右侧栏 AI 整理按钮和内嵌图谱预览，右侧栏回归会话导航和结构化摘要。
+  - PRD 明确图谱入口、弹窗展示和“前端不写死图结构规则”的完成标准。
+- Verification:
+  - `pnpm run build:web`
+  - `pnpm run build:api`
+  - `cd rag && ./.venv/bin/python -m compileall app tests`
+  - `diagram tests ok`
+  - `pnpm run lint:web`，仅有仓库既有 warning。
+- Commit: 本次提交。
+- Blockers: 无。
+- Next: 等待下一轮任务。
+
+## 执行提醒
+
+- 每轮只做一个任务。
+- 每轮只做一个主题；同主题可少量跨服务，无关改动要拆分。
+- 普通改动跑最小检查，高风险改动做真实链路验证；验证通过后再提交。
+- 如果工作区不干净，先停下来说明，不要让 Ralph 自动吞掉无关改动。
+
+### 2026-05-27 - AFK 任务队列再次完成
+
+- Service: repo
+- Task: 重新梳理 PRD 文档并按队列自动执行到完成。
+- Changed:
+  - 完成离线部署外发开关、生产认证收口、日志脱敏、企业集成 API、webhook、离线包导入、嵌入式问答控件和集成 Token 管理。
+  - `PRD.md` 当前无剩余未完成 checkbox。
+  - 每个任务均已按单主题提交，提交正文包含编号修改点。
+- Verification:
+  - `rg -n "^- \\[ \\]" PRD.md` 返回无未完成任务。
+  - 各任务已分别执行对应的 API/Web/RAG 构建、定点 smoke 和严格 diff 审计。
+- Commit: 本状态提交。
+- Blockers: 无。
+- Next: `<promise>COMPLETE</promise>`。

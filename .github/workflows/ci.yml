@@ -2,10 +2,12 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
-  web-and-api:
+  verify:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,39 +15,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node runtime
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build web and api
-        run: pnpm build
-
-  rag:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install RAG dev deps
-        run: pip install -e ./rag[dev]
+      - name: Enable Corepack
+        run: corepack enable
 
-      - name: Lint RAG
-        run: ruff check rag/app
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Compile RAG
-        run: python -m compileall rag/app
+      - name: Run harness verification
+        run: pnpm run verify

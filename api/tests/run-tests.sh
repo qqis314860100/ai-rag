@@ -7,8 +7,8 @@
 #   API_BASE_URL=http://host:3001 ./tests/run-tests.sh  # 指定 API 地址
 #
 # 前置条件:
-#   1. API 服务已启动 (apps/api)
-#   2. RAG 服务已启动 (services/rag)
+#   1. API 服务已启动 (api)
+#   2. RAG 服务已启动 (rag)
 #   3. 知识库已索引 (至少有种子文档)
 # ============================================================
 set -euo pipefail
@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 API_DIR="${SCRIPT_DIR}"
 BASE_URL="${API_BASE_URL:-http://localhost:3001}"
 export API_BASE_URL="${BASE_URL}"
+TEST_COUNT=10
 
 echo "============================================"
 echo "  RAG Knowledge Base API Integration Tests"
@@ -44,12 +45,12 @@ export API_TOKEN
 echo "  Token acquired (${#API_TOKEN} chars)."
 echo ""
 
-echo "[0/6] Checking API availability..."
+echo "[0/${TEST_COUNT}] Checking API availability..."
 if ! curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${BASE_URL}/api/admin/health" > /dev/null 2>&1; then
   echo ""
   echo "ERROR: API at ${BASE_URL} is not reachable."
   echo "Please start the API server before running tests:"
-  echo "  cd apps/api && pnpm dev"
+  echo "  cd api && pnpm dev"
   echo ""
   exit 1
 fi
@@ -68,7 +69,7 @@ run_test() {
   TOTAL=$((TOTAL + 1))
 
   echo "----------------------------------------"
-  echo "[${TOTAL}/6] Running: ${name}"
+  echo "[${TOTAL}/${TEST_COUNT}] Running: ${name}"
   echo "----------------------------------------"
 
   if bash "${script}" 2>&1; then
@@ -87,6 +88,10 @@ run_test() {
 run_test "Health Check"           "${API_DIR}/test-health.sh"        || true
 run_test "Search Request"         "${API_DIR}/test-search.sh"        || true
 run_test "Chat / Q&A Request"     "${API_DIR}/test-chat.sh"          || true
+run_test "Chat Branch Guards"     "${API_DIR}/test-chat-branch-guards.sh" || true
+run_test "Source Detail Contract" "${API_DIR}/test-source-detail.sh" || true
+run_test "Document Preview Contract" "${API_DIR}/test-document-preview-contract.sh" || true
+run_test "Chat Notes Contract"    "${API_DIR}/test-chat-notes-contract.sh" || true
 run_test "Document Upload"        "${API_DIR}/test-upload.sh"        || true
 run_test "Debug Search"           "${API_DIR}/test-debug-search.sh"  || true
 run_test "Out-of-Scope Refusal"   "${API_DIR}/test-refusal.sh"       || true

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "./index";
+import { buildDocumentPreviewContract } from "../utils/documentPreview";
 
 export interface DocumentRow {
   id: string;
@@ -215,6 +216,11 @@ export function formatDocument(row: DocumentRow, opts: { includePath?: boolean }
     file_type: row.file_type,
     file_size: row.file_size,
     file_hash: row.file_hash,
+    preview: buildDocumentPreviewContract({
+      documentId: row.id,
+      fileName: row.file_name,
+      fileType: row.file_type,
+    }),
     chunk_count: row.chunk_count,
     index_status: row.index_status,
     index_error: row.index_error,

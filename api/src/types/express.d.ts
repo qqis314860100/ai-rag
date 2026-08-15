@@ -8,5 +8,11 @@ declare namespace Express {
       permissions: string[];
       allowedSecurityLevels: string[];
     };
+    integration?: {
+      tokenId?: string;
+      clientId: string;
+      tokenHash: string;
+      allowedSecurityLevels: string[];
+    };
   }
 }

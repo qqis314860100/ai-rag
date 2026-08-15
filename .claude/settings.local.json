@@ -78,7 +78,19 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Chunks:{d[\\\\\"chunk_count\\\\\"]} Status:{d[\\\\\"index_status\\\\\"]}'\\)\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'{len\\(d[\\\\\"chunks\\\\\"]\\)} results, {d[\\\\\"latency_ms\\\\\"]}ms'\\); [print\\(f'  [{c[\\\\\"score\\\\\"]:.3f}] {c[\\\\\"section_path\\\\\"][:80]}'\\) for c in d['chunks']]\")",
       "Bash(rm -rf data/chroma/* data/uploads/*)",
-      "Bash(rm -f data/app.db)"
+      "Bash(rm -f data/app.db)",
+      "Bash(rtk ls *)",
+      "Bash(rtk grep *)",
+      "Bash(rtk wc *)",
+      "Bash(python3 scripts/ralph_task_queue.py --mode count)",
+      "Bash(python3 scripts/ralph_task_queue.py --mode next)",
+      "Bash(python3 scripts/ralph_task_queue.py --mode remaining --limit 5)",
+      "Bash(rtk read *)",
+      "Bash(pnpm --dir web add react-markdown remark-gfm remark-breaks rehype-sanitize rehype-highlight)",
+      "Bash(pnpm --dir web add react-markdown remark-gfm remark-breaks rehype-sanitize rehype-highlight --config.store-dir=/Users/tomtong/Library/pnpm/store/v11)",
+      "Bash(rtk pnpm *)",
+      "Bash(pnpm --dir web exec tsc --noEmit)",
+      "Bash(rtk git *)"
     ]
   }
 }

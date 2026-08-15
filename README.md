@@ -2,6 +2,13 @@
 
 面向电池产线工艺、设备、检测、MES、维护、安全的可追溯智能问答系统。
 
+## 先看这里
+
+- [CLAUDE.md](CLAUDE.md) - 仓库入口、约束和常用命令
+- [项目执行规则清单](docs/EXECUTION_RULES.md) - 任务完成标准与提交门槛
+- [项目架构与边界标准](docs/架构标准.md) - 三个服务的职责边界
+- [贡献指南](docs/CONTRIBUTING.md) - commit 规则
+
 ## 技术栈
 
 | 层 | 技术 |
@@ -14,16 +21,12 @@
 ## 项目结构
 
 ```
-├── web/                       ← React 前端 (localhost:5174)
-├── api/                       ← Express API (localhost:3001)
-├── rag/                       ← Python RAG 服务 (localhost:8001)
-├── knowledge/                 ← 知识库源文档 (14 篇)
-├── docs/                      ← 项目文档（docs/README.md 索引）
-├── skills/                    ← coding-implementation 技能
-├── .ai/                       ← 变更工作流（pipeline.yaml + 变更记录）
-├── .prompt/                   ← 分层工程模板
-├── scripts/                   ← check-harness.sh / lint.sh
-├── package.json               ← pnpm workspace 编排
+├── web/           ← React 前端 (localhost:5174)
+├── api/           ← Express API (localhost:3001)
+├── rag/           ← Python RAG 服务 (localhost:8000)
+├── knowledge/     ← 知识库源文档 (14 篇)
+├── docs/          ← 项目文档 (含 CONTRIBUTING.md)
+├── package.json   ← pnpm workspace 编排
 └── README.md
 ```
 
@@ -62,6 +65,8 @@ pnpm dev          # Web + API 并行启动
 pnpm dev:rag      # RAG 服务 (Python)
 ```
 
+RAG 服务启动后可通过 http://localhost:8000/rag/health 检查健康状态。
+
 ### 初始化
 
 1. 访问 http://localhost:5174
@@ -71,8 +76,36 @@ pnpm dev:rag      # RAG 服务 (Python)
 ### 开发与提交规则
 
 - 先看 [CLAUDE.md](CLAUDE.md) 和 [项目执行规则清单](docs/EXECUTION_RULES.md)
-- 先验证功能真的可用，再提交
-- 一个 commit 只改一个服务，不能混 `web` / `api` / `rag`
+- 普通改动跑最小检查，高风险改动才做真实链路验证
+- 一个 commit 只表达一个主题；同主题可以跨服务，无关改动必须拆开
+- 新增的人类阅读型文档使用中文文件名和中文标题
+
+### 标准检查
+
+```bash
+pnpm run lint
+pnpm run build
+pnpm run verify
+pnpm run audit:harness
+```
+
+### 备份与恢复
+
+```bash
+scripts/backup_sqlite_daily.sh
+scripts/backup_chromadb_weekly.sh
+```
+
+- SQLite 默认从 `api/data/app.db` 备份到 `data/backups/sqlite/`，保留 14 天，可用 `DB_PATH`、`BACKUP_DIR`、`KEEP_DAYS` 覆盖。
+- ChromaDB 默认从 `rag/data/chroma/` 备份到 `data/backups/chromadb/`，保留 8 周，可用 `CHROMA_DIR`、`BACKUP_DIR`、`KEEP_WEEKS` 覆盖。
+- 恢复 SQLite：先停止 API，再把目标 `.db` 复制回 `api/data/app.db`。
+- 恢复 ChromaDB：先停止 RAG，再清空或移走 `rag/data/chroma/`，解压目标 `chroma-*.tar.gz` 到 `rag/data/`。
+- 恢复后依次启动 `pnpm dev:rag` 和 `pnpm dev:api`，检查 `/rag/health` 与 `/api/admin/health`。
+
+### 聊天体验文档
+
+- [需求文档](docs/CHAT_EXPERIENCE_SPEC.md)
+- [开发计划](docs/CHAT_EXPERIENCE_PLAN.md)
 
 ## 三个服务
 
@@ -80,4 +113,4 @@ pnpm dev:rag      # RAG 服务 (Python)
 |------|------|------|
 | web | 5174 | `pnpm dev:web` |
 | api | 3001 | `pnpm dev:api` |
-| rag | 8001 | `pnpm dev:rag` |
+| rag | 8000 | `pnpm dev:rag` |

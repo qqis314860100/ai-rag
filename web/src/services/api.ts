@@ -23,7 +23,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
   if (res.status === 401) {
-    // Token expired/invalid — drop it and send the user to the login page
     redirectToLogin();
     throw new Error("登录已过期，请重新登录");
   }
@@ -70,9 +69,6 @@ export function uploadWithProgress(
         const data = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data);
-        } else if (xhr.status === 401) {
-          redirectToLogin();
-          reject(new Error("登录已过期，请重新登录"));
         } else {
           reject(new Error(data?.error?.message || `Upload failed (${xhr.status})`));
         }

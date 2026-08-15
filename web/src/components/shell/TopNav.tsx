@@ -23,8 +23,8 @@ export default function TopNav() {
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-soft text-accent text-xs font-semibold shrink-0">
               {initials}
             </div>
-            <span className="text-sm text-text-secondary">{user.name}</span>
-            <span className="w-px h-5 bg-divider mx-1" />
+            <span className="hidden text-sm text-text-secondary sm:inline">{user.name}</span>
+            <span className="mx-1 hidden h-5 w-px bg-divider sm:inline-block" />
           </>
         )}
         <Link to="/settings" className="rounded-lg p-2 text-text-secondary hover:bg-surface-hover hover:text-text transition-colors shrink-0" aria-label="设置">

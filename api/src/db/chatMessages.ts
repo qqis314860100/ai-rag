@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "./index";
 import { touchSession } from "./chatSessions";
+import { formatArtifact, listArtifactsByMessage } from "./chatArtifacts";
 
 export interface ChatMessageRow {
   id: string;
@@ -30,7 +31,7 @@ interface OrderedMessageRow {
 export function listMessagesBySession(sessionId: string): ChatMessageRow[] {
   const db = getDb();
   return db
-    .prepare("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC")
+    .prepare("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC")
     .all(sessionId) as ChatMessageRow[];
 }
 
@@ -47,9 +48,17 @@ function listOrderedMessageIds(sessionId: string): OrderedMessageRow[] {
     .all(sessionId) as OrderedMessageRow[];
 }
 
-function deleteMessageIds(ids: string[]): void {
+function getBranchTruncationIds(sessionId: string, messageId: string, includeSelf: boolean): string[] {
+  const ordered = listOrderedMessageIds(sessionId);
+  const index = ordered.findIndex((row) => row.id === messageId);
+  if (index === -1) return [];
+
+  const startIndex = includeSelf ? index : index + 1;
+  return ordered.slice(startIndex).map((row) => row.id);
+}
+
+function deleteMessageIds(db: ReturnType<typeof getDb>, ids: string[]): void {
   if (ids.length === 0) return;
-  const db = getDb();
   const stmt = db.prepare("DELETE FROM chat_messages WHERE id = ?");
   for (const id of ids) {
     stmt.run(id);
@@ -99,31 +108,38 @@ export function updateMessageAndTruncateSession(messageId: string, content: stri
   const existing = getMessageById(messageId);
   if (!existing) return null;
 
-  const ordered = listOrderedMessageIds(existing.session_id);
-  const index = ordered.findIndex((row) => row.id === messageId);
-  if (index === -1) return existing;
+  const idsToDelete = getBranchTruncationIds(existing.session_id, messageId, false);
+  const truncateBranch = db.transaction((idsToDelete: string[]) => {
+    db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
+    deleteMessageIds(db, idsToDelete);
+    touchSession(existing.session_id);
+  });
 
-  db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
-  deleteMessageIds(ordered.slice(index + 1).map((row) => row.id));
-  touchSession(existing.session_id);
+  truncateBranch(idsToDelete);
   return getMessageById(messageId);
 }
 
 export function deleteMessageAndTruncateSession(messageId: string): boolean {
+  const db = getDb();
   const existing = getMessageById(messageId);
   if (!existing) return false;
 
-  const ordered = listOrderedMessageIds(existing.session_id);
-  const index = ordered.findIndex((row) => row.id === messageId);
-  if (index === -1) return false;
+  const idsToDelete = getBranchTruncationIds(existing.session_id, messageId, true);
+  if (idsToDelete.length === 0) return false;
+  const truncateBranch = db.transaction((idsToDelete: string[]) => {
+    deleteMessageIds(db, idsToDelete);
+    touchSession(existing.session_id);
+  });
 
-  deleteMessageIds(ordered.slice(index).map((row) => row.id));
-  touchSession(existing.session_id);
+  truncateBranch(idsToDelete);
   return true;
 }
 
 export function formatMessage(row: ChatMessageRow) {
   const metadata = JSON.parse(row.metadata_json || "{}");
+  const artifacts = listArtifactsByMessage(row.id)
+    .map(formatArtifact)
+    .filter((artifact) => artifact.metadata.gate_status !== "blocked");
   return {
     id: row.id,
     session_id: row.session_id,
@@ -132,6 +148,7 @@ export function formatMessage(row: ChatMessageRow) {
     sources: JSON.parse(row.sources_json || "[]"),
     confidence: metadata.confidence as number | undefined,
     followups: metadata.followups as string[] | undefined,
+    artifacts,
     metadata,
     latency_ms: row.latency_ms,
     created_at: row.created_at,

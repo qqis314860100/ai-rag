@@ -4,15 +4,23 @@
   "private": true,
   "description": "企业级电池产线 RAG 知识库系统",
   "scripts": {
-    "dev:web": "pnpm --filter web dev",
-    "dev:api": "pnpm --filter api dev",
-    "dev:rag": "cd rag && python -m uvicorn app.main:app --reload --port 8001",
-    "dev": "pnpm run --parallel dev:web dev:api",
-    "build:web": "pnpm --filter web build",
-    "build:api": "pnpm --filter api build",
+    "dev:web": "pnpm --dir web dev",
+    "dev:api": "pnpm --dir api dev",
+    "dev:rag": "cd rag && ./.venv/bin/python -m uvicorn app.main:app --reload --port 8000",
+    "dev": "pnpm --parallel --filter web --filter api dev",
+    "build:web": "pnpm --dir web build",
+    "build:api": "pnpm --dir api build",
     "build": "pnpm run build:web && pnpm run build:api",
+    "lint:web": "eslint \"web/src/**/*.{ts,tsx}\"",
+    "lint:api": "eslint \"api/src/**/*.ts\"",
+    "lint": "pnpm run lint:web && pnpm run lint:api",
+    "check:rag": "python3 -m compileall rag/app",
+    "test:api": "bash api/tests/run-tests.sh",
+    "smoke:desktop-perf": "node scripts/desktop_perf_smoke.mjs",
+    "audit:diff": "python3 scripts/audit_diff.py",
+    "audit:harness": "python3 scripts/audit_harness.py",
+    "verify": "pnpm run lint && pnpm run build && pnpm run check:rag && pnpm run audit:harness",
     "typecheck": "pnpm --filter web build && pnpm --filter api build",
-    "lint": "bash scripts/lint.sh",
     "test": "bash api/tests/run-tests.sh",
     "check": "bash scripts/check-harness.sh"
   },
@@ -20,7 +28,18 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.30.0",
     "@commitlint/cli": "^21.0.1",
-    "@commitlint/config-conventional": "^21.0.1"
-  }
+    "@commitlint/config-conventional": "^21.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.33.0",
+    "@typescript-eslint/parser": "^8.33.0",
+    "eslint": "^9.30.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0"
+  },
+  "workspaces": [
+    "web",
+    "api"
+  ]
 }

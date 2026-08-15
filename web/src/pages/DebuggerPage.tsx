@@ -30,7 +30,11 @@ export default function DebuggerPage() {
       const res = await api.post<ApiResponse<DebugResult>>("/search/debug", { query, top_k: topK, mode, filters, include_prompt: includePrompt });
       setResult(res.data);
       setHistory(h => [{ query, time: new Date().toLocaleTimeString("zh-CN") }, ...h].slice(0, 10));
-    } catch {} finally { setLoading(false); }
+    } catch (error) {
+      console.error("Debugger search failed", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

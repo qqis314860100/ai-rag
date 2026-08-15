@@ -2,8 +2,8 @@ import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
+import crypto from "crypto";
 import { loadConfig } from "../config";
 import {
   listDocuments,
@@ -18,8 +18,11 @@ import { AppError, ErrorCodes } from "../utils/errors";
 import { auditFromRequest } from "../services/auditService";
 import { requirePermission, getSecurityLevelsForRequest } from "../middleware/auth";
 import { ingestDocument, reindexDocument } from "../services/ragClient";
+import { buildDocumentInsights } from "../services/documentInsightsService";
+import { importOfflinePackage } from "../services/offlineImportService";
 import { getDb } from "../db";
 import { listComments, createComment, updateComment, softDeleteComment } from "../db/docComments";
+import { buildDocumentPreviewContract, getPreviewMimeType, listPreviewFormatDefinitions } from "../utils/documentPreview";
 
 const config = loadConfig();
 
@@ -29,10 +32,7 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Knowledge directory (seeded source documents) — resolved relative to upload dir
-const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
-
-// Allowed file types — extension AND MIME type must both be known
+// Allowed file types
 const ALLOWED_MIME_TYPES: Record<string, string> = {
   "application/pdf": "pdf",
   "text/plain": "txt",
@@ -49,14 +49,6 @@ const ALLOWED_EXTENSIONS: Record<string, string> = {
   ".docx": "docx",
 };
 
-// Magic bytes for content sniffing (defense against renamed executables)
-const MAGIC_BYTES: Record<string, Buffer> = {
-  pdf: Buffer.from("%PDF-", "latin1"),
-  docx: Buffer.from([0x50, 0x4b, 0x03, 0x04]), // PK.. zip container
-};
-
-const SECURITY_LEVELS = ["public", "internal", "confidential", "restricted"];
-
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const storage = multer.diskStorage({
@@ -71,36 +63,19 @@ const storage = multer.diskStorage({
   },
 });
 
-const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const extType = ALLOWED_EXTENSIONS[ext];
-  const mimeType = ALLOWED_MIME_TYPES[file.mimetype];
 
-  // Extension AND MIME type must agree on a supported type
-  if (!extType) {
-    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "不支持的文件类型。允许: pdf, txt, md, docx", 400), false);
-    return;
-  }
-  if (file.mimetype && file.mimetype !== "application/octet-stream" && mimeType !== extType) {
-    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "文件扩展名与内容类型不匹配。", 400), false);
-    return;
-  }
-  cb(null, true);
+const SECURITY_LEVELS = ["public", "internal", "confidential", "restricted"];
+
+// Magic bytes for content sniffing (defense against renamed executables)
+const MAGIC_BYTES: Record<string, Buffer> = {
+  pdf: Buffer.from("%PDF-", "latin1"),
+  docx: Buffer.from([0x50, 0x4b, 0x03, 0x04]), // PK.. zip container
 };
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: MAX_FILE_SIZE,
-    files: 1,
-  },
-});
 
 /** Verify the file content matches its claimed type via magic bytes. */
 function assertMagicBytes(filePath: string, fileType: string): void {
   const magic = MAGIC_BYTES[fileType];
-  if (!magic) return; // txt/md have no reliable magic — content is parsed as text later
+  if (!magic) return; // txt/md have no reliable magic
   const fd = fs.openSync(filePath, "r");
   try {
     const buf = Buffer.alloc(magic.length);
@@ -149,13 +124,49 @@ function resolveWithinRoots(candidate: string, roots: string[]): string | null {
     });
     return realRoots.some((root) => real === root || real.startsWith(root + path.sep)) ? real : null;
   } catch {
-    return null; // missing file or non-resolvable path
+    return null;
   }
 }
 
+const fileFilter: multer.Options["fileFilter"] = (_req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  const extType = ALLOWED_EXTENSIONS[ext];
+  const mimeType = ALLOWED_MIME_TYPES[file.mimetype];
+
+  // Extension AND MIME type must agree on a supported type
+  if (!extType) {
+    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "不支持的文件类型。允许: pdf, txt, md, docx", 400), false);
+    return;
+  }
+  if (file.mimetype && file.mimetype !== "application/octet-stream" && mimeType !== extType) {
+    cb(new AppError(ErrorCodes.FILE_UPLOAD_FAILED, "文件扩展名与内容类型不匹配。", 400), false);
+    return;
+  }
+  cb(null, true);
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: MAX_FILE_SIZE,
+    files: 1,
+  },
+});
+
 const router = Router();
 
-// GET /api/documents - list documents (scoped to the requester's security levels)
+function bodyText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function bodyTags(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+// GET /api/documents - list documents
 router.get("/documents", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, status, index_status, security_level, keyword, page, page_size } = req.query;
@@ -177,6 +188,71 @@ router.get("/documents", async (req: Request, res: Response, next: NextFunction)
   }
 });
 
+// GET /api/documents/preview-contract - supported preview MIME/file-type contract
+router.get("/documents/preview-contract", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(
+      res,
+      {
+        version: "2026-05-24",
+        formats: listPreviewFormatDefinitions(),
+        contract: {
+          document_preview_field: "preview",
+          endpoint_fields: ["raw", "file", "chunk", "comments"],
+          unsupported_views_return_reason: true,
+        },
+      },
+      req.requestId
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/documents/import/offline-package - import MES/PLM/ERP exported files from a controlled local directory
+router.post(
+  "/documents/import/offline-package",
+  requirePermission("document.upload"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const packagePath = bodyText(req.body.package_path);
+      const sourceSystem = bodyText(req.body.source_system).toLowerCase();
+      const category = bodyText(req.body.category) || sourceSystem.toUpperCase();
+      const securityLevel = bodyText(req.body.security_level) || "internal";
+
+      if (!packagePath || !sourceSystem) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "缺少必填字段: package_path, source_system。", 400);
+      }
+      if (!["mes", "plm", "erp"].includes(sourceSystem)) {
+        throw new AppError(ErrorCodes.VALIDATION_ERROR, "source_system 必须是 mes、plm 或 erp。", 400);
+      }
+
+      const result = await importOfflinePackage({
+        packagePath,
+        sourceSystem,
+        category,
+        securityLevel,
+        process: bodyText(req.body.process) || undefined,
+        station: bodyText(req.body.station) || undefined,
+        version: bodyText(req.body.version) || undefined,
+        owner: bodyText(req.body.owner) || undefined,
+        tags: bodyTags(req.body.tags),
+        createdBy: req.user?.id,
+        requestId: req.requestId,
+      });
+
+      auditFromRequest(req, "document.offline_import", "document", undefined, {
+        source_system: sourceSystem,
+        total: result.total,
+        failed: result.items.filter((item) => item.status === "failed").length,
+      });
+      sendSuccess(res, result, req.requestId);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // GET /api/documents/:id - document detail
 router.get("/documents/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -186,18 +262,37 @@ router.get("/documents/:id", async (req: Request, res: Response, next: NextFunct
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
     }
     assertDocumentVisible(req, doc);
-
     const formatted = formatDocument(doc) as ReturnType<typeof formatDocument> & { content?: string };
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
 
     // Include file content for text-based files
     try {
-      const ext = doc.file_name?.split(".").pop()?.toLowerCase() || "";
-      if (["md", "txt", "markdown"].includes(ext) && doc.file_path && fs.existsSync(doc.file_path)) {
+      if (preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
         formatted.content = fs.readFileSync(doc.file_path, "utf-8");
       }
-    } catch {}
+    } catch (error) {
+      console.warn("Failed to attach document content preview", { documentId, error });
+    }
 
     sendSuccess(res, formatted, req.requestId);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/documents/:id/insights - document usage and governance detail
+router.get("/documents/:id/insights", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const documentId = req.params.id as string;
+    const doc = getDocumentById(documentId);
+    if (!doc) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
+    }
+    sendSuccess(res, buildDocumentInsights(documentId), req.requestId);
   } catch (err) {
     next(err);
   }
@@ -262,7 +357,6 @@ router.post(
         title: doc.title,
         file_name: req.file.originalname,
         file_size: req.file.size,
-        file_hash: fileHash,
       });
 
       // Update status to processing and call RAG ingest asynchronously
@@ -322,11 +416,12 @@ router.patch(
       if (!existing) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
       }
+
       assertDocumentVisible(req, existing);
 
       const { title, category, process, station, version, owner, security_level, tags } = req.body;
 
-      // Changing security_level is a privilege-sensitive operation: only admins may do it
+      // 修改安全等级是权限敏感操作：仅管理员可执行
       if (security_level !== undefined && !req.user?.permissions.includes("settings.update")) {
         throw new AppError(ErrorCodes.FORBIDDEN, "仅系统管理员可以修改文档安全等级。", 403);
       }
@@ -385,7 +480,7 @@ router.delete(
   }
 );
 
-// GET /api/documents/chunks/:chunk_id - get chunk content (scoped to security level)
+// GET /api/documents/chunks/:chunk_id - get chunk content
 router.get("/documents/chunks/:chunk_id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const chunkId = req.params.chunk_id as string;
@@ -423,7 +518,6 @@ router.post(
       if (!doc) {
         throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
       }
-      assertDocumentVisible(req, doc);
 
       updateDocument(doc.id, {
         indexStatus: "processing",
@@ -491,12 +585,6 @@ router.get("/documents/:id/comments", async (req: Request, res: Response, next: 
 // POST /api/documents/:id/comments - create comment
 router.post("/documents/:id/comments", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const doc = getDocumentById(req.params.id as string);
-    if (!doc) {
-      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档不存在。", 404);
-    }
-    assertDocumentVisible(req, doc);
-
     const { content, chunk_id, parent_id } = req.body;
     if (!content || typeof content !== "string" || content.trim().length === 0) {
       throw new AppError(ErrorCodes.VALIDATION_ERROR, "评论内容不能为空。", 400);
@@ -554,58 +642,70 @@ router.get("/documents/:id/raw", async (req: Request, res: Response, next: NextF
     }
     assertDocumentVisible(req, doc);
 
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
+
+    const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
     const allowedRoots = [uploadDir, knowledgeDir];
 
+    let content: string | null = null;
+
     // Strategy 1: direct file_path (must stay inside allowed roots)
-    if (doc.file_path && fs.existsSync(doc.file_path)) {
+    if (preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
       const real = resolveWithinRoots(doc.file_path, allowedRoots);
-      if (real) {
-        sendSuccess(res, { content: fs.readFileSync(real, "utf-8") }, req.requestId);
-        return;
-      }
+      if (real) content = fs.readFileSync(real, "utf-8");
     }
 
     // Strategy 2: use section_path to find the document file
     // e.g. "极柱Busbar激光焊接 / 5. 安全注意事项" → look for "极柱Busbar激光焊接.md"
     const sectionPath = req.query.section_path as string | undefined;
-    if (sectionPath && fs.existsSync(knowledgeDir)) {
+    if (!content && sectionPath && fs.existsSync(knowledgeDir)) {
       const docName = sectionPath.split(" / ")[0]?.trim();
       if (docName) {
         for (const ext of [".md", ".txt", ".markdown"]) {
           const real = resolveWithinRoots(path.join(knowledgeDir, `${docName}${ext}`), allowedRoots);
-          if (real) {
-            sendSuccess(res, { content: fs.readFileSync(real, "utf-8") }, req.requestId);
-            return;
-          }
+          if (real) { content = fs.readFileSync(real, "utf-8"); break; }
         }
       }
     }
 
     // Strategy 3: search by title in knowledge dir
-    for (const ext of [".md", ".txt", ".markdown"]) {
-      const real = resolveWithinRoots(path.join(knowledgeDir, `${doc.title}${ext}`), allowedRoots);
-      if (real) {
-        sendSuccess(res, { content: fs.readFileSync(real, "utf-8") }, req.requestId);
-        return;
+    if (!content) {
+      for (const ext of [".md", ".txt", ".markdown"]) {
+        const real = resolveWithinRoots(path.join(knowledgeDir, `${doc.title}${ext}`), allowedRoots);
+        if (real) { content = fs.readFileSync(real, "utf-8"); break; }
       }
     }
 
-    // Strategy 4: fuzzy match — find file whose name contains doc title or vice versa
-    if (fs.existsSync(knowledgeDir)) {
+    // Strategy 3: fuzzy match — find file whose name contains doc title or vice versa
+    if (!content && fs.existsSync(knowledgeDir)) {
       const files = fs.readdirSync(knowledgeDir);
       for (const f of files) {
         const name = f.replace(/\.(md|txt|markdown)$/, "");
         if (doc.title.includes(name) || name.includes(doc.title)) {
-          const real = resolveWithinRoots(path.join(knowledgeDir, f), allowedRoots);
-          if (real) {
-            sendSuccess(res, { content: fs.readFileSync(real, "utf-8") }, req.requestId);
-            return;
-          }
+          content = fs.readFileSync(path.join(knowledgeDir, f), "utf-8");
+          break;
         }
       }
     }
 
-    throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在，请确认知识库文件已上传。", 404);
+    if (content === null && !preview.capabilities.raw && doc.file_path && fs.existsSync(doc.file_path)) {
+      throw new AppError(
+        ErrorCodes.VALIDATION_ERROR,
+        "当前文件类型不支持原文文本预览，请使用 file endpoint。",
+        415,
+        { preview }
+      );
+    }
+
+    if (content === null) {
+      throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在，请确认知识库文件已上传。", 404);
+    }
+
+    sendSuccess(res, { content }, req.requestId);
   } catch (err) {
     next(err);
   }
@@ -620,8 +720,8 @@ router.get("/documents/:id/file", async (req: Request, res: Response, next: Next
     }
     assertDocumentVisible(req, doc);
 
+    const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
     const allowedRoots = [uploadDir, knowledgeDir];
-
     const filePath = resolveWithinRoots(doc.file_path, allowedRoots);
     if (!filePath) {
       // Try to find by title in knowledge directory
@@ -634,15 +734,17 @@ router.get("/documents/:id/file", async (req: Request, res: Response, next: Next
       throw new AppError(ErrorCodes.DOCUMENT_NOT_FOUND, "文档文件不存在。", 404);
     }
 
+    const preview = buildDocumentPreviewContract({
+      documentId: doc.id,
+      fileName: doc.file_name,
+      fileType: doc.file_type,
+    });
     const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      ".pdf": "application/pdf",
-      ".md": "text/markdown",
-      ".txt": "text/plain",
-      ".markdown": "text/markdown",
-    };
-    res.type(mimeTypes[ext] || "application/octet-stream");
-    res.sendFile(filePath);
+    const mimeType = getPreviewMimeType(ext || doc.file_type);
+    res.type(mimeType);
+    res.setHeader("X-Document-File-Type", preview.file_type);
+    res.setHeader("X-Document-Preview-Kind", preview.content_kind);
+    res.sendFile(path.resolve(filePath));
   } catch (err) {
     next(err);
   }
@@ -653,76 +755,64 @@ router.post(
   "/documents/sync-from-rag",
   requirePermission("document.reindex"),
   async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const ragUrl = `${config.ragServiceUrl}/rag/documents`;
+  try {
+    const config = loadConfig();
+    const ragUrl = `${config.ragServiceUrl}/rag/documents`;
 
-      const ragHeaders: Record<string, string> = {};
-      if (config.ragApiKey) ragHeaders["X-API-Key"] = config.ragApiKey;
+    const ragHeaders: Record<string, string> = {};
+    if (config.ragApiKey) ragHeaders["X-API-Key"] = config.ragApiKey;
 
-      const response = await fetch(ragUrl, { headers: ragHeaders, signal: AbortSignal.timeout(10000) });
-      if (!response.ok) {
-        throw new AppError(ErrorCodes.RAG_SERVICE_ERROR, "RAG 服务文档列表请求失败。", 502);
-      }
+    const response = await fetch(ragUrl, { headers: ragHeaders, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      throw new AppError(ErrorCodes.RAG_SERVICE_ERROR, "RAG 服务文档列表请求失败。", 502);
+    }
 
-      const { documents: ragDocs } = (await response.json()) as { documents: Array<{ document_id: string; title: string; chunk_count: number; category: string; section_paths: string[] }> };
+    const { documents: ragDocs } = (await response.json()) as { documents: Array<{ document_id: string; title: string; chunk_count: number; category: string; section_paths: string[] }> };
 
-      let created = 0;
-      let updated = 0;
+    let created = 0;
+    let updated = 0;
 
-      const db = getDb();
-      const findByTitle = db.prepare(
-        "SELECT id FROM documents WHERE title = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 1"
-      );
-      const claimId = db.prepare(
-        "UPDATE documents SET id = ?, chunk_count = ?, index_status = 'ready' WHERE id = ?"
-      );
-      const updateSourceRefs = db.prepare(
-        "UPDATE message_sources SET document_id = ? WHERE document_id = ?"
-      );
-
-      const sync = db.transaction(() => {
-        for (const rd of ragDocs) {
-          const existing = getDocumentById(rd.document_id);
-          if (existing) {
-            updateDocument(rd.document_id, {
-              title: rd.title,
-              category: rd.category || "未分类",
-              indexStatus: "ready",
-              chunkCount: rd.chunk_count,
-            });
-            updated++;
-            continue;
+    for (const rd of ragDocs) {
+      const existing = getDocumentById(rd.document_id);
+      if (existing) {
+        updateDocument(rd.document_id, {
+          title: rd.title,
+          category: rd.category || "未分类",
+          indexStatus: "ready",
+          chunkCount: rd.chunk_count,
+        });
+        updated++;
+      } else {
+        // Try to find the source file on disk by title
+        const knowledgeDir = path.resolve(config.uploadDir, "../../knowledge");
+        let filePath = "";
+        let fileName = "";
+        let fileType = "unknown";
+        let fileSize = 0;
+        for (const ext of [".md", ".txt", ".markdown"]) {
+          const candidate = path.join(knowledgeDir, `${rd.title}${ext}`);
+          if (fs.existsSync(candidate)) {
+            filePath = candidate;
+            fileName = `${rd.title}${ext}`;
+            fileType = ext.replace(".", "");
+            fileSize = fs.statSync(candidate).size;
+            break;
           }
+        }
 
-          // Find the source file on disk by title
-          const knowledgeDir2 = path.resolve(config.uploadDir, "../../knowledge");
-          let filePath = "";
-          let fileName = "";
-          let fileType = "unknown";
-          let fileSize = 0;
-          for (const ext of [".md", ".txt", ".markdown"]) {
-            const candidate = path.join(knowledgeDir2, `${rd.title}${ext}`);
-            if (fs.existsSync(candidate)) {
-              filePath = candidate;
-              fileName = `${rd.title}${ext}`;
-              fileType = ext.replace(".", "");
-              fileSize = fs.statSync(candidate).size;
-              break;
-            }
-          }
-
-          // A doc with the same title may already exist under a different id
-          // (e.g. synced before the RAG id was assigned). Claim that row instead
-          // of guessing "the most recently created document".
-          const sameTitle = findByTitle.get(rd.title) as { id: string } | undefined;
-          if (sameTitle) {
-            claimId.run(rd.document_id, rd.chunk_count, sameTitle.id);
-            updateSourceRefs.run(rd.document_id, sameTitle.id);
-            updated++;
-            continue;
-          }
-
-          // Fresh insert with the RAG document id directly (no id swap race)
+        // 按标题精确回填 RAG document_id（消除"最新一条"竞态）
+        const db = getDb();
+        const sameTitle = db.prepare(
+          "SELECT id FROM documents WHERE title = ? AND status != 'deleted' ORDER BY created_at DESC LIMIT 1"
+        ).get(rd.title) as { id: string } | undefined;
+        if (sameTitle) {
+          db.prepare("UPDATE documents SET id = ?, chunk_count = ?, index_status = 'ready' WHERE id = ?")
+            .run(rd.document_id, rd.chunk_count, sameTitle.id);
+          db.prepare("UPDATE message_sources SET document_id = ? WHERE document_id = ?")
+            .run(rd.document_id, sameTitle.id);
+          updated++;
+        } else {
+          // 直接以 RAG document_id 创建，无需 ID 交换
           createDocument(
             {
               title: rd.title,
@@ -740,16 +830,15 @@ router.post(
             .run(rd.chunk_count, rd.document_id);
           created++;
         }
-      });
-
-      sync();
-
-      auditFromRequest(req, "document.sync", "document", undefined, { created, updated, total: ragDocs.length });
-
-      sendSuccess(res, { created, updated, total: ragDocs.length }, req.requestId);
-    } catch (err) {
-      next(err);
+      }
     }
+
+    auditFromRequest(req, "document.sync", "document", undefined, { created, updated, total: ragDocs.length });
+
+    sendSuccess(res, { created, updated, total: ragDocs.length }, req.requestId);
+  } catch (err) {
+    next(err);
+  }
   }
 );
 

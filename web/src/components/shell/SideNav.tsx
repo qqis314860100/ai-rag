@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose } from "lucide-react";
+import { MessageSquare, BookOpen, FileText, Star, BarChart3, Settings, BatteryFull, PanelLeftClose, LibraryBig, FileQuestion } from "lucide-react";
 
 const primaryNav = [
   { to: "/chat", icon: MessageSquare, label: "聊天" },
   { to: "/analytics", icon: BarChart3, label: "统计看板" },
   { to: "/documents", icon: BookOpen, label: "知识库管理" },
+  { to: "/knowledge-assets", icon: LibraryBig, label: "知识资产" },
+  { to: "/knowledge-gaps", icon: FileQuestion, label: "缺口治理" },
   { to: "/sop", icon: FileText, label: "工艺SOP" },
 ];
 
@@ -19,7 +21,7 @@ export default function SideNav() {
 
   return (
     <nav
-      className="relative flex flex-col border-r border-divider bg-white shrink-0 transition-all duration-slow ease-out z-20"
+      className="relative hidden flex-col border-r border-divider bg-white shrink-0 transition-all duration-slow ease-out z-20 lg:flex"
       style={{ width: expanded ? 220 : 56 }}
     >
       {/* Brand */}
@@ -41,7 +43,7 @@ export default function SideNav() {
             key={to + label}
             to={to}
             end
-            className={({ isActive }) =>
+            className={({ isActive }: { isActive: boolean }) =>
               `flex items-center rounded-lg transition-all duration-fast ${
                 expanded ? "gap-3 px-3" : "justify-center"
               } py-2.5 text-sm font-medium ${
