@@ -63,10 +63,14 @@ def _budget_exceeded_http_error(error: LlmBudgetExceeded) -> HTTPException:
 
 
 def verify_api_key(request: Request) -> None:
-    """配置了 RAG_API_KEY 时，所有 /rag 端点必须携带 X-API-Key。"""
+    """配置了 RAG_API_KEY 时，所有 /rag 端点必须携带服务密钥。
+
+    X-Service-Key 是外部 AI 能力服务（ep）约定的鉴权头，X-API-Key 为存量
+    API 网关头；迁移期两者兼容，后续收敛为统一键时只保留其一。
+    """
     if not config.rag_api_key:
         return
-    provided = request.headers.get("X-API-Key", "")
+    provided = request.headers.get("X-Service-Key") or request.headers.get("X-API-Key", "")
     if provided != config.rag_api_key:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
