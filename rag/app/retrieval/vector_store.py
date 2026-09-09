@@ -285,7 +285,9 @@ def _scope_where(scopes: list[dict] | None) -> dict | None:
         dims = {
             key: str(value).strip()
             for key, value in scope.items()
-            if key in SCOPE_DIMENSION_KEYS and str(value).strip()
+            if key in SCOPE_DIMENSION_KEYS
+            and value is not None
+            and str(value).strip()
         }
         if not dims:
             continue
