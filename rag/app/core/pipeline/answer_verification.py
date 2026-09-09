@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ...schemas.models import AnswerIR, AnswerWarning
-from .retrieve import _context_conflict_candidates
+from .retrieve_signals import context_conflict_candidates as _context_conflict_candidates
 
 ANSWER_VERIFICATION_SCHEMA = "answer-verification/v1"
 SUPPORT_SCORE_THRESHOLD = 0.18

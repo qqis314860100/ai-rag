@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 from ...schemas.models import AnswerQueryRewrite, AnswerWarning
-from .retrieve import _context_conflict_candidates
+from .retrieve_signals import context_conflict_candidates as _context_conflict_candidates
 from .rewrite import _dedupe_preserve_order, _knowledge_asset_trace
 
 REFUSAL_ANSWER = "根据当前知识库信息，我暂时无法确认该问题。"

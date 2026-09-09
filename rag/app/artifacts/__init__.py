@@ -1,8 +1,8 @@
+from .diagram_extraction import extract_diagram_keywords
 from .diagram_ir import (
     build_keyword_diagram_ir,
     build_llm_diagram_ir,
     build_placeholder_diagram_ir,
-    extract_diagram_keywords,
     extract_diagram_steps,
 )
 from .diagram_models import (
