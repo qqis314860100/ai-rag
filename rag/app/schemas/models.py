@@ -15,19 +15,32 @@ from .source_models import SourceContext, SourceMetadata
 # ---------------------------------------------------------------------------
 
 class IngestRequest(BaseModel):
-    document_id: str
-    file_path: str
+    """文档入库/抽取请求。
+
+    - 存量形态：document_id + file_path + metadata（电池语料 UI/API 调用）；
+    - ep 能力服务形态：namespace + targetType + targetId + title + scopes
+      （targetId 语义、文件字节运输方案联调期定，当前仍需 file_path 指向本地暂存文件）。
+    """
+    document_id: str | None = None
+    file_path: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     # 语料命名空间：空回退电池默认 collection
     namespace: str = ""
     # 文档 scope 维度（platformFamily/productLine/base 等），入库时折入 chunk metadata
     scopes: list[dict[str, Any]] = Field(default_factory=list)
+    # ep DocumentRequest 契约字段（camelCase 兼容）
+    target_type: str = Field(default="", validation_alias=AliasChoices("target_type", "targetType"))
+    target_id: int | None = Field(default=None, validation_alias=AliasChoices("target_id", "targetId"))
+    title: str = ""
 
 
 class IngestResult(BaseModel):
     document_id: str
     chunk_count: int
     index_status: str  # ready | failed
+    # ep IngestResult 契约字段（存量 TS 调用方忽略多余字段）
+    ok: bool = True
+    message: str = ""
 
 
 class ReindexRequest(BaseModel):
@@ -43,6 +56,23 @@ class ReindexResult(BaseModel):
     document_id: str
     chunk_count: int
     index_status: str
+
+
+# ---------------------------------------------------------------------------
+# AI 能力服务：元数据抽取结果（ep ExtractionResult 契约）
+# 空字段语义：字符串 "" / 列表 [] / 数值 0.0
+# ---------------------------------------------------------------------------
+
+class ExtractionResult(BaseModel):
+    name: str = ""
+    description: str = ""
+    assetTypeCode: str = ""
+    tags: list[str] = Field(default_factory=list)
+    summary: str = ""
+    categoryCode: str = ""
+    scopeHints: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 # ---------------------------------------------------------------------------

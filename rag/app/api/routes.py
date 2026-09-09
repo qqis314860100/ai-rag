@@ -29,6 +29,7 @@ from ..core.pipeline import (
 )
 from ..core.pipeline.answer_verification import verify_answer_ir
 from ..core.terminology import list_term_entries, terminology_contract
+from ..extraction.asset_extractor import extract_asset_metadata
 from ..llm.usage_guard import LlmBudgetExceeded, usage_summary
 from ..schemas.models import (
     AnswerIR,
@@ -37,6 +38,7 @@ from ..schemas.models import (
     DebugSearchRequest,
     DebugSearchResult,
     DiagramGenerateRequest,
+    ExtractionResult,
     ImageArtifactContract,
     ImageArtifactContractRequest,
     IngestRequest,
@@ -145,12 +147,36 @@ def list_rag_documents():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _require_ingest_source(request: IngestRequest) -> tuple[str, str]:
+    """解析 (document_id, file_path)，兼容存量与 ep DocumentRequest 形态。
+
+    ep 请求只带 namespace/targetType/targetId/title/scopes（文件字节运输方案
+    联调期定），当前仍需 file_path 指向本地暂存文件才能解析入库。
+    """
+    document_id = (request.document_id or "").strip()
+    if not document_id and request.target_id is not None:
+        document_id = f"{request.namespace or 'ep'}:{request.target_type or 'doc'}:{request.target_id}"
+    file_path = (request.file_path or "").strip()
+    if not file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="file_path 缺失：文件字节运输方案未定，联调期需先提供本地暂存文件路径",
+        )
+    if not document_id:
+        raise HTTPException(
+            status_code=400,
+            detail="document_id 缺失：请提供 document_id 或 ep 契约的 targetId",
+        )
+    return document_id, file_path
+
+
 @router.post("/documents/ingest", response_model=IngestResult, dependencies=[Depends(verify_api_key)])
 def ingest(request: IngestRequest):
     try:
+        document_id, file_path = _require_ingest_source(request)
         result = pipeline.ingest_document(
-            document_id=request.document_id,
-            file_path=request.file_path,
+            document_id=document_id,
+            file_path=file_path,
             metadata=request.metadata,
             namespace=request.namespace or None,
             scopes=request.scopes or None,
@@ -161,6 +187,35 @@ def ingest(request: IngestRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception(f"Ingest failed for {request.document_id}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/extract", response_model=ExtractionResult, dependencies=[Depends(verify_api_key)])
+def extract_metadata(request: IngestRequest):
+    """AI 能力服务编目元数据抽取（复用 解析→切分→抽取 链路）。
+
+    请求与 /documents/ingest 同形态；输出与 ep AiCapabilityClient.ExtractionResult
+    逐字段对齐（空字段语义 ""/[]/0.0）。抽取计入 usage_guard 预算；内容不足时
+    返回空字段结果而非编造建议。
+    """
+    try:
+        document_id, file_path = _require_ingest_source(request)
+        result = extract_asset_metadata(
+            document_id=document_id,
+            file_path=file_path,
+            title=request.title,
+            scopes=request.scopes or None,
+            target_type=request.target_type,
+        )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LlmBudgetExceeded as e:
+        raise _budget_exceeded_http_error(e)
+    except Exception:
+        logger.exception(f"Extract failed for {request.title or request.target_id}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
