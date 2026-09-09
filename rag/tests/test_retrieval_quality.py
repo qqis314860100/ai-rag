@@ -156,7 +156,7 @@ def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatc
         captured["embedding_query"] = query
         return [0.1, 0.2, 0.3]
 
-    def fake_search(query_embedding, allowed_security_levels, top_k, filters=None):
+    def fake_search(query_embedding, allowed_security_levels, top_k, filters=None, namespace=None, scopes=None):
         return [
             _hit(0.61, "开路电压异常时需要复核静置时间、采样线和电压阈值。"),
             _hit(0.7, "设备维护周期和日常点检要求。", document_title="常见设备故障与维护"),

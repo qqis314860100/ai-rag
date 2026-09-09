@@ -208,7 +208,7 @@ def test_terminology_contract_covers_initial_battery_line_terms() -> None:
 def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         captured["retrieval_query"] = query
         return {
             "latency_ms": 3,
@@ -255,7 +255,7 @@ def test_chat_uses_rewrite_trace_for_retrieval_and_answer_ir(monkeypatch) -> Non
 
 
 def test_chat_query_understanding_records_history_and_recall_candidates(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [

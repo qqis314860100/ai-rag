@@ -29,7 +29,7 @@ def _hit(score: float, content: str, chunk_id: str = "chunk-1") -> dict:
 
 
 def test_chat_refuses_low_information_query_without_llm(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {"latency_ms": 2, "results": []}
 
     def fail_llm_chat(messages, temperature=0.2):
@@ -53,7 +53,7 @@ def test_chat_refuses_low_information_query_without_llm(monkeypatch) -> None:
 
 
 def test_chat_refuses_weak_evidence_with_structured_reason(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [_hit(0.16, "设备维护周期和日常点检要求。")],
@@ -81,7 +81,7 @@ def test_chat_refuses_weak_evidence_with_structured_reason(monkeypatch) -> None:
 
 
 def test_chat_warns_context_conflict_without_hard_refusal(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [
@@ -126,7 +126,7 @@ def test_chat_warns_context_conflict_without_hard_refusal(monkeypatch) -> None:
 
 
 def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [
@@ -166,7 +166,7 @@ def test_chat_allows_safety_context_with_required_and_forbidden_actions(monkeypa
 
 
 def test_chat_allows_negative_status_terms_without_self_conflict(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [
@@ -197,7 +197,7 @@ def test_chat_allows_negative_status_terms_without_self_conflict(monkeypatch) ->
 
 
 def test_stream_chat_emits_structured_refusal_without_llm(monkeypatch) -> None:
-    def fake_search(query, top_k, allowed_security_levels, filters=None):
+    def fake_search(query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {"latency_ms": 2, "results": []}
 
     def fail_llm_stream(messages, temperature=0.2):

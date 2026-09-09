@@ -109,7 +109,7 @@ def test_quality_eval_flow_answer_diagram_has_top_down_sequence() -> None:
 
 
 def test_quality_eval_troubleshooting_answer_keeps_actionable_sources(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {
             "latency_ms": 3,
             "results": [
@@ -143,7 +143,7 @@ def test_quality_eval_troubleshooting_answer_keeps_actionable_sources(monkeypatc
 
 
 def test_quality_eval_refusal_for_low_information_query(monkeypatch) -> None:
-    def fake_search(self, query, top_k, allowed_security_levels, filters=None):
+    def fake_search(self, query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
         return {"latency_ms": 2, "results": []}
 
     def fail_llm_chat(messages, temperature=0.2):
