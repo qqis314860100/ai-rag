@@ -69,15 +69,15 @@ def extract_asset_metadata(
     chunks = _parse_document_chunks(document_id=document_id, file_path=file_path)
     parts = [re.sub(r"\s+", " ", (chunk.content or "").strip()) for chunk in chunks]
     parts = [part for part in parts if part]
-    if not parts:
-        # 拒答纪律：没有可抽取内容时不编造建议。
-        return ExtractionResult()
-
+    # name/scopeHints 属于“识别”而非“编造”，内容为空也保留；其余字段按拒答纪律留空。
     result = ExtractionResult(
         name=_clean_text(title or document_id, 120),
         scopeHints=_scope_hints(scopes),
-        evidence=_evidence_lines(document_id, title, chunks),
     )
+    if not parts:
+        return result
+
+    result.evidence = _evidence_lines(document_id, title, chunks)
     if _llm_live():
         try:
             llm_result = _extract_via_llm(
