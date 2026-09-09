@@ -71,6 +71,12 @@ class Config:
     chroma_persist_dir: str = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma")
     chroma_collection: str = os.getenv("CHROMA_COLLECTION", "battery_line_knowledge_v1")
 
+    # 语料命名空间默认标签："" 或 "battery" 都回退到电池语料默认 collection，
+    # 保证存量 ingest/search/chat 行为不变；外部调用方（如 ep 能力服务）请求可携带
+    # namespace（如 ep-docs）选择独立语料集合，namespace → collection 的解析见
+    # retrieval/vector_store.resolve_collection_name。
+    rag_namespace_default: str = os.getenv("RAG_NAMESPACE_DEFAULT", "battery").strip().lower()
+
     embedding_model: str = _read_db_setting("embedding_model", os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
     embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
