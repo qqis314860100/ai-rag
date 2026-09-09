@@ -367,6 +367,92 @@ def rerank_hits(
     return {"results": selected_hits, "trace": trace}
 
 
+def _rrf_fuse_candidates(
+    vector_hits: list[dict],
+    lexical_hits: list[dict],
+    top_k: int,
+    k: int = 60,
+) -> list[dict]:
+    """按 chunk 对向量/词法候选做 RRF 融合；同 chunk 优先保留向量路命中。"""
+    scores: dict[str, float] = {}
+    preferred: dict[str, dict] = {}
+    for hits, prefer_vector in ((vector_hits, True), (lexical_hits, False)):
+        for pos, hit in enumerate(hits, start=1):
+            chunk_id = hit.get("chunk_id")
+            if not chunk_id:
+                continue
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + pos)
+            if chunk_id not in preferred or prefer_vector:
+                preferred[chunk_id] = hit
+    ordered = sorted(scores, key=lambda cid: scores[cid], reverse=True)[:top_k]
+    return [preferred[cid] for cid in ordered]
+
+
+def fuse_lexical_candidates(
+    query: str,
+    vector_hits: list[dict],
+    candidate_top_k: int,
+    allowed_security_levels: list[str] | None = None,
+    namespace: str | None = None,
+) -> list[dict]:
+    """在向量候选之外补一条 BM25 词法候选路并 RRF 融合（混合候选生成）。
+
+    词法路对语料内 active chunk 按查询词计算 BM25 取 top，再映射为与向量路
+    同构的命中对象；向量路候选缺失但词法能命中的文档（如跨主题问题）由此
+    进入候选池，交由 rerank 统一排序。当前语料量级全量扫描可接受，迁移
+    Qdrant 后由原生 sparse 检索 + RRF 取代本实现。
+    """
+    from ...retrieval.vector_store import build_hits_from_rows, fetch_active_chunks
+
+    corpus_rows = fetch_active_chunks(
+        namespace=namespace,
+        allowed_security_levels=allowed_security_levels,
+    )
+    if not corpus_rows:
+        return vector_hits[:candidate_top_k]
+
+    terms = _extract_query_terms(query)
+    pseudo_hits = [
+        {"content": row["content"], "metadata": row["metadata"]}
+        for row in corpus_rows
+    ]
+    bm25_scores = _bm25_scores(terms, pseudo_hits)
+
+    # 只补“向量候选未召回的新文档”，且限量：词法命中不伪造向量分（score=0），
+    # 避免归一化后的高 BM25 被 rerank 误当成强向量证据而挤掉真实语义命中。
+    vector_docs = {
+        str(hit.get("document_id") or "")
+        for hit in vector_hits
+        if hit.get("document_id")
+    }
+    add_cap = max(3, min(candidate_top_k // 3, 8))
+    picked: list[dict] = []
+    added_docs: set[str] = set()
+    for score, index in sorted(
+        ((bm25_scores[i], i) for i in range(len(corpus_rows))),
+        key=lambda pair: pair[0],
+        reverse=True,
+    ):
+        if score <= 0 or len(picked) >= add_cap:
+            if score <= 0:
+                break
+            continue
+        row = corpus_rows[index]
+        doc_id = str(row["metadata"].get("document_id") or "")
+        if not doc_id or doc_id in vector_docs or doc_id in added_docs:
+            continue
+        added_docs.add(doc_id)
+        row["score"] = 0.0
+        picked.append(row)
+
+    lexical_hits = (
+        build_hits_from_rows(picked, namespace=namespace) if picked else []
+    )
+    if not lexical_hits:
+        return vector_hits[:candidate_top_k]
+    return _rrf_fuse_candidates(vector_hits, lexical_hits, candidate_top_k)
+
+
 def _keyword_rerank(
     query: str,
     hits: list[dict],

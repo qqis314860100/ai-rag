@@ -164,6 +164,12 @@ def test_search_expands_terminology_before_embedding_and_records_hits(monkeypatc
 
     monkeypatch.setattr(pipeline_module, "embed_query", fake_embed_query)
     monkeypatch.setattr(pipeline_module, "search", fake_search)
+    # 混合候选默认开启：本测试只关注术语扩展与 rerank 信号，词法路一并 mock 掉，
+    # 避免读到真实语料库索引造成环境串扰。
+    monkeypatch.setattr(
+        "app.core.pipeline.retrieve.fuse_lexical_candidates",
+        lambda *args, **kwargs: [],
+    )
 
     result = RagPipeline().search(
         query="OCV异常怎么处理？",

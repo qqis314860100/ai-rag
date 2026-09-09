@@ -220,6 +220,21 @@ class RagPipeline:
         )
         hits = rerank_result["results"]
 
+        # 混合候选（词法补召回）：向量 rerank 结果权威，词法只把“向量没召回的新文档”
+        # 经 RRF 插进最终序列，避免词法命中伪造向量证据挤占语义命中。
+        if config.rag_hybrid_candidates:
+            from .retrieve import _rrf_fuse_candidates, fuse_lexical_candidates
+
+            lexical_hits = fuse_lexical_candidates(
+                query=retrieval_query,
+                vector_hits=[],
+                candidate_top_k=top_k,
+                allowed_security_levels=allowed_security_levels,
+                namespace=namespace,
+            )
+            if lexical_hits:
+                hits = _rrf_fuse_candidates(hits, lexical_hits, top_k)
+
         latency_ms = int((time.time() - start) * 1000)
 
         return {

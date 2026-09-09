@@ -211,8 +211,8 @@ def search(
     )
 
     hits: list[dict] = []
-    document_context_cache: dict[str, dict[int, dict[str, str]]] = {}
     if results and results["ids"] and results["ids"][0]:
+        cache: dict[str, dict[int, dict[str, str]]] = {}
         for i, chunk_id in enumerate(results["ids"][0]):
             metadata = results["metadatas"][0][i] if results["metadatas"] else {}
             # Filter by status=active
@@ -221,53 +221,103 @@ def search(
             distance = results["distances"][0][i] if results["distances"] else 0
             score = 1.0 - distance  # cosine distance to similarity
             content = results["documents"][0][i] if results["documents"] else ""
-            snippet = metadata.get("snippet") or content[:200]
-            document_id = metadata.get("document_id", "")
-            chunk_index = metadata.get("chunk_index", 0)
-            source_context = _build_source_context(
-                col=col,
-                document_id=document_id,
-                chunk_index=chunk_index,
-                content=content,
-                snippet=snippet,
-                page_number=metadata.get("page_number", 0),
-                offset_start=metadata.get("offset_start"),
-                offset_end=metadata.get("offset_end"),
-                offset_unit=metadata.get("offset_unit", "char"),
-                cache=document_context_cache,
-            )
-            raw_hit = {
-                "chunk_id": chunk_id,
-                "document_id": document_id,
-                "document_title": metadata.get("document_title") or metadata.get("title", ""),
-                "section_path": metadata.get("section_path", ""),
-                "page_number": metadata.get("page_number", 0),
-                "chunk_index": chunk_index,
-                "section_level": metadata.get("section_level", 0),
-                "document_type": metadata.get("source_format") or metadata.get("document_type", ""),
-                "source_format": metadata.get("source_format", ""),
-                "file_type": metadata.get("file_type") or metadata.get("source_format", ""),
-                "mime_type": metadata.get("mime_type", ""),
-                "format": metadata.get("format") or metadata.get("source_format", ""),
-                "content_kind": metadata.get("content_kind", ""),
-                "category": metadata.get("category", ""),
-                "version": metadata.get("version", ""),
-                "offset_start": metadata.get("offset_start"),
-                "offset_end": metadata.get("offset_end"),
-                "snippet": snippet,
-                "content": content,
-                "score": round(score, 4),
-                "source_context": source_context,
-                "context_before": source_context["before"],
-                "context_after": source_context["after"],
-                "context_window": source_context["window"],
-                "metadata": metadata,
-            }
-            normalized_hit = build_source_metadata(raw_hit)
-            normalized_hit["source_metadata"] = SourceMetadata.from_source(normalized_hit).model_dump()
-            hits.append(normalized_hit)
+            hits.append(_map_chunk_hit(col, cache, chunk_id, metadata, content, score))
 
     return hits[:top_k]
+
+
+def _map_chunk_hit(col, cache, chunk_id: str, metadata: dict, content: str, score: float) -> dict:
+    """把一条 Chroma 行映射为检索命中对象（向量路与词法候选路共用）。"""
+    snippet = metadata.get("snippet") or content[:200]
+    document_id = metadata.get("document_id", "")
+    chunk_index = metadata.get("chunk_index", 0)
+    source_context = _build_source_context(
+        col=col,
+        document_id=document_id,
+        chunk_index=chunk_index,
+        content=content,
+        snippet=snippet,
+        page_number=metadata.get("page_number", 0),
+        offset_start=metadata.get("offset_start"),
+        offset_end=metadata.get("offset_end"),
+        offset_unit=metadata.get("offset_unit", "char"),
+        cache=cache,
+    )
+    raw_hit = {
+        "chunk_id": chunk_id,
+        "document_id": document_id,
+        "document_title": metadata.get("document_title") or metadata.get("title", ""),
+        "section_path": metadata.get("section_path", ""),
+        "page_number": metadata.get("page_number", 0),
+        "chunk_index": chunk_index,
+        "section_level": metadata.get("section_level", 0),
+        "document_type": metadata.get("source_format") or metadata.get("document_type", ""),
+        "source_format": metadata.get("source_format", ""),
+        "file_type": metadata.get("file_type") or metadata.get("source_format", ""),
+        "mime_type": metadata.get("mime_type", ""),
+        "format": metadata.get("format") or metadata.get("source_format", ""),
+        "content_kind": metadata.get("content_kind", ""),
+        "category": metadata.get("category", ""),
+        "version": metadata.get("version", ""),
+        "offset_start": metadata.get("offset_start"),
+        "offset_end": metadata.get("offset_end"),
+        "snippet": snippet,
+        "content": content,
+        "score": round(score, 4),
+        "source_context": source_context,
+        "context_before": source_context["before"],
+        "context_after": source_context["after"],
+        "context_window": source_context["window"],
+        "metadata": metadata,
+    }
+    normalized_hit = build_source_metadata(raw_hit)
+    normalized_hit["source_metadata"] = SourceMetadata.from_source(normalized_hit).model_dump()
+    return normalized_hit
+
+
+def fetch_active_chunks(
+    namespace: str | None = None,
+    allowed_security_levels: list[str] | None = None,
+) -> list[dict]:
+    """整仓 active chunk 原始行（词法候选路用）；行含 chunk_id/content/metadata。"""
+    col = _get_collection(namespace)
+    if col.count() == 0:
+        return []
+    where = {}
+    if allowed_security_levels:
+        where["security_level"] = {"$in": allowed_security_levels}
+    result = col.get(
+        where=where or None,
+        include=["documents", "metadatas"],
+    )
+    rows: list[dict] = []
+    for chunk_id, doc, meta in zip(
+        result["ids"], result["documents"], result["metadatas"]
+    ):
+        if meta.get("status", "active") != "active":
+            continue
+        rows.append({"chunk_id": chunk_id, "content": doc or "", "metadata": meta})
+    return rows
+
+
+def build_hits_from_rows(rows: list[dict], namespace: str | None = None) -> list[dict]:
+    """把带 score 的原始行映射为检索命中对象（词法候选路用）。"""
+    col = _get_collection(namespace)
+    cache: dict[str, dict[int, dict[str, str]]] = {}
+    hits: list[dict] = []
+    for row in rows:
+        metadata = row.get("metadata") or {}
+        hits.append(
+            _map_chunk_hit(
+                col,
+                cache,
+                row["chunk_id"],
+                metadata,
+                row.get("content", ""),
+                row.get("score", 0.0),
+            )
+        )
+    return hits
 
 
 def _scope_where(scopes: list[dict] | None) -> dict | None:
