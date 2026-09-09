@@ -1,0 +1,58 @@
+{
+  "description": "ep AiCapabilityClient 联调契约样本（蓝图执行清单第 7 项，ai-rag 侧提供，帮助 ep 联调）。端点前缀 {base}/rag；鉴权头 X-Service-Key: <ai.capability.api-key>。",
+  "chat_stream": {
+    "namespace": "ep-docs",
+    "scopes": [
+      {
+        "platformFamily": "P1",
+        "platformVariant": "V1",
+        "productLine": "L1",
+        "base": "B2",
+        "productionLine": "PRL-01",
+        "processSection": "分选"
+      }
+    ],
+    "history": [
+      { "role": "user", "content": "电芯分选工序包含哪些环节？" }
+    ],
+    "question": "外观检测的判定标准是什么？"
+  },
+  "documents_ingest": {
+    "namespace": "ep-docs",
+    "targetType": "DOCUMENT",
+    "targetId": 1001,
+    "title": "电芯分选工序规范（样例）",
+    "scopes": [
+      {
+        "platformFamily": "P1",
+        "productLine": "L1",
+        "base": "B2",
+        "productionLine": "PRL-01",
+        "processSection": "分选"
+      }
+    ]
+  },
+  "extract": {
+    "namespace": "ep-docs",
+    "targetType": "DOCUMENT",
+    "targetId": 1001,
+    "title": "电芯分选工序规范（样例）",
+    "scopes": [
+      {
+        "platformFamily": "P1",
+        "productLine": "L1",
+        "base": "B2",
+        "productionLine": "PRL-01",
+        "processSection": "分选"
+      }
+    ]
+  },
+  "rag_side_notes": {
+    "ingest_extract_file_transport": "文件字节运输方案联调期定：当前 ai-rag 的 /documents/ingest 与 /extract 仍需 file_path 指向 rag 允许目录（RAG_ALLOWED_DIRS）内的本地暂存文件，并以 document_id（或 ep targetId 自动回退）标识；纯 ep 形态缺 file_path 时服务返回 400 提示",
+    "response_contracts": {
+      "ingest": "IngestResult{ok:boolean,message:string}（另含 document_id/chunk_count/index_status 存量字段）",
+      "extract": "ExtractionResult{name,description,assetTypeCode,tags[],summary,categoryCode,scopeHints[],evidence[],confidence}，空字段 \"\"/[]/0.0",
+      "chat_stream_sse": "meta → delta* → citations(refs:[{docId,location,excerpt,inScope}]) → done（或 error）"
+    }
+  }
+}
