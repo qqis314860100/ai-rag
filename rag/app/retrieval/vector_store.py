@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 import chromadb
 from chromadb.config import Settings
@@ -17,32 +18,74 @@ from ..schemas.models import SourceMetadata
 logger = logging.getLogger(__name__)
 
 _client = None
-_collection = None
+# collection 缓存：以解析后的 collection 名为键，支持多语料命名空间各自缓存实例。
+_collections: dict[str, object] = {}
 CONTEXT_SNIPPET_CHARS = 400
 
+# ep 等外部调用方 scope 维度（见 AI 能力服务契约），入库时折入 chunk metadata 便于检索过滤。
+SCOPE_DIMENSION_KEYS: tuple[str, ...] = (
+    "platformFamily",
+    "platformVariant",
+    "productLine",
+    "base",
+    "productionLine",
+    "processSection",
+)
 
-def _get_collection():
-    global _client, _collection
-    if _collection is None:
+
+def _normalize_namespace(namespace: str | None) -> str:
+    return (namespace or "").strip().lower()
+
+
+def resolve_collection_name(namespace: str | None) -> str:
+    """把请求 namespace 解析为实际 Chroma collection 名。
+
+    - 空值或电池别名（battery / 配置默认标签 / 默认 collection 名）→ config.chroma_collection，
+      保证存量电池语料路径行为不变；
+    - 其它 namespace 优先使用 RAG_NAMESPACE_COLLECTION_<大写NS> 显式映射，
+      否则按 "ns_<净化后的namespace>" 规则自动生成独立 collection。
+    """
+    ns = _normalize_namespace(namespace)
+    if not ns or ns in {
+        "battery",
+        config.rag_namespace_default,
+        config.chroma_collection.lower(),
+    }:
+        return config.chroma_collection
+    safe = re.sub(r"[^a-z0-9]+", "_", ns).strip("_")
+    explicit_key = f"RAG_NAMESPACE_COLLECTION_{safe.upper()}"
+    explicit = os.getenv(explicit_key, "").strip()
+    if explicit:
+        return explicit
+    return f"ns_{safe}" if safe else config.chroma_collection
+
+
+def _get_collection(namespace: str | None = None):
+    global _client
+    name = resolve_collection_name(namespace)
+    if name in _collections:
+        return _collections[name]
+    if _client is None:
         os.makedirs(config.chroma_persist_dir, exist_ok=True)
         _client = chromadb.PersistentClient(
             path=config.chroma_persist_dir,
             settings=Settings(anonymized_telemetry=False),
         )
-        _collection = _client.get_or_create_collection(
-            name=config.chroma_collection,
-            metadata={"hnsw:space": "cosine"},
-        )
-        logger.info(f"ChromaDB collection '{config.chroma_collection}' ready, "
-                     f"count={_collection.count()}")
-    return _collection
+    collection = _client.get_or_create_collection(
+        name=name,
+        metadata={"hnsw:space": "cosine"},
+    )
+    logger.info(f"ChromaDB collection '{name}' ready (namespace={namespace!r}), "
+                f"count={collection.count()}")
+    _collections[name] = collection
+    return collection
 
 
-def upsert_chunks(chunks: list[Chunk]) -> int:
+def upsert_chunks(chunks: list[Chunk], namespace: str | None = None) -> int:
     if not chunks:
         return 0
 
-    col = _get_collection()
+    col = _get_collection(namespace)
     ids: list[str] = []
     documents: list[str] = []
     metadatas: list[dict] = []
@@ -101,6 +144,12 @@ def upsert_chunks(chunks: list[Chunk]) -> int:
             "offset_unit": c.metadata.get("offset_unit", "char"),
             "snippet": c.metadata.get("snippet") or c.content[:200],
         }
+        # scope 维度（platformFamily/productLine/base 等）随 chunk 写入数组值，
+        # 供检索 $contains（数组包含成员）做精确过滤
+        for scope_key in SCOPE_DIMENSION_KEYS:
+            scope_values = c.metadata.get(scope_key)
+            if scope_values:
+                md[scope_key] = list(scope_values)
         # ChromaDB doesn't support complex types in metadata
         tags = c.metadata.get("tags", [])
         if isinstance(tags, list):
@@ -126,8 +175,10 @@ def search(
     allowed_security_levels: list[str],
     top_k: int = 5,
     filters: dict | None = None,
+    namespace: str | None = None,
+    scopes: list[dict] | None = None,
 ) -> list[dict]:
-    col = _get_collection()
+    col = _get_collection(namespace)
 
     if col.count() == 0:
         return []
@@ -142,6 +193,10 @@ def search(
             where["document_id"] = filters["document_id"]
         if filters.get("tags"):
             where["tags"] = {"$contains": filters["tags"]}
+
+    scope_where = _scope_where(scopes)
+    if scope_where:
+        where = _merge_where(where, scope_where)
 
     if not where:
         where = {}
@@ -213,6 +268,46 @@ def search(
             hits.append(normalized_hit)
 
     return hits[:top_k]
+
+
+def _scope_where(scopes: list[dict] | None) -> dict | None:
+    """把请求 scopes 列表翻译成 Chroma where 子句。
+
+    语义：空/全空对象视为不限（None）；文档命中任一非空 scope 对象即视为在
+    范围内（$or），单个对象内所有非空维度都要与 chunk metadata 一致（$and）。
+    入库时每个维度以数组值存储，$contains 在这里是“数组包含该成员”的精确
+    匹配，单值与多值场景行为一致，无子串歧义。
+    """
+    groups: list[dict] = []
+    for scope in scopes or []:
+        if not isinstance(scope, dict):
+            continue
+        dims = {
+            key: str(value).strip()
+            for key, value in scope.items()
+            if key in SCOPE_DIMENSION_KEYS and str(value).strip()
+        }
+        if not dims:
+            continue
+        dim_conditions = [{key: {"$contains": value}} for key, value in sorted(dims.items())]
+        if len(dim_conditions) == 1:
+            groups.append(dim_conditions[0])
+        else:
+            groups.append({"$and": dim_conditions})
+    if not groups:
+        return None
+    if len(groups) == 1:
+        return groups[0]
+    return {"$or": groups}
+
+
+def _merge_where(base: dict, extra: dict) -> dict:
+    """把 scope 子句与既有检索过滤（security/filters）合并为单个 where。"""
+    if not base:
+        return extra
+    if not extra:
+        return base
+    return {"$and": [base, extra]}
 
 
 def _build_source_context(
@@ -299,8 +394,8 @@ def _coerce_optional_int(value) -> int | None:
         return None
 
 
-def delete_by_document(document_id: str) -> int:
-    col = _get_collection()
+def delete_by_document(document_id: str, namespace: str | None = None) -> int:
+    col = _get_collection(namespace)
     # Get all chunks for this document
     result = col.get(where={"document_id": document_id})
     if result and result["ids"]:
@@ -309,5 +404,5 @@ def delete_by_document(document_id: str) -> int:
     return 0
 
 
-def get_collection_count() -> int:
-    return _get_collection().count()
+def get_collection_count(namespace: str | None = None) -> int:
+    return _get_collection(namespace).count()

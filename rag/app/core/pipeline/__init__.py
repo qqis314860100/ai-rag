@@ -12,7 +12,12 @@ from ...parsers.html import HtmlParser
 from ...parsers.markdown import MarkdownParser
 from ...parsers.pdf import PdfParser
 from ...parsers.text import TxtParser
-from ...retrieval.vector_store import delete_by_document, search, upsert_chunks
+from ...retrieval.vector_store import (
+    SCOPE_DIMENSION_KEYS,
+    delete_by_document,
+    search,
+    upsert_chunks,
+)
 from ..config import config
 from ..logging_safety import safe_log_json, sha256_short
 from ..terminology import expand_query_with_terms
@@ -91,15 +96,40 @@ def _elapsed_ms(start: float) -> int:
     return int((time.time() - start) * 1000)
 
 
+def _scope_metadata_dims(scopes: list[dict] | None) -> dict[str, list[str]]:
+    """把入库 scope 列表折成每个维度的取值数组（去重排序，空维度省略）。
+
+    数组值可直接用 Chroma metadata `$contains` 做“包含该取值”的精确匹配，
+    避免字符串子串歧义（多值文档与单值文档统一匹配）。
+    """
+    dim_values: dict[str, set[str]] = {}
+    for scope in scopes or []:
+        if not isinstance(scope, dict):
+            continue
+        for key in SCOPE_DIMENSION_KEYS:
+            value = str(scope.get(key) or "").strip()
+            if value:
+                dim_values.setdefault(key, set()).add(value)
+    return {key: sorted(values) for key, values in sorted(dim_values.items())}
+
+
 class RagPipeline:
     def __init__(self):
         self.config = config
 
     def ingest_document(
-        self, document_id: str, file_path: str, metadata: dict | None = None
+        self,
+        document_id: str,
+        file_path: str,
+        metadata: dict | None = None,
+        namespace: str | None = None,
+        scopes: list[dict] | None = None,
     ) -> dict:
         start = time.time()
         meta = _build_ingest_metadata(file_path, metadata)
+        # 把文档 scope 维度折入 metadata：多个 scope 对象同维度值取并集 join，
+        # 空维度省略，检索时按该键做包含过滤（简化约定见 vector_store._scope_where）。
+        meta.update(_scope_metadata_dims(scopes))
 
         # 路径包含校验：仅允许白名单目录（data/uploads、knowledge）
         safe_path = _validate_file_path(file_path)
@@ -123,9 +153,13 @@ class RagPipeline:
                 "content_kind": meta.get("content_kind", ""),
                 "preview_format": meta.get("preview_format", ""),
             })
+            for _key in SCOPE_DIMENSION_KEYS:
+                _value = meta.get(_key)
+                if _value:
+                    c.metadata[_key] = _value
 
-        delete_by_document(document_id)
-        chunk_count = upsert_chunks(chunks)
+        delete_by_document(document_id, namespace=namespace)
+        chunk_count = upsert_chunks(chunks, namespace=namespace)
 
         total_ms = int((time.time() - start) * 1000)
         logger.info(
@@ -144,9 +178,14 @@ class RagPipeline:
         }
 
     def reindex_document(
-        self, document_id: str, file_path: str, metadata: dict | None = None
+        self,
+        document_id: str,
+        file_path: str,
+        metadata: dict | None = None,
+        namespace: str | None = None,
+        scopes: list[dict] | None = None,
     ) -> dict:
-        return self.ingest_document(document_id, file_path, metadata)
+        return self.ingest_document(document_id, file_path, metadata, namespace=namespace, scopes=scopes)
 
     def search(
         self,
@@ -154,6 +193,8 @@ class RagPipeline:
         top_k: int,
         allowed_security_levels: list[str],
         filters: dict | None = None,
+        namespace: str | None = None,
+        scopes: list[dict] | None = None,
     ) -> dict:
         start = time.time()
         term_expansion = expand_query_with_terms(query)
@@ -167,6 +208,8 @@ class RagPipeline:
             allowed_security_levels=allowed_security_levels,
             top_k=candidate_top_k,
             filters=filters,
+            namespace=namespace,
+            scopes=scopes,
         )
         rerank_result = rerank_hits(
             retrieval_query,
@@ -195,12 +238,16 @@ class RagPipeline:
         allowed_security_levels: list[str],
         filters: dict | None = None,
         include_prompt: bool = False,
+        namespace: str | None = None,
+        scopes: list[dict] | None = None,
     ) -> dict:
         search_result = self.search(
             query=query,
             top_k=top_k,
             allowed_security_levels=allowed_security_levels,
             filters=filters,
+            namespace=namespace,
+            scopes=scopes,
         )
 
         hits = search_result["results"]
@@ -244,6 +291,8 @@ class RagPipeline:
         filters: dict | None = None,
         history: list[dict[str, str]] | None = None,
         knowledge_assets: list[dict] | None = None,
+        namespace: str | None = None,
+        scopes: list[dict] | None = None,
     ) -> dict:
         total_start = time.time()
         stage_timings_ms: dict[str, int] = {}
@@ -261,6 +310,8 @@ class RagPipeline:
             top_k=top_k,
             allowed_security_levels=allowed_security_levels,
             filters=filters,
+            namespace=namespace,
+            scopes=scopes,
         )
         retrieval_ms = _elapsed_ms(search_start)
         stage_timings_ms["retrieve_ms"] = retrieval_ms

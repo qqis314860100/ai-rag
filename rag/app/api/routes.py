@@ -152,6 +152,8 @@ def ingest(request: IngestRequest):
             document_id=request.document_id,
             file_path=request.file_path,
             metadata=request.metadata,
+            namespace=request.namespace or None,
+            scopes=request.scopes or None,
         )
         return result
     except ValueError as e:
@@ -169,6 +171,8 @@ def reindex(request: ReindexRequest):
             document_id=request.document_id,
             file_path=request.file_path,
             metadata=request.metadata,
+            namespace=request.namespace or None,
+            scopes=request.scopes or None,
         )
         return result
     except ValueError as e:
@@ -186,6 +190,8 @@ def search(request: SearchRequest):
             top_k=request.top_k,
             allowed_security_levels=request.allowed_security_levels,
             filters=request.filters,
+            namespace=request.namespace or None,
+            scopes=request.scopes or None,
         )
         return result
     except Exception:
@@ -202,6 +208,8 @@ def search_debug(request: DebugSearchRequest):
             allowed_security_levels=request.allowed_security_levels,
             filters=request.filters,
             include_prompt=request.include_prompt,
+            namespace=request.namespace or None,
+            scopes=request.scopes or None,
         )
         return result
     except Exception:
@@ -219,6 +227,8 @@ def chat(request: ChatRequest):
             filters=request.filters,
             history=request.history,
             knowledge_assets=request.knowledge_assets,
+            namespace=request.namespace or None,
+            scopes=request.scopes or None,
         )
         return result
     except LlmBudgetExceeded as e:
@@ -305,10 +315,11 @@ def chat_stream(request: ChatRequest):
             rewritten_query = query_rewrite.rewritten_query
             search_result = pipeline.search(
                 query=rewritten_query,
-
                 top_k=request.top_k,
                 allowed_security_levels=request.allowed_security_levels,
                 filters=request.filters,
+                namespace=request.namespace or None,
+                scopes=request.scopes or None,
             )
 
             hits = search_result["results"]

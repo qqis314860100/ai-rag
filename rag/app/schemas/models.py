@@ -18,6 +18,10 @@ class IngestRequest(BaseModel):
     document_id: str
     file_path: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # 语料命名空间：空回退电池默认 collection
+    namespace: str = ""
+    # 文档 scope 维度（platformFamily/productLine/base 等），入库时折入 chunk metadata
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IngestResult(BaseModel):
@@ -30,6 +34,9 @@ class ReindexRequest(BaseModel):
     document_id: str
     file_path: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # 语料命名空间：空回退电池默认 collection
+    namespace: str = ""
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReindexResult(BaseModel):
@@ -73,6 +80,9 @@ class SearchRequest(BaseModel):
     mode: str = "vector"
     filters: dict[str, Any] = Field(default_factory=dict)
     allowed_security_levels: list[str] = Field(default=["public", "internal"])
+    namespace: str = ""
+    # scope 维度过滤（platformFamily/productLine/base 等），空数组=不过滤
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TermExpansionHit(BaseModel):
@@ -139,6 +149,9 @@ class DebugSearchRequest(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
     allowed_security_levels: list[str] = Field(default=["public", "internal"])
     include_prompt: bool = False
+    namespace: str = ""
+    # scope 维度过滤（platformFamily/productLine/base 等），空数组=不过滤
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DebugSearchResult(BaseModel):
@@ -180,7 +193,7 @@ class Source(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str = Field(validation_alias=AliasChoices("query", "question"))
     top_k: int = Field(default=5, ge=1, le=50)
     allowed_security_levels: list[str] = Field(default=["public", "internal"])
     filters: dict[str, Any] = Field(default_factory=dict)
@@ -188,6 +201,9 @@ class ChatRequest(BaseModel):
     knowledge_assets: list[dict[str, Any]] = Field(default_factory=list)
     session_id: str | None = None
     stream: bool = False
+    namespace: str = ""
+    # scope 维度过滤（platformFamily/productLine/base 等），空数组=不过滤
+    scopes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ChatTrace(BaseModel):
