@@ -1,5 +1,10 @@
+import base64
 import json
 import logging
+import os
+import re
+import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -165,33 +170,90 @@ def list_rag_documents():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-def _require_ingest_source(request: IngestRequest) -> tuple[str, str]:
-    """解析 (document_id, file_path)，兼容存量与 ep DocumentRequest 形态。
+# 能力服务字节运输大小上限（解码后字节数），防止恶意超大 payload 撑爆磁盘。
+_CAPABILITY_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 
-    ep 请求只带 namespace/targetType/targetId/title/scopes（文件字节运输方案
-    联调期定），当前仍需 file_path 指向本地暂存文件才能解析入库。
+
+def _stage_capability_upload(request: IngestRequest) -> str:
+    """把 fileContentBase64 字节落盘到允许解析目录，返回待清理的文件路径。
+
+    暂存根目录：RAG_STAGING_DIR（可配）或 rag_allowed_dirs[0]/capability-staging；
+    必须位于 ingest/extract 的白名单内，否则 _validate_file_path 会拒绝读取。
+    """
+    try:
+        raw = base64.b64decode(request.file_content_base64, validate=True)
+    except Exception as exc:  # base64 解码失败统一按请求错误处理
+        raise ValueError("fileContentBase64 不是合法的 Base64 内容") from exc
+    if not raw:
+        raise HTTPException(status_code=400, detail="fileContentBase64 为空")
+    if len(raw) > _CAPABILITY_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="fileContentBase64 超过 50MB 大小上限")
+
+    file_name = Path(request.file_name or "").name.strip()
+    if not file_name:
+        raise HTTPException(
+            status_code=400,
+            detail="缺少 fileName：base64 运输需要原文件名以推断解析格式",
+        )
+    suffix = Path(file_name).suffix.lower()
+    if not suffix:
+        raise HTTPException(
+            status_code=400,
+            detail="fileName 缺少扩展名：无法选择解析器，请提供带扩展名的文件名",
+        )
+
+    configured = os.getenv("RAG_STAGING_DIR", "").strip()
+    if configured:
+        staging_root = Path(configured).expanduser()
+        allowed = config.rag_allowed_dirs
+        if str(staging_root) not in allowed:
+            allowed.append(str(staging_root))
+    else:
+        staging_root = Path(config.rag_allowed_dirs[0] or "./data/uploads") / "capability-staging"
+    namespace_dir = re.sub(r"[^A-Za-z0-9_.-]+", "_", request.namespace or "default").strip("_") or "default"
+    target_dir = staging_root / namespace_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    unique = f"{int(time.time() * 1000)}-{file_name}"
+    staged = target_dir / unique
+    staged.write_bytes(raw)
+    return str(staged)
+
+
+def _require_ingest_source(request: IngestRequest) -> tuple[str, str, str | None]:
+    """解析 (document_id, 可解析文件路径, 待清理临时文件路径|None)。
+
+    - 存量形态：document_id + file_path（电池语料 UI/API）；
+    - ep 形态：namespace/targetType/targetId/title/scopes，文件字节经
+      fileContentBase64 + fileName 运输，服务端先落盘到允许目录再走既有解析链路，
+      调用方负责 finally 清理返回的临时路径。
     """
     document_id = (request.document_id or "").strip()
     if not document_id and request.target_id is not None:
         document_id = f"{request.namespace or 'ep'}:{request.target_type or 'doc'}:{request.target_id}"
     file_path = (request.file_path or "").strip()
+    temp_path: str | None = None
+    if not file_path and request.file_content_base64:
+        temp_path = _stage_capability_upload(request)
+        file_path = temp_path
     if not file_path:
         raise HTTPException(
             status_code=400,
-            detail="file_path 缺失：文件字节运输方案未定，联调期需先提供本地暂存文件路径",
+            detail="缺少可解析文件：请提供 file_path，或 ep 契约的 fileContentBase64 + fileName",
         )
     if not document_id:
         raise HTTPException(
             status_code=400,
             detail="document_id 缺失：请提供 document_id 或 ep 契约的 targetId",
         )
-    return document_id, file_path
+    return document_id, file_path, temp_path
 
 
 @router.post("/documents/ingest", response_model=IngestResult, dependencies=[Depends(verify_api_key)])
 def ingest(request: IngestRequest):
+    temp_path = None
     try:
-        document_id, file_path = _require_ingest_source(request)
+        document_id, file_path, temp_path = _require_ingest_source(request)
         result = pipeline.ingest_document(
             document_id=document_id,
             file_path=file_path,
@@ -200,12 +262,20 @@ def ingest(request: IngestRequest):
             scopes=request.scopes or None,
         )
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         # Client errors (bad path, unsupported type) — safe to echo
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception(f"Ingest failed for {request.document_id}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                logger.debug("临时文件清理失败: %s", temp_path)
 
 
 @router.post("/extract", response_model=ExtractionResult, dependencies=[Depends(verify_api_key)])
@@ -216,8 +286,9 @@ def extract_metadata(request: IngestRequest):
     逐字段对齐（空字段语义 ""/[]/0.0）。抽取计入 usage_guard 预算；内容不足时
     返回空字段结果而非编造建议。
     """
+    temp_path = None
     try:
-        document_id, file_path = _require_ingest_source(request)
+        document_id, file_path, temp_path = _require_ingest_source(request)
         result = extract_asset_metadata(
             document_id=document_id,
             file_path=file_path,
@@ -235,6 +306,12 @@ def extract_metadata(request: IngestRequest):
     except Exception:
         logger.exception(f"Extract failed for {request.title or request.target_id}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                logger.debug("临时文件清理失败: %s", temp_path)
 
 
 @router.post("/documents/reindex", response_model=ReindexResult, dependencies=[Depends(verify_api_key)])

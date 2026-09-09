@@ -18,11 +18,16 @@ class IngestRequest(BaseModel):
     """文档入库/抽取请求。
 
     - 存量形态：document_id + file_path + metadata（电池语料 UI/API 调用）；
-    - ep 能力服务形态：namespace + targetType + targetId + title + scopes
-      （targetId 语义、文件字节运输方案联调期定，当前仍需 file_path 指向本地暂存文件）。
+    - ep 能力服务形态：namespace + targetType + targetId + title + scopes；
+      文件字节运输：file_path（服务端本地暂存）或 file_content_base64 + file_name 二选一，
+      base64 形态由服务端落临时文件后走既有解析链路。
     """
     document_id: str | None = None
     file_path: str | None = None
+    file_content_base64: str | None = Field(
+        default=None, validation_alias=AliasChoices("file_content_base64", "fileContentBase64")
+    )
+    file_name: str | None = Field(default=None, validation_alias=AliasChoices("file_name", "fileName"))
     metadata: dict[str, Any] = Field(default_factory=dict)
     # 语料命名空间：空回退电池默认 collection
     namespace: str = ""
