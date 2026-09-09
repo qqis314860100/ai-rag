@@ -78,6 +78,8 @@ class Config:
     rag_namespace_default: str = os.getenv("RAG_NAMESPACE_DEFAULT", "battery").strip().lower()
 
     embedding_model: str = _read_db_setting("embedding_model", os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
+    # Qwen3-Embedding 等仓库需要加载其远程 modeling 代码；默认关闭，仅按需开启
+    embedding_trust_remote_code: bool = _read_env_bool("EMBEDDING_TRUST_REMOTE_CODE", False)
     embedding_batch_size: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")

@@ -21,7 +21,10 @@ def _get_model():
         try:
             from sentence_transformers import SentenceTransformer
             logger.info(f"Loading embedding model: {config.embedding_model}")
-            _embedding_model = SentenceTransformer(config.embedding_model)
+            _embedding_model = SentenceTransformer(
+                config.embedding_model,
+                trust_remote_code=config.embedding_trust_remote_code,
+            )
             logger.info("Embedding model loaded successfully")
         except Exception as e:  # noqa: BLE001 - any model failure must fall back
             logger.warning(f"Failed to load model: {e}. Using fallback embeddings.")
