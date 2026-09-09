@@ -44,6 +44,7 @@ from .diagram_extraction import (
 from .diagram_extraction import (
     step_kind as _step_kind,
 )
+from .diagram_extraction import extract_evidence_blocks as _extract_evidence_blocks
 from .diagram_models import (
     DiagramEdge,
     DiagramIR,
