@@ -77,6 +77,24 @@ def verify_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def _ep_citation_refs(sources: list[dict]) -> list[dict]:
+    """把检索来源映射为 ep ChatCitations.refs 契约字段（docId/location/excerpt/inScope）。"""
+    refs: list[dict] = []
+    for source in sources or []:
+        doc_id = str(source.get("document_id") or source.get("chunk_id") or "")
+        location = str(source.get("section_path") or "")
+        if not location and source.get("page_number"):
+            location = f"第{source.get('page_number')}页"
+        excerpt = str(source.get("snippet") or source.get("content") or "")[:200]
+        refs.append({
+            "docId": doc_id,
+            "location": location,
+            "excerpt": excerpt,
+            "inScope": True,
+        })
+    return refs
+
+
 @router.get("/health", dependencies=[Depends(verify_api_key)])
 def health():
     try:
@@ -355,15 +373,26 @@ def knowledge_gap_cluster_drafts(request: KnowledgeGapClusterRequest):
 
 
 @router.post("/chat/stream", dependencies=[Depends(verify_api_key)])
-def chat_stream(request: ChatRequest):
-    """Streaming chat endpoint using SSE."""
+def chat_stream(request: ChatRequest, req: Request):
+    """Streaming chat endpoint using SSE.
+
+    - 存量调用（X-API-Key 或不带服务键头）：保持 stage/meta/token/done/error 事件序，
+      电池语料 UI/API 行为不变；
+    - ep 能力服务（带 X-Service-Key）：事件序对齐契约 meta → delta* → citations → done
+      （或 error），citations.refs 含 docId/location/excerpt/inScope 字段。
+    """
+    ep_mode = bool(req.headers.get("X-Service-Key"))
+
     def _sse_json(obj: dict) -> str:
         return json.dumps(obj, ensure_ascii=False)
 
+    def _sse(obj: dict) -> str:
+        return f"data: {_sse_json(obj)}\n\n"
+
     async def generate():
         try:
-
-            yield f"data: {_sse_json({'type': 'stage', 'stage': 'accepted', 'message': 'RAG 流式请求已接收。'})}\n\n"
+            if not ep_mode:
+                yield _sse({'type': 'stage', 'stage': 'accepted', 'message': 'RAG 流式请求已接收。'})
             # 1. Search
             matched_assets = _select_knowledge_assets(request.query, request.knowledge_assets)
             query_rewrite = _rewrite_query_with_trace(request.query, request.history, matched_assets)
@@ -387,7 +416,10 @@ def chat_stream(request: ChatRequest):
             )
 
             # Send search metadata
-            yield f"data: {_sse_json({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})}\n\n"
+            if ep_mode:
+                yield _sse({'type': 'meta', 'sessionId': request.session_id or '', 'messageId': ''})
+            else:
+                yield _sse({'type': 'meta', 'retrieval_ms': search_result['latency_ms'], 'hit_count': len(hits), 'query_rewrite': query_rewrite.model_dump()})
 
             from ..llm.prompt_builder import build_messages, extract_sources
             sources = extract_sources(hits)
@@ -422,7 +454,12 @@ def chat_stream(request: ChatRequest):
                         "confidence_profile": confidence_profile,
                     },
                 )
-                yield f"data: {_sse_json({'type': 'token', 'content': REFUSAL_ANSWER})}\n\n"
+                if ep_mode:
+                    yield _sse({'type': 'delta', 'text': REFUSAL_ANSWER})
+                    yield _sse({'type': 'citations', 'refs': []})
+                    yield _sse({'type': 'done', 'usage': ''})
+                    return
+                yield _sse({'type': 'token', 'content': REFUSAL_ANSWER})
                 visual_plan = plan_visual_artifacts(
                     question=request.query,
                     answer=REFUSAL_ANSWER,
@@ -431,9 +468,8 @@ def chat_stream(request: ChatRequest):
                     answer_status=answer_ir.status,
                 )
                 visual_plan.metadata["knowledge_assets"] = answer_ir.metadata.get("knowledge_assets", [])
-                yield f"data: {_sse_json({'type': 'done', 'sources': sources, 'confidence': answer_ir.confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})}\n\n"
+                yield _sse({'type': 'done', 'sources': sources, 'confidence': answer_ir.confidence, 'followups': [], 'answer_ir': answer_ir.model_dump(), 'visual_plan': visual_plan.model_dump()})
                 return
-
 
             # 2. Build prompt
             messages = build_messages(
@@ -455,6 +491,34 @@ def chat_stream(request: ChatRequest):
                         event_data = json.loads(sse_chunk[len("data: "):].strip())
                     except Exception:  # noqa: BLE001 - 事件解析失败视为普通 chunk
                         event_data = None
+
+                if ep_mode:
+                    if event_data and event_data.get("type") == "token":
+                        full_answer += str(event_data.get("content") or "")
+                        yield _sse({'type': 'delta', 'text': str(event_data.get("content") or "")})
+                    elif event_data and event_data.get("type") == "done":
+                        answer_ir = AnswerIR.from_chat(
+                            answer=full_answer,
+                            sources=sources,
+                            original_query=request.query,
+                            rewritten_query=rewritten_query,
+                            query_rewrite=query_rewrite,
+                            confidence=confidence,
+                            warnings=refusal.warnings,
+                            metadata={
+                                "knowledge_assets": _knowledge_asset_trace(matched_assets),
+                                **refusal.metadata,
+                                "confidence_profile": confidence_profile,
+                            },
+                        )
+                        answer_ir = verify_answer_ir(answer_ir, sources=sources, hits=hits)
+                        yield _sse({'type': 'citations', 'refs': _ep_citation_refs(sources)})
+                        yield _sse({'type': 'done', 'usage': ''})
+                    elif event_data and event_data.get("type") == "error":
+                        yield _sse({'type': 'error', 'code': str(event_data.get("code") or "LLM_STREAM_ERROR"),
+                                    'message': str(event_data.get("message") or "LLM 流式生成失败")})
+                    # ep 契约严格：其它未知事件不转发，避免解析器报未知事件
+                    continue
 
                 if event_data and event_data.get("type") == "token":
                     full_answer += str(event_data.get("content") or "")
@@ -491,13 +555,13 @@ def chat_stream(request: ChatRequest):
                         "answer_ir": answer_ir.model_dump(),
                         "visual_plan": visual_plan.model_dump(),
                     }
-                    yield f"data: {_sse_json(done_data)}\n\n"
+                    yield _sse(done_data)
                 else:
                     yield sse_chunk
 
         except Exception as e:
             logger.exception("Chat stream failed")
-            yield f"data: {_sse_json({'type': 'error', 'message': str(e)})}\n\n"
+            yield _sse({'type': 'error', 'code': 'INTERNAL_ERROR', 'message': str(e)})
 
     return StreamingResponse(generate(), media_type="text/event-stream",
                            headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
