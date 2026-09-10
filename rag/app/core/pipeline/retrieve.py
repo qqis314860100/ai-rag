@@ -353,6 +353,22 @@ def rerank_hits(
                 fallback_reason = f"llm_exception:{type(exc).__name__}"
                 logger.warning("LLM rerank failed, falling back to local rerank: %s", exc)
                 mode_used = "local"
+        elif configured_mode == "cross":
+            try:
+                cross_window = min(
+                    max(config.rag_rerank_cross_window, requested_top_k),
+                    len(ranked_hits),
+                )
+                head, fallback_reason = _cross_rerank(query, ranked_hits[:cross_window])
+                if not fallback_reason:
+                    ranked_hits = head + ranked_hits[cross_window:]
+                    mode_used = "cross"
+                else:
+                    mode_used = "local"
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                fallback_reason = f"cross_exception:{type(exc).__name__}"
+                logger.warning("Cross-encoder rerank failed, falling back to local rerank: %s", exc)
+                mode_used = "local"
 
     selected_hits = ranked_hits[:requested_top_k]
     trace = _build_rerank_trace(
@@ -536,6 +552,38 @@ def _local_hybrid_rerank(
         metadata["retrieval_mode"] = "hybrid"
         h["metadata"] = metadata
     return sorted(hits, key=lambda h: h.get("score", 0), reverse=True)
+
+
+def _cross_rerank(query: str, hits: list[dict]) -> tuple[list[dict], str]:
+    """Cross-encoder 重排：对本地混合重排后的候选按相关性重排。
+
+    分数写入 metadata.ranking.cross_score 与 hit.score 供审计；模型不可用
+    或调用失败返回 (原序, 原因)，由 rerank_hits 回退到 local。
+    """
+    from ...llm.cross_reranker import cross_rerank_scores
+
+    try:
+        scores = cross_rerank_scores(query, hits)
+    except Exception as exc:  # noqa: BLE001 - 任何失败都回退
+        return hits, f"cross_exception:{type(exc).__name__}"
+    if scores is None:
+        return hits, "cross_unavailable"
+    if not scores or len(scores) != len(hits):
+        return hits, "cross_empty"
+    for hit, score in zip(hits, scores):
+        metadata = hit.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            hit["metadata"] = metadata
+        ranking = metadata.get("ranking")
+        if not isinstance(ranking, dict):
+            ranking = {}
+            metadata["ranking"] = ranking
+        ranking["cross_score"] = round(float(score), 4)
+        ranking["scoring_version"] = "cross_v1"
+        hit["score"] = round(float(score), 4)
+    ranked = sorted(hits, key=lambda hit: hit.get("score", 0), reverse=True)
+    return ranked, ""
 
 
 def _llm_rerank(
@@ -745,7 +793,7 @@ def _copy_hit_with_original_rank(hit: dict, index: int) -> dict:
 
 def _normalize_rerank_mode(mode: str | None) -> str:
     normalized = (mode or "local").strip().lower()
-    if normalized in {"local", "llm", "off"}:
+    if normalized in {"local", "llm", "cross", "off"}:
         return normalized
     return "local"
 

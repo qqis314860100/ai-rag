@@ -94,6 +94,11 @@ class Config:
     rag_max_context_chars: int = _read_db_setting_int("rag_max_context_chars", int(os.getenv("RAG_MAX_CONTEXT_CHARS", "12000")))
     rag_rerank_mode: str = _read_db_setting("rag_rerank_mode", os.getenv("RAG_RERANK_MODE", "local")).strip().lower()
     rag_rerank_llm_candidate_limit: int = _read_env_int("RAG_RERANK_LLM_CANDIDATE_LIMIT", 12)
+    # cross-encoder 重排（RAG_RERANK_MODE=cross）：本地 bge-reranker，失败自动回退 local
+    rag_rerank_cross_model: str = os.getenv("RAG_RERANK_CROSS_MODEL", "BAAI/bge-reranker-base")
+    rag_rerank_cross_device: str = os.getenv("RAG_RERANK_CROSS_DEVICE", "cpu")
+    # cross 只精排 local 前 N 名，其后保序（防 CE 对中段/词法命中误判）
+    rag_rerank_cross_window: int = _read_env_int("RAG_RERANK_CROSS_WINDOW", 20)
     # 混合候选生成：向量候选之外补 BM25 词法路并 RRF 融合（默认开，评测净增益）
     rag_hybrid_candidates: bool = _read_env_bool("RAG_HYBRID_CANDIDATES", True)
 
