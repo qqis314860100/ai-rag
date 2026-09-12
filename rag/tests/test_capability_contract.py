@@ -17,7 +17,7 @@ from app.core.config import config
 from app.extraction import asset_extractor as asset_extractor_module
 from app.retrieval import vector_store as vector_store_module
 from app.schemas.models import ChatRequest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -373,3 +373,48 @@ def test_ep_contract_sample_fixture_is_valid_json():
     # ep 三个请求都只带 namespace/scopes 等契约字段
     for key in ("chat_stream", "documents_ingest", "extract"):
         assert isinstance(payload[key], dict)
+
+
+# ---------------------------------------------------------------------------
+# 7) ep 模式 SSE 事件序：带 X-Service-Key 时必须为 meta → delta* → citations → done
+# ---------------------------------------------------------------------------
+
+
+def test_ep_mode_stream_event_order_without_llm(monkeypatch):
+    """带 X-Service-Key（ep 契约）时事件序必须是 meta → delta* → citations → done。
+
+    走零命中的拒答路径，以便在不调用 LLM 的前提下断言事件序（复用
+    test_refusal_policy 的手法）。ep 侧网关只发 X-API-Key，故该分支只对直连生效。
+    """
+
+    def empty_search(query, top_k, allowed_security_levels, filters=None, namespace=None, scopes=None):
+        return {"latency_ms": 1, "results": []}
+
+    def fail_llm_stream(*args, **kwargs):
+        raise AssertionError("ep 模式拒答路径不应调用 LLM")
+
+    monkeypatch.setattr(config, "rag_api_key", "ep-contract-key")
+    monkeypatch.setattr(routes_module.pipeline, "search", empty_search)
+    monkeypatch.setattr("app.llm.client.chat_stream", fail_llm_stream)
+
+    app = FastAPI()
+    app.include_router(routes_module.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/rag/chat/stream",
+        headers={"X-Service-Key": "ep-contract-key"},
+        json={"query": "ep 事件序契约自测", "top_k": 3, "namespace": "battery"},
+    )
+
+    assert response.status_code == 200
+    types = [
+        json.loads(line.removeprefix("data: ")).get("type")
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert types, "ep 模式未产出任何 SSE 事件"
+    assert types[0] == "meta", f"ep 模式首事件必须是 meta，实际 {types[:3]}"
+    assert types[-1] == "done", f"ep 模式末事件必须是 done，实际 {types[-3:]}"
+    assert types[-2] == "citations", f"done 之前必须是 citations，实际 {types[-3:]}"
+    assert all(t == "delta" for t in types[1:-2]), f"meta 与 citations 之间只能是 delta，实际 {types}"
